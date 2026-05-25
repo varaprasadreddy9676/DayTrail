@@ -24,7 +24,7 @@ test('terminal bridge writes redacted command metadata', async () => {
   const metadata = JSON.parse(await readFile(outFile, 'utf8'));
   assert.equal(metadata.eventType, 'command');
   assert.equal(metadata.lastCommand, 'curl https://api.example.test --api-key [redacted]');
-  assert.equal(metadata.cwd.endsWith('Work tracker'), true);
+  assert.equal(metadata.cwd, process.cwd());
 });
 
 test('terminal bridge prints installable shell hooks with absolute script path', async () => {
