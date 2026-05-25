@@ -278,6 +278,12 @@ type BackendAutomationCandidate = {
   relatedAiTools?: string[];
 };
 
+type HourFileEntry = {
+  name: string;
+  context: string | null;
+  durationMs: number;
+};
+
 type HourAppBreakdown = {
   app: string;
   durationMs: number;
@@ -285,6 +291,13 @@ type HourAppBreakdown = {
   contexts: string[];
   aiTools: string[];
   examples: string[];
+  files: HourFileEntry[];
+};
+
+type IdleGap = {
+  startMs: number;
+  endMs: number;
+  durationMs: number;
 };
 
 type HourBucket = {
@@ -294,6 +307,7 @@ type HourBucket = {
   events: BackendSourceEvent[];
   apps: HourAppBreakdown[];
   aiTools: string[];
+  idleGaps: IdleGap[];
 };
 
 type ProjectUsageBreakdown = {
@@ -1092,6 +1106,86 @@ function localHourLabel(hour: number) {
   return date.toLocaleTimeString([], { hour: "numeric" });
 }
 
+// ── File-breakdown helpers (mirrors Rust parse_editor_file_from_title) ────────
+
+const EDITOR_APPS_SET = new Set([
+  "Visual Studio Code", "VS Code Insiders", "Cursor", "Sublime Text",
+  "Sublime Text 2", "Sublime Text 3", "Sublime Text 4", "Xcode",
+  "IntelliJ IDEA", "WebStorm", "PyCharm", "GoLand", "Rider", "CLion",
+  "RubyMine", "DataGrip", "Nova", "BBEdit", "MacVim", "Neovim", "Zed",
+]);
+
+const BROWSER_APPS_SET = new Set([
+  "Safari", "Firefox", "Firefox Developer Edition",
+  "Google Chrome", "Google Chrome Canary", "Microsoft Edge",
+  "Brave Browser", "Arc", "Chromium", "Opera", "Vivaldi",
+  "ChatGPT Atlas", "Tor Browser", "Waterfox",
+]);
+
+const GENERIC_TAB_TITLES = new Set([
+  "new tab", "new private tab", "new incognito window",
+  "about:blank", "about:newtab", "new window", "start page", "blank page",
+]);
+
+function looksLikeFilename(s: string): boolean {
+  return s.length > 0 && s.length <= 200 && s.includes(".") && !s.startsWith("/");
+}
+
+function basenameFromPath(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+}
+
+function parseEditorFile(title: string, appName: string): HourFileEntry | null {
+  if (!EDITOR_APPS_SET.has(appName)) return null;
+  const t = title.replace(/^[●•]\s*/, "").trim();
+
+  // VS Code / Cursor / Zed: "file — project — App"
+  const emParts = t.split(" — ");
+  if (emParts.length >= 2) {
+    const name = emParts[0].trim();
+    if (looksLikeFilename(name)) {
+      const context =
+        emParts.length >= 3 && !EDITOR_APPS_SET.has(emParts[1].trim())
+          ? basenameFromPath(emParts[1].trim())
+          : null;
+      return { name, context, durationMs: 0 };
+    }
+  }
+
+  // Sublime Text: "file (project) - App"
+  const parenMatch = /^(.+?)\s+\(([^)]*)\)/.exec(t);
+  if (parenMatch && looksLikeFilename(parenMatch[1].trim())) {
+    return {
+      name: parenMatch[1].trim(),
+      context: parenMatch[2] ? basenameFromPath(parenMatch[2]) : null,
+      durationMs: 0,
+    };
+  }
+
+  // JetBrains: "file [/path] – IDE"
+  const enParts = t.split(" – ");
+  if (enParts.length >= 2 && looksLikeFilename(enParts[0].trim())) {
+    const bracketMatch = /^\[([^\]]+)\]/.exec(enParts[1] ?? "");
+    return {
+      name: enParts[0].trim(),
+      context: bracketMatch ? basenameFromPath(bracketMatch[1]) : null,
+      durationMs: 0,
+    };
+  }
+
+  return null;
+}
+
+function parseBrowserTab(event: BackendSourceEvent): HourFileEntry | null {
+  const app = eventAppLabel(event);
+  if (!BROWSER_APPS_SET.has(app)) return null;
+  const title = event.title?.trim();
+  if (!title || GENERIC_TAB_TITLES.has(title.toLowerCase())) return null;
+  return { name: title, context: event.domain ?? null, durationMs: 0 };
+}
+
+// ── End file-breakdown helpers ─────────────────────────────────────────────
+
 function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
   const hourMs = 60 * 60 * 1000;
   const dayStartDate = new Date();
@@ -1112,6 +1206,7 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
         contexts: Set<string>;
         aiTools: Set<string>;
         examples: Set<string>;
+        files: Map<string, HourFileEntry>;
       }
     >(),
     aiTools: new Set<string>(),
@@ -1151,6 +1246,7 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
         contexts: new Set<string>(),
         aiTools: new Set<string>(),
         examples: new Set<string>(),
+        files: new Map<string, HourFileEntry>(),
       };
 
       appRow.durationMs += overlap;
@@ -1164,6 +1260,20 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
         appRow.aiTools.add(tool);
         bucket.aiTools.add(tool);
       });
+
+      // Per-file duration tracking for editors and browsers
+      const rawTitle = event.title?.trim() ?? "";
+      const parsedFile = parseEditorFile(rawTitle, app) ?? parseBrowserTab(event);
+      if (parsedFile) {
+        const fileKey = `${parsedFile.name}|${parsedFile.context ?? ""}`;
+        const existing = appRow.files.get(fileKey);
+        if (existing) {
+          appRow.files.set(fileKey, { ...existing, durationMs: existing.durationMs + overlap });
+        } else {
+          appRow.files.set(fileKey, { ...parsedFile, durationMs: overlap });
+        }
+      }
+
       bucket.apps.set(app, appRow);
       bucket.durationMs += overlap;
       if (!bucket.events.some((existing) => existing.id === event.id)) {
@@ -1172,23 +1282,45 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
     }
   });
 
-  return working.map((bucket): HourBucket => ({
-    hour: bucket.hour,
-    label: bucket.label,
-    durationMs: bucket.durationMs,
-    events: bucket.events.sort((left, right) => left.startedAt - right.startedAt),
-    apps: [...bucket.apps.values()]
-      .map((app) => ({
-        app: app.app,
-        durationMs: app.durationMs,
-        events: app.events.size,
-        contexts: [...app.contexts],
-        aiTools: [...app.aiTools],
-        examples: [...app.examples],
-      }))
-      .sort((left, right) => right.durationMs - left.durationMs),
-    aiTools: [...bucket.aiTools],
-  }));
+  const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5-minute gap = "away"
+
+  return working.map((bucket): HourBucket => {
+    const sortedEvents = bucket.events.sort((left, right) => left.startedAt - right.startedAt);
+
+    // Detect idle gaps between consecutive events
+    const idleGaps: IdleGap[] = [];
+    for (let i = 1; i < sortedEvents.length; i++) {
+      const prev = sortedEvents[i - 1];
+      const curr = sortedEvents[i];
+      const prevEnd = Math.max(prev.endedAt, prev.startedAt + prev.durationMs);
+      const gap = curr.startedAt - prevEnd;
+      if (gap >= IDLE_THRESHOLD_MS) {
+        idleGaps.push({ startMs: prevEnd, endMs: curr.startedAt, durationMs: gap });
+      }
+    }
+
+    return {
+      hour: bucket.hour,
+      label: bucket.label,
+      durationMs: bucket.durationMs,
+      events: sortedEvents,
+      apps: [...bucket.apps.values()]
+        .map((app) => ({
+          app: app.app,
+          durationMs: app.durationMs,
+          events: app.events.size,
+          contexts: [...app.contexts],
+          aiTools: [...app.aiTools],
+          examples: [...app.examples],
+          files: [...app.files.values()]
+            .sort((a, b) => b.durationMs - a.durationMs)
+            .slice(0, 5),
+        }))
+        .sort((left, right) => right.durationMs - left.durationMs),
+      aiTools: [...bucket.aiTools],
+      idleGaps,
+    };
+  });
 }
 
 function buildProjectUsageBreakdown(sourceEvents: BackendSourceEvent[]): ProjectUsageBreakdown[] {
@@ -3418,12 +3550,28 @@ function HourDetailView({
                 const visibleContext = [...app.examples, ...app.contexts]
                   .filter((value, index, values) => value && values.indexOf(value) === index)
                   .slice(0, 4);
+                const hasFiles = app.files.length > 0;
                 return (
                   <article className="hour-app-row" key={app.app}>
                     <AppIcon appName={app.app} className="app-color-dot" />
-                    <div>
-                      <strong>{app.app}</strong>
-                      <em>{visibleContext.join(" · ") || "No file, folder, or site captured"}</em>
+                    <div className="hour-app-row-body">
+                      <div className="hour-app-row-header">
+                        <strong>{app.app}</strong>
+                        <span className="hour-app-row-meta">{formatDuration(app.durationMs)} · {app.events} record{app.events === 1 ? "" : "s"}</span>
+                      </div>
+                      {hasFiles ? (
+                        <ul className="hour-file-list" aria-label={`Files in ${app.app}`}>
+                          {app.files.map((file) => (
+                            <li className="hour-file-row" key={`${file.name}|${file.context ?? ""}`}>
+                              <span className="hour-file-name">{file.name}</span>
+                              {file.context && <em className="hour-file-context">{file.context}</em>}
+                              <span className="hour-file-duration">{formatDuration(file.durationMs)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <em className="hour-app-row-context">{visibleContext.join(" · ") || "No file, folder, or site captured"}</em>
+                      )}
                       {app.aiTools.length > 0 && (
                         <span className="tool-chip-row">
                           {app.aiTools.map((tool) => (
@@ -3432,11 +3580,28 @@ function HourDetailView({
                         </span>
                       )}
                     </div>
-                    <span>{formatDuration(app.durationMs)}</span>
-                    <small>{app.events} record{app.events === 1 ? "" : "s"}</small>
                   </article>
                 );
               })}
+              {bucket.idleGaps.length > 0 && (
+                <div className="hour-idle-gaps">
+                  <span className="hour-idle-gaps-label">Away gaps detected</span>
+                  {bucket.idleGaps.map((gap) => {
+                    const startTime = new Date(gap.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                    const endTime = new Date(gap.endMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <article className="hour-idle-gap-row" key={gap.startMs}>
+                        <span className="hour-idle-dot" />
+                        <div>
+                          <strong>Away</strong>
+                          <em>{startTime} – {endTime}</em>
+                        </div>
+                        <span>{formatDuration(gap.durationMs)}</span>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </section>
 

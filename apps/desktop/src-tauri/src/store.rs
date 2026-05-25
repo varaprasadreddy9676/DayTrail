@@ -6249,6 +6249,43 @@ const EDITOR_APPS: &[&str] = &[
     "Zed",
 ];
 
+const BROWSER_APPS: &[&str] = &[
+    "Safari",
+    "Firefox",
+    "Firefox Developer Edition",
+    "Google Chrome",
+    "Google Chrome Canary",
+    "Microsoft Edge",
+    "Brave Browser",
+    "ChatGPT Atlas",
+    "Arc",
+    "Chromium",
+    "Opera",
+    "Vivaldi",
+    "Tor Browser",
+    "Waterfox",
+];
+
+/// Tab page titles that contain no useful information.
+const GENERIC_TAB_TITLES: &[&str] = &[
+    "New Tab",
+    "New private tab",
+    "New Incognito Window",
+    "about:blank",
+    "about:newtab",
+    "New Window",
+    "Start Page",
+    "Blank Page",
+];
+
+fn is_generic_tab_title(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    GENERIC_TAB_TITLES
+        .iter()
+        .any(|t| t.to_lowercase() == lower)
+        || lower.is_empty()
+}
+
 /// Parse an editor window title into `(filename, project)`.
 ///
 /// Handles the common patterns:
@@ -6385,11 +6422,15 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
                 if let Some(title) = event.title.as_deref().and_then(clean_capture_label) {
                     push_example(&mut bucket.examples, title.clone());
 
-                    // Build per-file breakdown for editors
-                    if let Some((filename, proj)) =
-                        parse_editor_file_from_title(&title, &app)
-                    {
+                    // Per-file breakdown: editors get filename+project, browsers get tab title+domain
+                    if let Some((filename, proj)) = parse_editor_file_from_title(&title, &app) {
                         let key = (filename, proj);
+                        let entry = file_buckets.entry(key).or_default();
+                        entry.0 += dur;
+                        entry.1 += 1;
+                    } else if BROWSER_APPS.contains(&app.as_str()) && !is_generic_tab_title(&title) {
+                        let context = event.domain.clone();
+                        let key = (title, context);
                         let entry = file_buckets.entry(key).or_default();
                         entry.0 += dur;
                         entry.1 += 1;

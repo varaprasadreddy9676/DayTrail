@@ -1430,8 +1430,8 @@ kbd {
 
 .hour-app-row {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto auto;
-  align-items: center;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   padding: 11px 14px;
   border-bottom: 1px solid var(--border-subtle);
@@ -1442,53 +1442,156 @@ kbd {
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
+  margin-top: 1px;
 }
 
-.hour-app-row > div:nth-child(2) {
+.hour-app-row-body {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 5px;
 }
 
-.hour-app-row strong,
-.hour-app-row em,
-.hour-app-row span,
-.hour-app-row small {
+.hour-app-row-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
+}
+
+.hour-app-row-header strong {
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.hour-app-row strong {
-  color: var(--text-main);
-  font-size: 13px;
-  line-height: 17px;
+.hour-app-row-meta {
+  color: var(--text-soft);
+  font-size: 11px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.hour-app-row em,
-.hour-app-row small {
+.hour-app-row-context {
   color: var(--text-muted);
   font-size: 11px;
   font-style: normal;
   line-height: 14px;
-}
-
-.hour-app-row em {
   display: -webkit-box;
   white-space: normal;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
-.hour-app-row > span {
+/* ── Hour view: per-file / per-tab breakdown list ────────────────────── */
+
+.hour-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.hour-file-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hour-file-name {
+  font-size: 11px;
   color: var(--text-main);
-  font-weight: 700;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
-.hour-app-row > small {
+.hour-file-context {
+  font-size: 10px;
+  color: var(--text-soft);
+  font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+  flex-shrink: 1;
+}
+
+.hour-file-duration {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Idle / away gap rows ─────────────────────────────────────────────── */
+
+.hour-idle-gaps {
+  padding: 10px 14px 6px;
+  border-top: 1px dashed var(--border-strong);
+  display: grid;
+  gap: 4px;
+}
+
+.hour-idle-gaps-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+  margin-bottom: 4px;
+}
+
+.hour-idle-gap-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.hour-idle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-soft);
+  opacity: 0.5;
+}
+
+.hour-idle-gap-row div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.hour-idle-gap-row strong {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.hour-idle-gap-row em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-soft);
+}
+
+.hour-idle-gap-row > span:last-child {
+  font-size: 11px;
+  color: var(--text-soft);
+  font-weight: 600;
   white-space: nowrap;
 }
 
