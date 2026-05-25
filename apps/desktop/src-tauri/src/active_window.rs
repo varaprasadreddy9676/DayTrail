@@ -800,6 +800,7 @@ fn is_chromium_browser(app_name: &str) -> bool {
             | "Google Chrome Canary"
             | "Microsoft Edge"
             | "Brave Browser"
+            | "ChatGPT Atlas"
             | "Arc"
             | "Chromium"
             | "Opera"
@@ -1211,6 +1212,8 @@ mod tests {
         display_app_name_from_executable, push_ai_tool_from_path, single_workspace_candidate,
         terminal_ai_tools_from_ps_output, workspace_from_candidates,
     };
+    #[cfg(target_os = "macos")]
+    use super::is_chromium_browser;
     use std::path::Path;
 
     #[test]
@@ -1339,5 +1342,11 @@ mod tests {
                 Some(expected)
             );
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn treats_chatgpt_atlas_as_chromium_browser_for_tab_urls() {
+        assert!(is_chromium_browser("ChatGPT Atlas"));
     }
 }
