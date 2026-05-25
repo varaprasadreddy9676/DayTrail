@@ -86,17 +86,6 @@ impl WorktraceStore {
             .app_data_dir()
             .context("failed to resolve app data directory")?;
         let db_path = app_dir.join(DB_FILE_NAME);
-        if !db_path.exists() {
-            if let Some(legacy_path) = legacy_database_paths()
-                .into_iter()
-                .find(|path| path.exists())
-            {
-                if let Some(parent) = db_path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let _ = fs::copy(legacy_path, &db_path);
-            }
-        }
         Self::open_with_options(db_path, true)
     }
 
@@ -8367,15 +8356,6 @@ fn redact_json_url_fields(value: &mut Value, changed: &mut bool) {
         }
         _ => {}
     }
-}
-
-fn legacy_database_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(base) = dirs::data_local_dir().or_else(dirs::home_dir) {
-        paths.push(base.join("ai.worktrace.desktop").join("worktrace.sqlite3"));
-        paths.push(base.join("WorkTrace AI").join("worktrace.sqlite3"));
-    }
-    paths
 }
 
 pub fn default_database_path() -> Result<PathBuf> {

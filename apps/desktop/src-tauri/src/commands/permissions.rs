@@ -33,3 +33,8 @@ pub fn restart_app(app: AppHandle) -> Result<bool, CommandError> {
     app.request_restart();
     Ok(true)
 }
+
+#[tauri::command]
+pub fn reset_and_request_accessibility() -> Result<CapturePermissionSummary, CommandError> {
+    crate::permissions::reset_and_request_accessibility().map_err(Into::into)
+}

@@ -190,6 +190,18 @@ dd {
   line-height: 19px;
 }
 
+.permission-steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.permission-steps li + li {
+  margin-top: 4px;
+}
+
 .permission-actions {
   display: flex;
   min-width: 0;
@@ -924,7 +936,10 @@ kbd {
 }
 
 .panel-block.hourly-panel {
-  min-height: 650px;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: min(720px, calc(100vh - 160px));
+  min-height: 360px;
 }
 
 .hour-legend {
@@ -981,7 +996,8 @@ kbd {
 .hour-timeline-list {
   display: grid;
   min-height: 0;
-  overflow: visible;
+  align-content: start;
+  overflow-y: auto;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
@@ -1323,6 +1339,9 @@ kbd {
   min-width: 0;
   min-height: 0;
   gap: 12px;
+  overflow-y: auto;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .hour-distribution-panel {
@@ -1360,6 +1379,17 @@ kbd {
   display: grid;
   align-content: start;
   min-height: 0;
+}
+
+.hour-app-panel {
+  min-height: 0;
+}
+
+.hour-app-list {
+  max-height: min(360px, 42vh);
+  overflow: auto;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .hour-app-row {
@@ -4696,4 +4726,94 @@ textarea {
     justify-content: flex-start;
     overflow-x: auto;
   }
+}
+
+/* ── Toast notifications ───────────────────────────────────────────────── */
+
+.toast-container {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  pointer-events: all;
+  animation: toast-in 0.18s ease;
+}
+
+.toast.toast-exit {
+  animation: toast-out 0.18s ease forwards;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+}
+
+.toast[data-kind="success"] .toast-icon { background: var(--success); }
+.toast[data-kind="error"]   .toast-icon { background: var(--danger); }
+.toast[data-kind="info"]    .toast-icon { background: var(--accent-main); }
+.toast[data-kind="warning"] .toast-icon { background: var(--warning); }
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 16px;
+}
+
+.toast-message {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 16px;
+  word-break: break-word;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toast-close:hover { color: var(--text-main); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
 }

@@ -66,6 +66,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         permissions::open_capture_permission_settings,
         permissions::request_capture_permission,
         permissions::restart_app,
+        permissions::reset_and_request_accessibility,
         export::export_data,
         export::export_data_range,
         export::analyze_export_range,

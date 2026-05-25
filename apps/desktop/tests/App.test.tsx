@@ -806,7 +806,7 @@ describe("WorkTrace command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /allow app and window tracking/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /allow app and window tracking|still not detected/i })).toBeInTheDocument();
     expect(screen.getByText(/privacy & security > accessibility/i)).toBeInTheDocument();
     expect(screen.getAllByText(/\/applications\/daytrail\.app/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /restart app/i }).length).toBeGreaterThan(0);

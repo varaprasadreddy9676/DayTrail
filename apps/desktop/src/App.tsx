@@ -1,5 +1,12 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+// ── Toast system ────────────────────────────────────────────────────────────
+type ToastKind = "success" | "error" | "info" | "warning";
+type Toast = { id: number; kind: ToastKind; title: string; message?: string };
+let _toastSeq = 0;
+function nextToastId() { return ++_toastSeq; }
 
 type ViewKey =
   | "today"
@@ -411,6 +418,7 @@ type TauriGlobal = {
 
 type TauriInternals = {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  transformCallback?: unknown;
 };
 
 declare global {
@@ -422,6 +430,10 @@ declare global {
 
 function hasTauriRuntime() {
   return Boolean(getTauriInvoke());
+}
+
+function hasTauriEventRuntime() {
+  return typeof window.__TAURI_INTERNALS__?.transformCallback === "function";
 }
 
 function getTauriInvoke() {
@@ -1547,6 +1559,26 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
 }
 
 export default function App() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  const addToast = useCallback((kind: ToastKind, title: string, message?: string) => {
+    const id = nextToastId();
+    setToasts((prev) => [...prev, { id, kind, title, message }]);
+    const delay = kind === "error" || kind === "warning" ? 6000 : 3000;
+    toastTimers.current.set(id, setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+      toastTimers.current.delete(id);
+    }, delay));
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    const timer = toastTimers.current.get(id);
+    if (timer) clearTimeout(timer);
+    toastTimers.current.delete(id);
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   const [activeView, setActiveView] = useState<ViewKey>("today");
   const [activeStream, setActiveStream] = useState("backend");
   const [activeAppName, setActiveAppName] = useState<string | null>(null);
@@ -1721,6 +1753,21 @@ export default function App() {
     setPermissionStatus(permissionStatusMessage(summary));
   }
 
+  async function resetAndRequestAccessibility() {
+    setPermissionStatus("Resetting accessibility grant...");
+    const summary = await invokeTauri<BackendCapturePermissionSummary>(
+      "reset_and_request_accessibility",
+    );
+
+    if (!summary) {
+      setPermissionStatus("Reset unavailable");
+      return;
+    }
+
+    setPermissionSummary(summary);
+    setPermissionStatus(permissionStatusMessage(summary));
+  }
+
   async function restartDayTrail() {
     setPermissionStatus("Restarting DayTrail...");
     const restarted = await invokeTauri<boolean>("restart_app");
@@ -1804,6 +1851,22 @@ export default function App() {
       setActiveStream(latestStream.id);
     }
   }, [activeView, latestStream.id]);
+
+  // Tray-action events emitted by the Rust tray handler
+  useEffect(() => {
+    if (!hasTauriRuntime() || !hasTauriEventRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    listen<string>("tray-navigate", (event) => {
+      if (event.payload === "quick_note") {
+        setActiveView("restore");
+      } else if (event.payload === "eod") {
+        generateRitual("eod");
+      }
+    })
+      .then((fn) => { unlisten = fn; })
+      .catch(() => undefined);
+    return () => { unlisten?.(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -2050,6 +2113,7 @@ export default function App() {
 
     if (!savedSettings) {
       setSaveState("Save failed");
+      addToast("error", "Settings not saved", "Could not write to local storage. Check disk space and try again.");
       return;
     }
 
@@ -2062,6 +2126,7 @@ export default function App() {
 
       if (!keySettings) {
         setSaveState("Settings saved, API key save failed");
+        addToast("error", "API key not saved", "Settings were saved but the API key could not be stored in the OS keychain.");
         return;
       }
 
@@ -2072,6 +2137,7 @@ export default function App() {
     setAiConfig(savedConfig);
     setDraftAiConfig(savedConfig);
     setSaveState(`${savedConfig.provider} saved`);
+    addToast("success", "Settings saved");
   }
 
   async function toggleTracking() {
@@ -2085,6 +2151,7 @@ export default function App() {
       setIsPaused(pauseState.paused);
     } else {
       setSaveState("Capture control unavailable");
+      addToast("error", "Tracking control unavailable", "Could not reach the desktop backend. Try restarting DayTrail.");
     }
   }
 
@@ -2096,10 +2163,12 @@ export default function App() {
 
     if (!result) {
       setTerminalBridgeStatus("Install failed");
+      addToast("error", "Terminal bridge install failed", "Could not write shell hook. Check that your shell profile is writable.");
       return;
     }
 
     setTerminalBridgeStatus(result.message);
+    addToast("success", "Terminal bridge installed", "Open a new terminal tab for the hook to take effect.");
     await refreshTodaySnapshot();
   }
 
@@ -2125,6 +2194,7 @@ export default function App() {
 
     if (!payload) {
       setExportStatus("Export unavailable");
+      addToast("error", "Export failed", "Could not generate export. Make sure DayTrail has captured some activity first.");
       return;
     }
 
@@ -2143,6 +2213,7 @@ export default function App() {
 
     if (!report?.bodyMarkdown) {
       setExportStatus("AI analysis unavailable");
+      addToast("error", "AI analysis failed", "Check that an AI provider and API key are configured in Settings.");
       return;
     }
 
@@ -2160,11 +2231,13 @@ export default function App() {
 
     if (!configJson) {
       setStorageStatus("Configuration export unavailable");
+      addToast("error", "Config export failed", "Could not read settings from the backend.");
       return;
     }
 
     setSettingsConfigJson(configJson);
     setStorageStatus("Configuration export ready");
+    addToast("success", "Configuration exported", "Copy the JSON below to save or transfer your settings.");
   }
 
   async function importSettingsConfig() {
@@ -2182,6 +2255,7 @@ export default function App() {
 
     if (!imported) {
       setStorageStatus("Configuration import failed");
+      addToast("error", "Config import failed", "The JSON may be invalid or from an incompatible version.");
       return;
     }
 
@@ -2200,10 +2274,12 @@ export default function App() {
 
     if (!backup) {
       setStorageStatus("Database backup failed");
+      addToast("error", "Backup failed", "Could not write backup file. Check available disk space.");
       return;
     }
 
     setStorageStatus(`Backup created: ${backup.path}`);
+    addToast("success", "Backup complete", backup.path);
     await loadStorageLocations();
   }
 
@@ -2229,14 +2305,15 @@ export default function App() {
 
     if (!restored) {
       setStorageStatus("Database restore failed");
+      addToast("error", "Restore failed", "Could not restore the database. The file may be corrupt or from an incompatible version.");
       return;
     }
 
-    setStorageStatus(
-      restored.preRestoreBackupPath
-        ? `Database restored. Safety backup: ${restored.preRestoreBackupPath}`
-        : "Database restored",
-    );
+    const restoreMsg = restored.preRestoreBackupPath
+      ? `Database restored. Safety backup: ${restored.preRestoreBackupPath}`
+      : "Database restored";
+    setStorageStatus(restoreMsg);
+    addToast("success", "Restore complete", restored.preRestoreBackupPath ? `Safety backup saved to ${restored.preRestoreBackupPath}` : undefined);
     await refreshTodaySnapshot();
     await loadStorageLocations();
   }
@@ -2306,14 +2383,18 @@ export default function App() {
 
   if (permissionSummary?.setupRequired && !permissionSetupDismissed) {
     return (
-      <PermissionSetupView
-        onContinue={() => setPermissionSetupDismissed(true)}
-        onOpenSettings={openCapturePermissionSettings}
-        onRefresh={loadCapturePermissions}
-        onRestart={restartDayTrail}
-        permissionStatus={permissionStatus}
-        summary={permissionSummary}
-      />
+      <>
+        <PermissionSetupView
+          onContinue={() => setPermissionSetupDismissed(true)}
+          onOpenSettings={openCapturePermissionSettings}
+          onRefresh={loadCapturePermissions}
+          onRestart={restartDayTrail}
+          onResetAccessibility={resetAndRequestAccessibility}
+          permissionStatus={permissionStatus}
+          summary={permissionSummary}
+        />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
     );
   }
 
@@ -2561,6 +2642,25 @@ export default function App() {
           setCommandQuery={setCommandQuery}
         />
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toast-container" role="region" aria-label="Notifications" aria-live="polite">
+      {toasts.map((toast) => (
+        <div className="toast" data-kind={toast.kind} key={toast.id} role="alert">
+          <span className="toast-icon" aria-hidden="true" />
+          <div className="toast-body">
+            <strong className="toast-title">{toast.title}</strong>
+            {toast.message && <span className="toast-message">{toast.message}</span>}
+          </div>
+          <button className="toast-close" onClick={() => onDismiss(toast.id)} type="button" aria-label="Dismiss">×</button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2570,6 +2670,7 @@ function PermissionSetupView({
   onOpenSettings,
   onRefresh,
   onRestart,
+  onResetAccessibility,
   permissionStatus,
   summary,
 }: {
@@ -2577,10 +2678,12 @@ function PermissionSetupView({
   onOpenSettings: (permissionId: string) => void;
   onRefresh: () => void;
   onRestart: () => void;
+  onResetAccessibility: () => void;
   permissionStatus: string;
   summary: BackendCapturePermissionSummary;
 }) {
   const requiredCheck = summary.checks.find((check) => check.required && check.status !== "granted");
+  const stillMissingAfterCheck = permissionStatus.startsWith("Still missing");
 
   return (
     <div className="permission-setup-shell">
@@ -2594,10 +2697,19 @@ function PermissionSetupView({
         </div>
         <section className="permission-hero">
           <span>{permissionStatus}</span>
-          <h1>Allow app and window tracking</h1>
+          <h1>{stillMissingAfterCheck ? "Still not detected — let's fix it" : "Allow app and window tracking"}</h1>
           <p>
-            DayTrail needs Accessibility access to identify the active app and window title. It does not capture screenshots, keystrokes, clipboard text, or file contents.
+            {stillMissingAfterCheck
+              ? "macOS may have a stale or mismatched grant. Click \"Fix accessibility\" — it clears the old entry and opens System Settings so you can re-grant in one step."
+              : "DayTrail needs Accessibility access to identify the active app and window title. It does not capture screenshots, keystrokes, clipboard text, or file contents."}
           </p>
+          {stillMissingAfterCheck && (
+            <ol className="permission-steps">
+              <li>Click <strong>Fix accessibility</strong> below — System Settings will open.</li>
+              <li>Find <strong>DayTrail</strong> in the list and toggle it <strong>ON</strong>.</li>
+              <li>Switch back to DayTrail — tracking starts automatically.</li>
+            </ol>
+          )}
         </section>
         <PermissionStatusList
           onOpenSettings={onOpenSettings}
@@ -2606,23 +2718,42 @@ function PermissionSetupView({
           summary={summary}
         />
         <div className="permission-actions">
-          <button
-            className="button primary"
-            disabled={!requiredCheck}
-            onClick={() => requiredCheck && onOpenSettings(requiredCheck.id)}
-            type="button"
-          >
-            <Icon name="warning" />
-            <span>{requiredCheck?.actionLabel ?? "Open Settings"}</span>
-          </button>
-          <button className="button" onClick={onRefresh} type="button">
-            <Icon name="sync" />
-            <span>Recheck</span>
-          </button>
-          <button className="button" onClick={onRestart} type="button">
-            <Icon name="return" />
-            <span>Restart app</span>
-          </button>
+          {stillMissingAfterCheck ? (
+            <>
+              <button className="button primary" onClick={onResetAccessibility} type="button">
+                <Icon name="warning" />
+                <span>Fix accessibility</span>
+              </button>
+              <button className="button" onClick={onRefresh} type="button">
+                <Icon name="sync" />
+                <span>Recheck</span>
+              </button>
+              <button className="button" onClick={onRestart} type="button">
+                <Icon name="return" />
+                <span>Restart app</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="button primary"
+                disabled={!requiredCheck}
+                onClick={() => requiredCheck && onOpenSettings(requiredCheck.id)}
+                type="button"
+              >
+                <Icon name="warning" />
+                <span>{requiredCheck?.actionLabel ?? "Open Settings"}</span>
+              </button>
+              <button className="button" onClick={onRefresh} type="button">
+                <Icon name="sync" />
+                <span>Recheck</span>
+              </button>
+              <button className="button" onClick={onRestart} type="button">
+                <Icon name="return" />
+                <span>Restart app</span>
+              </button>
+            </>
+          )}
           <button className="button compact" onClick={onContinue} type="button">
             Continue limited
           </button>
@@ -3021,7 +3152,7 @@ function HourlyTimelinePanel({
       <div className="hour-filter-bar">
         <span>
           {activeBuckets.length === 0
-            ? "No active hours captured yet"
+            ? "No activity captured yet — use your computer for a few minutes and DayTrail will populate this view"
             : showFullDay
               ? "Showing all 24 hours"
               : `Showing ${activeBuckets.length} active hour${activeBuckets.length === 1 ? "" : "s"}`}

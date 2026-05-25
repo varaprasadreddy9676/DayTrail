@@ -93,10 +93,8 @@ fn permission_diagnostics(
             return vec![
                 "No Windows privacy permission is required for normal active-window tracking."
                     .to_string(),
-                "Browser URLs still require the DayTrail browser extension/native bridge."
-                    .to_string(),
-                "Editor folders and terminal commands require their bridge integrations."
-                    .to_string(),
+                "Browser URLs still require the DayTrail browser extension and native host bridge — install these from Settings > Bridges.".to_string(),
+                "Editor folders require the VS Code/Cursor extension. Terminal commands require the PowerShell terminal bridge.".to_string(),
             ];
         }
         return Vec::new();
@@ -257,6 +255,32 @@ pub fn request_capture_permission(permission_id: &str) -> Result<CapturePermissi
     #[cfg(not(target_os = "macos"))]
     {
         let _ = permission_id;
+        Ok(capture_permission_summary())
+    }
+}
+
+pub fn reset_and_request_accessibility() -> Result<CapturePermissionSummary> {
+    #[cfg(target_os = "macos")]
+    {
+        // Reset the stale TCC grant (e.g. after a binary update invalidated the signature).
+        // This clears the entry so macOS will prompt fresh on the next trust check.
+        let _ = std::process::Command::new("tccutil")
+            .args(["reset", "Accessibility", "ai.daytrail.desktop"])
+            .status();
+
+        // Trigger the system prompt / open System Settings Accessibility page.
+        let _ = macos_accessibility_trusted(true);
+
+        // Open the settings pane so the user can toggle the switch on.
+        let _ = std::process::Command::new("open")
+            .arg(ACCESSIBILITY_URL)
+            .status();
+
+        Ok(capture_permission_summary())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
         Ok(capture_permission_summary())
     }
 }

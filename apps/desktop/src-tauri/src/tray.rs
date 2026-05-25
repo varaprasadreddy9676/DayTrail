@@ -1,12 +1,14 @@
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 use crate::store::WorktraceStore;
 
 pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> {
+    let is_paused = store.pause_state().map(|s| s.paused).unwrap_or(false);
+
     let status = MenuItem::with_id(
         app,
         "status",
@@ -17,8 +19,8 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
     let show = MenuItem::with_id(app, "show", "Show Command Center", true, None::<&str>)?;
     let quick_note =
         MenuItem::with_id(app, "quick_note", "Quick-Capture Note", true, None::<&str>)?;
-    let pause = MenuItem::with_id(app, "pause", "Pause tracking", true, None::<&str>)?;
-    let resume = MenuItem::with_id(app, "resume", "Resume tracking", true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", "Pause tracking", !is_paused, None::<&str>)?;
+    let resume = MenuItem::with_id(app, "resume", "Resume tracking", is_paused, None::<&str>)?;
     let eod = MenuItem::with_id(app, "eod", "Run End-of-Day Ritual", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit DayTrail", true, None::<&str>)?;
@@ -42,20 +44,50 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
         ],
     )?;
 
+    // Clone menu items so the event handler can update their enabled state.
+    let pause_item = pause.clone();
+    let resume_item = resume.clone();
+    let status_item = status.clone();
+
     let mut tray = TrayIconBuilder::with_id("daytrail-tray")
         .tooltip("DayTrail")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .icon_as_template(true)
         .on_menu_event(move |app, event| match event.id().as_ref() {
-            "show" | "quick_note" | "eod" | "settings" => {
+            "show" | "settings" => {
                 show_main_window(app);
             }
+            "quick_note" => {
+                show_main_window(app);
+                let _ = app.emit("tray-navigate", "quick_note");
+            }
+            "eod" => {
+                show_main_window(app);
+                let _ = app.emit("tray-navigate", "eod");
+            }
             "pause" => {
-                let _ = store.pause("tray");
+                if let Ok(state) = store.pause("tray") {
+                    let _ = pause_item.set_enabled(false);
+                    let _ = resume_item.set_enabled(true);
+                    let label = if state.paused {
+                        "DayTrail: Paused"
+                    } else {
+                        "DayTrail: Tracking Active"
+                    };
+                    let _ = status_item.set_text(label);
+                }
             }
             "resume" => {
-                let _ = store.resume();
+                if let Ok(state) = store.resume() {
+                    let _ = pause_item.set_enabled(true);
+                    let _ = resume_item.set_enabled(false);
+                    let label = if state.paused {
+                        "DayTrail: Paused"
+                    } else {
+                        "DayTrail: Tracking Active"
+                    };
+                    let _ = status_item.set_text(label);
+                }
             }
             "quit" => {
                 app.exit(0);
