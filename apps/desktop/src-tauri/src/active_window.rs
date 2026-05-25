@@ -1208,12 +1208,12 @@ fn is_self_app(app_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::is_chromium_browser;
     use super::{
         display_app_name_from_executable, push_ai_tool_from_path, single_workspace_candidate,
         terminal_ai_tools_from_ps_output, workspace_from_candidates,
     };
-    #[cfg(target_os = "macos")]
-    use super::is_chromium_browser;
     use std::path::Path;
 
     #[test]

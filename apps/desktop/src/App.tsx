@@ -19,7 +19,7 @@ type ViewKey =
   | "rituals"
   | "memory"
   | "settings";
-type RitualKey = "morning" | "restore" | "eod" | "weekly" | "meeting";
+type RitualKey = "daily";
 
 type WorkSession = {
   id: string;
@@ -499,8 +499,6 @@ type WorkspaceFolder = {
 const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "today", label: "Today", icon: "layout" },
   { id: "apps", label: "Activity", icon: "apps" },
-  { id: "ai", label: "AI Impact", icon: "ritual" },
-  { id: "loops", label: "Needs Review", icon: "warning" },
   { id: "rituals", label: "Reports", icon: "ritual" },
   { id: "settings", label: "Settings", icon: "sliders" },
 ];
@@ -510,25 +508,20 @@ const initialActions: ActionItem[] = [];
 const streams: Stream[] = [];
 
 const commandSuggestions = [
-  "/what-did-i-do",
-  "/ai-usage",
+  "/today",
+  "/activity",
+  "/report",
   "/export",
-  "/saved-notes",
-  "/context",
-  "/eod",
-  "/plan-week",
-  "/follow-ups",
 ];
 
 const commandLabels: Record<string, string> = {
+  "/today": "Open Today",
+  "/activity": "Open Activity",
+  "/report": "Generate daily report",
   "/what-did-i-do": "What did I work on today?",
-  "/ai-usage": "Show AI Impact",
-  "/export": "Export activity data",
-  "/saved-notes": "Manage saved notes",
-  "/context": "Resume current context",
+  "/ai-usage": "Open Activity",
+  "/export": "Export data",
   "/eod": "Generate daily report",
-  "/plan-week": "Generate weekly plan",
-  "/follow-ups": "Show Needs Review",
 };
 
 const initialFolders: WorkspaceFolder[] = [];
@@ -644,17 +637,8 @@ const emptyStream: Stream = {
   events: [],
 };
 
-function buildLocalReportMarkdown(ritual: RitualKey, snapshot: BackendTodaySnapshot | null) {
-  const title =
-    ritual === "morning"
-      ? "Morning Plan"
-      : ritual === "weekly"
-        ? "Weekly Review"
-        : ritual === "meeting"
-          ? "Client / Manager Update"
-          : ritual === "restore"
-            ? "AI Usage Report"
-            : "Daily Work Execution Report";
+function buildLocalReportMarkdown(_reportType: RitualKey, snapshot: BackendTodaySnapshot | null) {
+  const title = "Daily Work Report";
 
   if (!snapshot) {
     return `# ${title}
@@ -818,9 +802,40 @@ function eventContextLabel(event: BackendSourceEvent) {
   return compactDisplayLabel(event.workspaceKey ?? event.domain ?? event.title ?? event.app);
 }
 
+function metadataStringAt(value: unknown, path: string[]) {
+  let cursor = value;
+  for (const segment of path) {
+    if (!cursor || typeof cursor !== "object" || !(segment in cursor)) {
+      return null;
+    }
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+  return typeof cursor === "string" && cursor.trim() ? cursor : null;
+}
+
+function eventDocumentLabel(event: BackendSourceEvent) {
+  if (!event.metadataJson) {
+    return null;
+  }
+
+  try {
+    const metadata = JSON.parse(event.metadataJson) as unknown;
+    const rawDocument =
+      metadataStringAt(metadata, ["document", "fileName"]) ??
+      metadataStringAt(metadata, ["document", "filePath"]) ??
+      metadataStringAt(metadata, ["document", "uri"]) ??
+      metadataStringAt(metadata, ["activeFile"]);
+    const label = compactDisplayLabel(rawDocument);
+    return label === "Captured activity" ? null : label;
+  } catch {
+    return null;
+  }
+}
+
 function eventTitle(event: BackendSourceEvent) {
   const app = eventAppLabel(event);
-  const title = compactDisplayLabel(event.title);
+  const documentLabel = eventDocumentLabel(event);
+  const title = documentLabel ?? compactDisplayLabel(event.title);
   const normalizedTitle = title.toLowerCase();
   const normalizedApp = app.toLowerCase();
 
@@ -1076,6 +1091,7 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
       const app = eventAppLabel(event);
       const context = eventFullContextLabel(event);
       const title = eventTitle(event);
+      const document = eventDocumentLabel(event);
       const aiTools = aiToolLabelsForEvent(event);
       const appRow = bucket.apps.get(app) ?? {
         app,
@@ -1090,6 +1106,9 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
       appRow.events.add(event.id);
       appRow.contexts.add(context);
       appRow.examples.add(title);
+      if (document) {
+        appRow.examples.add(document);
+      }
       aiTools.forEach((tool) => {
         appRow.aiTools.add(tool);
         bucket.aiTools.add(tool);
@@ -1583,7 +1602,7 @@ export default function App() {
   const [activeStream, setActiveStream] = useState("backend");
   const [activeAppName, setActiveAppName] = useState<string | null>(null);
   const [activeHourDetail, setActiveHourDetail] = useState<number | null>(null);
-  const [activeRitual, setActiveRitual] = useState<RitualKey>("eod");
+  const [activeRitual, setActiveRitual] = useState<RitualKey>("daily");
   const [isPaused, setIsPaused] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
@@ -1860,7 +1879,7 @@ export default function App() {
       if (event.payload === "quick_note") {
         setActiveView("restore");
       } else if (event.payload === "eod") {
-        generateRitual("eod");
+        generateRitual("daily");
       }
     })
       .then((fn) => { unlisten = fn; })
@@ -2173,7 +2192,7 @@ export default function App() {
   }
 
   async function generateDailyReport() {
-    await generateRitual("eod");
+    await generateRitual("daily");
   }
 
   function exportRangeArgs() {
@@ -2322,15 +2341,7 @@ export default function App() {
     setActiveView("rituals");
     setActiveRitual(ritual);
 
-    const commandByRitual: Record<RitualKey, string> = {
-      morning: "generate_morning_plan",
-      restore: "generate_daily_report",
-      eod: "generate_daily_report",
-      weekly: "generate_weekly_plan",
-      meeting: "generate_daily_report",
-    };
-
-    const report = await invokeTauri<BackendReport>(commandByRitual[ritual]);
+    const report = await invokeTauri<BackendReport>("generate_daily_report");
 
     setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, todaySnapshot));
   }
@@ -2347,27 +2358,14 @@ export default function App() {
   }
 
   async function runCommand(command: string) {
-    if (command === "/what-did-i-do") {
+    if (command === "/today" || command === "/what-did-i-do") {
       setActiveView("today");
-    } else if (command === "/ai-usage") {
-      setActiveView("ai");
+    } else if (command === "/activity" || command === "/ai-usage") {
+      setActiveView("apps");
     } else if (command === "/export") {
       setActiveView("automation");
-    } else if (command === "/saved-notes") {
-      setActiveView("memory");
-    } else if (command === "/follow-ups") {
-      setActiveView("loops");
-    } else if (command === "/context") {
-      setActiveView("restore");
-    } else if (command === "/eod") {
-      await generateRitual("eod");
-    } else if (command === "/plan-week") {
-      await generateRitual("weekly");
-    } else if (command === "/standup" || command === "/field-visit") {
-      setActiveView("rituals");
-      setActiveRitual("meeting");
-    } else if (command === "/ai-threads" || command === "/error-hunt") {
-      setActiveView("restore");
+    } else if (command === "/report" || command === "/eod") {
+      await generateRitual("daily");
     } else if (
       command === "/pending" ||
       command === "/commitments" ||
@@ -2485,7 +2483,7 @@ export default function App() {
             </button>
             <button
               className="button primary"
-              onClick={() => generateRitual("eod")}
+              onClick={() => generateRitual("daily")}
               aria-label="Generate daily report"
               title="Generate end-of-day report"
               type="button"
@@ -2576,12 +2574,10 @@ export default function App() {
           )}
           {activeView === "rituals" && (
             <RitualsView
-              activeRitual={activeRitual}
               onOpenExports={() => setActiveView("automation")}
               onGenerateReport={() => generateRitual(activeRitual)}
               onRegenerateContext={regenerateContextData}
               reportMarkdown={reportMarkdown}
-              setActiveRitual={setActiveRitual}
               sourceFeed={displaySourceFeed}
             />
           )}
@@ -2705,9 +2701,10 @@ function PermissionSetupView({
           </p>
           {stillMissingAfterCheck && (
             <ol className="permission-steps">
-              <li>Click <strong>Fix accessibility</strong> below — System Settings will open.</li>
-              <li>Find <strong>DayTrail</strong> in the list and toggle it <strong>ON</strong>.</li>
-              <li>Switch back to DayTrail — tracking starts automatically.</li>
+              <li>Click <strong>Fix accessibility</strong> below to open <strong>Privacy & Security &gt; Accessibility</strong>.</li>
+              <li>Remove or toggle off any old <strong>DayTrail</strong> entry.</li>
+              <li>Enable this exact app: <strong>{summary.appPath ?? "/Applications/DayTrail.app"}</strong>.</li>
+              <li>Switch back to DayTrail and click <strong>Recheck</strong>.</li>
             </ol>
           )}
         </section>
@@ -2776,6 +2773,15 @@ function PermissionStatusList({
   onRestart: () => void;
   summary: BackendCapturePermissionSummary | null;
 }) {
+  const [copyStatus, setCopyStatus] = useState("Copy app path");
+
+  async function copyAppPath() {
+    if (!summary?.appPath) return;
+    await writeClipboardText(summary.appPath);
+    setCopyStatus("Copied");
+    window.setTimeout(() => setCopyStatus("Copy app path"), 1800);
+  }
+
   if (!summary) {
     return (
       <div className="empty-state compact-empty">
@@ -2814,6 +2820,20 @@ function PermissionStatusList({
         </article>
       ))}
       <div className="permission-diagnostics">
+        {summary.appPath && (
+          <div className="permission-path-helper">
+            <span>
+              System Settings path: <strong>Privacy &amp; Security &gt; Accessibility</strong>
+            </span>
+            <span>
+              Enable this exact app: <strong>{summary.appPath}</strong>
+            </span>
+            <button className="button compact" onClick={copyAppPath} type="button">
+              <Icon name="copy" />
+              {copyStatus}
+            </button>
+          </div>
+        )}
         {(summary.diagnostics ?? []).map((item) => (
           <span key={item}>{item}</span>
         ))}
@@ -2968,7 +2988,7 @@ function TodayView({
     { label: "Work sessions", value: sessions.length, detail: "captured today" },
     { label: "Apps used", value: appCount, detail: "with activity" },
     {
-      label: "AI-active time",
+      label: "AI time",
       value: aiActiveDuration > 0 ? formatDuration(aiActiveDuration) : "0m",
       detail: aiToolCount ? `${aiToolCount} tool${aiToolCount === 1 ? "" : "s"}` : "not detected yet",
     },
@@ -2977,7 +2997,7 @@ function TodayView({
       value: topApp?.app ?? "-",
       detail: topApp ? formatDuration(topApp.durationMs) : "waiting",
     },
-    { label: "Needs review", value: attentionCount, detail: "follow-ups" },
+    { label: "Follow-ups", value: attentionCount, detail: "needs attention" },
   ];
 
   return (
@@ -3308,24 +3328,29 @@ function HourDetailView({
                   <span>This hour will show apps, folders, browser domains, and AI tools when activity exists.</span>
                 </div>
               )}
-              {bucket.apps.map((app) => (
-                <article className="hour-app-row" key={app.app}>
-                  <div className="app-color-dot" style={{ background: appColor(app.app) }} />
-                  <div>
-                    <strong>{app.app}</strong>
-                    <em>{app.contexts.slice(0, 4).join(" · ") || "No folder or site captured"}</em>
-                    {app.aiTools.length > 0 && (
-                      <span className="tool-chip-row">
-                        {app.aiTools.map((tool) => (
-                          <span className="tool-chip" key={tool}>{tool}</span>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                  <span>{formatDuration(app.durationMs)}</span>
-                  <small>{app.events} record{app.events === 1 ? "" : "s"}</small>
-                </article>
-              ))}
+              {bucket.apps.map((app) => {
+                const visibleContext = [...app.examples, ...app.contexts]
+                  .filter((value, index, values) => value && values.indexOf(value) === index)
+                  .slice(0, 4);
+                return (
+                  <article className="hour-app-row" key={app.app}>
+                    <div className="app-color-dot" style={{ background: appColor(app.app) }} />
+                    <div>
+                      <strong>{app.app}</strong>
+                      <em>{visibleContext.join(" · ") || "No file, folder, or site captured"}</em>
+                      {app.aiTools.length > 0 && (
+                        <span className="tool-chip-row">
+                          {app.aiTools.map((tool) => (
+                            <span className="tool-chip" key={tool}>{tool}</span>
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                    <span>{formatDuration(app.durationMs)}</span>
+                    <small>{app.events} record{app.events === 1 ? "" : "s"}</small>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -4663,41 +4688,21 @@ function RestoreView({
 }
 
 function RitualsView({
-  activeRitual,
   onGenerateReport,
   onOpenExports,
   onRegenerateContext,
   reportMarkdown,
-  setActiveRitual,
   sourceFeed,
 }: {
-  activeRitual: RitualKey;
   onGenerateReport: () => void;
   onOpenExports: () => void;
   onRegenerateContext: () => void;
   reportMarkdown: string;
-  setActiveRitual: (ritual: RitualKey) => void;
   sourceFeed: SourceFeedItem[];
 }) {
   const [copyStatus, setCopyStatus] = useState("Copy markdown");
   const [reportSection, setReportSection] = useState<"summary" | "timeline" | "ai" | "raw">("summary");
-  const ritualLabels: Array<{ id: RitualKey; label: string }> = [
-    { id: "eod", label: "End-of-Day Summary" },
-    { id: "morning", label: "Morning Plan" },
-    { id: "weekly", label: "Weekly Review" },
-    { id: "meeting", label: "Client Update" },
-    { id: "restore", label: "AI Usage Report" },
-  ];
-  const markdownTitle =
-    activeRitual === "morning"
-      ? "Morning Plan"
-      : activeRitual === "weekly"
-        ? "Weekly Review"
-        : activeRitual === "meeting"
-          ? "Client / Manager Update"
-          : activeRitual === "restore"
-            ? "AI Usage Report"
-            : "End-of-Day Summary";
+  const markdownTitle = "Daily Work Report";
   const sourceSummary = sourceFeed.length
     ? sourceFeed.map((item) => `- ${item.label}`).join("\n")
     : "No source inputs captured yet.";
@@ -4730,16 +4735,21 @@ function RitualsView({
         </div>
       </div>
 
-      <div className="report-type-tabs" aria-label="Report type">
-        {ritualLabels.map((ritual) => (
+      <div className="report-type-tabs" aria-label="Report sections">
+        {[
+          ["summary", "Summary"],
+          ["timeline", "Timeline"],
+          ["ai", "AI usage"],
+          ["raw", "Raw facts"],
+        ].map(([id, label]) => (
           <button
-            aria-pressed={activeRitual === ritual.id}
-            key={ritual.id}
-            onClick={() => setActiveRitual(ritual.id)}
+            aria-pressed={reportSection === id}
+            key={id}
+            onClick={() => setReportSection(id as typeof reportSection)}
             type="button"
           >
-            <Icon name={ritual.id === "weekly" ? "archive" : ritual.id === "morning" ? "ritual" : "copy"} />
-            {ritual.label}
+            <Icon name={id === "raw" ? "archive" : id === "ai" ? "ritual" : "copy"} />
+            {label}
           </button>
         ))}
       </div>
@@ -4774,24 +4784,6 @@ function RitualsView({
 
         <section className="panel-block report-output-panel">
           <PanelHeader eyebrow="2. Generated report" title={markdownTitle} value="Markdown" />
-          <div className="report-output-tabs" role="tablist" aria-label="Report sections">
-            {[
-              ["summary", "Summary"],
-              ["timeline", "Timeline"],
-              ["ai", "AI insights"],
-              ["raw", "Raw facts"],
-            ].map(([id, label]) => (
-              <button
-                aria-selected={reportSection === id}
-                key={id}
-                onClick={() => setReportSection(id as typeof reportSection)}
-                role="tab"
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
           <pre className="report-preview" aria-label="Generated report markdown">{reportContent}</pre>
           <div className="output-actions">
             <button className="button compact primary" onClick={onGenerateReport} type="button">
@@ -4833,7 +4825,7 @@ function RitualsView({
             <button
               className="button compact"
               disabled={!reportMarkdown}
-              onClick={() => downloadTextFile(`daytrail-${activeRitual}-report.md`, reportMarkdown, "text/markdown")}
+              onClick={() => downloadTextFile("daytrail-daily-report.md", reportMarkdown, "text/markdown")}
               type="button"
             >
               <Icon name="archive" />
@@ -5564,40 +5556,22 @@ function CommandOverlay({
 }) {
   const activeCommand = commandQuery.trim().startsWith("/")
     ? commandQuery.trim()
-    : "/what-did-i-do";
+    : "/today";
   const answerByCommand: Record<string, string> = {
+    "/today":
+      "Open Today to review the hour-by-hour timeline and recent work.",
+    "/activity":
+      "Open Activity to inspect apps, sites, folders, and source events.",
+    "/report":
+      "Generate the daily report from captured activity.",
     "/what-did-i-do":
       "Open Today to review the hour-by-hour timeline and recent work.",
     "/ai-usage":
-      "Open AI Impact to see tools, apps, folders, and sites where AI was detected.",
+      "Open Activity to see AI usage in context.",
     "/export":
-      "Open Export Data to preview JSON or run AI routine analysis for a date range.",
-    "/saved-notes":
-      "Open Saved Notes to review or delete notes attached to work.",
-    "/follow-ups":
-      "Open Needs Review to review unanswered messages, promises, away time, and unfinished AI work.",
+      "Open Export Data to preview or export local activity data.",
     "/eod":
       "Generate the daily report from captured activity.",
-    "/plan-week":
-      "Generate a weekly plan from captured work, promises, and follow-ups.",
-    "/context":
-      "No return-to-work marker is available yet.",
-    "/error-hunt":
-      "No error trail has been captured yet.",
-    "/ai-threads":
-      "No AI threads have been linked yet.",
-    "/pending":
-      "No follow-ups are currently loaded.",
-    "/stuck":
-      "No stuck flag has been captured yet.",
-    "/commitments":
-      "No commitments are currently loaded.",
-    "/reply-debt":
-      "No unanswered messages are currently loaded.",
-    "/field-visit":
-      "No field visit debrief is currently loaded.",
-    "/standup":
-      "No standup draft is available until work sessions are captured.",
   };
 
   return (
@@ -5642,7 +5616,7 @@ function CommandOverlay({
                 type="button"
               >
                 <strong>{commandLabels[command] ?? command}</strong>
-                <span>{command === "/eod" || command === "/plan-week" ? "Generate" : "Open"}</span>
+                <span>{command === "/report" || command === "/eod" ? "Generate" : "Open"}</span>
               </button>
             ))}
             {memoryResults.map((result) => (
@@ -5662,7 +5636,7 @@ function CommandOverlay({
             <p>
               {memoryResults[0]
                 ? memoryResults[0].snippet || memoryResults[0].title
-                : answerByCommand[activeCommand] ?? answerByCommand["/pending"]}
+                : answerByCommand[activeCommand] ?? answerByCommand["/today"]}
             </p>
             <span className="source-anchor" aria-label="Selected source">
               {memoryResults[0]

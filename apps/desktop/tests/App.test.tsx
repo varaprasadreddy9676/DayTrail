@@ -10,14 +10,6 @@ afterEach(() => {
   window.__TAURI_INTERNALS__ = undefined;
 });
 
-async function openCommandResult(
-  user: ReturnType<typeof userEvent.setup>,
-  name: RegExp,
-) {
-  await user.click(screen.getByRole("button", { name: /search work/i }));
-  await user.click(screen.getByRole("button", { name }));
-}
-
 async function openAiSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /^settings$/i }));
   await user.click(screen.getByRole("button", { name: /ai provider/i }));
@@ -50,7 +42,7 @@ describe("WorkTrace command center", () => {
     );
   });
 
-  it("adds a context-anchored note and toggles watcher status", async () => {
+  it("toggles watcher status from the sidebar", async () => {
     const user = userEvent.setup();
     const invoke = vi.fn(async (command: string) => {
       if (command === "pause_tracking") {
@@ -72,16 +64,6 @@ describe("WorkTrace command center", () => {
     };
 
     render(<App />);
-
-    await openCommandResult(user, /resume current context/i);
-
-    const quickNote = screen.getByRole("textbox", { name: /quick bullet/i });
-
-    await user.type(quickNote, "Follow up on Oval renewal");
-    await user.click(screen.getByRole("button", { name: /^add note$/i }));
-
-    expect(screen.getByText(/follow up on oval renewal/i)).toBeInTheDocument();
-    expect(quickNote).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: /^capturing$/i }));
 
@@ -124,33 +106,23 @@ describe("WorkTrace command center", () => {
     expect(screen.getByText(/openai compatible ready/i)).toBeInTheDocument();
   });
 
-  it("surfaces context restore clues and ritual execution controls", async () => {
+  it("keeps reports generic and generates a daily report", async () => {
     const user = userEvent.setup();
 
     render(<App />);
 
-    await openCommandResult(user, /resume current context/i);
-
-    expect(
-      screen.getByRole("heading", {
-        name: /no return marker yet/i,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /resume context/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/no related clues/i)).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: /^reports$/i }));
 
-    expect(screen.getByRole("button", { name: /end-of-day summary/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^summary$/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     await user.click(screen.getAllByRole("button", { name: /^generate$/i })[0]);
     expect(screen.getByLabelText(/generated report markdown/i).textContent).toMatch(
-      /daily work execution report/i,
+      /daily work report/i,
     );
+    expect(screen.queryByRole("button", { name: /client update/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /weekly review/i })).not.toBeInTheDocument();
   });
 
   it("hydrates command-center data from the Tauri today snapshot", async () => {
@@ -363,7 +335,7 @@ describe("WorkTrace command center", () => {
     render(<App />);
 
     expect((await screen.findAllByText(/sqlite capture block/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/needs review/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/follow-ups/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/ship backend wiring/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /capture paused/i })).toBeInTheDocument();
     expect(screen.getByText(/ai-active today/i)).toBeInTheDocument();
@@ -377,9 +349,6 @@ describe("WorkTrace command center", () => {
     expect(screen.getAllByText(/app\.tsx - worktrace/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/https:\/\/chatgpt\.com\/c\/thread/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: /close session details/i }));
-
-    await openCommandResult(user, /resume current context/i);
-    expect(screen.getByText(/backend note loaded from sqlite/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^activity$/i }));
 
@@ -448,7 +417,7 @@ describe("WorkTrace command center", () => {
     expect(screen.getAllByText(/\/users\/alice\/work\/billing-api/i).length).toBeGreaterThan(0);
   });
 
-  it("persists AI settings and generates weekly plans through Tauri", async () => {
+  it("persists AI settings and keeps reports generic", async () => {
     const user = userEvent.setup();
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
@@ -489,12 +458,6 @@ describe("WorkTrace command center", () => {
           aiEndpoint: patch.aiEndpoint,
           aiRedactSecrets: patch.aiRedactSecrets,
           fullClipboardHistory: patch.fullClipboardHistory,
-        };
-      }
-
-      if (command === "generate_weekly_plan") {
-        return {
-          bodyMarkdown: "# Weekly Plan\n\n## Must close\n- Close Oval billing validation",
         };
       }
 
@@ -540,15 +503,12 @@ describe("WorkTrace command center", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("generate_daily_report", undefined));
 
     await user.click(screen.getByRole("button", { name: /^reports$/i }));
-    await user.click(screen.getByRole("button", { name: /weekly review/i }));
-    await user.click(screen.getAllByRole("button", { name: /^generate$/i })[0]);
+    await user.click(screen.getByRole("button", { name: /^timeline$/i }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText(/generated report markdown/i).textContent,
-      ).toMatch(/weekly plan/i),
+    expect(screen.getByLabelText(/generated report markdown/i).textContent).toMatch(
+      /no source inputs captured yet/i,
     );
-    expect(invoke).toHaveBeenCalledWith("generate_weekly_plan", undefined);
+    expect(screen.queryByRole("button", { name: /weekly review/i })).not.toBeInTheDocument();
   });
 
   it("manages portable settings and database backup from storage settings", async () => {
@@ -807,7 +767,7 @@ describe("WorkTrace command center", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /allow app and window tracking|still not detected/i })).toBeInTheDocument();
-    expect(screen.getByText(/privacy & security > accessibility/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/privacy & security > accessibility/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/\/applications\/daytrail\.app/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /restart app/i }).length).toBeGreaterThan(0);
     expect(screen.getByText(/screenshots are off by default/i)).toBeInTheDocument();

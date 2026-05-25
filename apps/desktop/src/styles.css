@@ -342,6 +342,26 @@ dd {
   font-weight: 650;
 }
 
+.permission-path-helper {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.permission-path-helper span {
+  grid-column: 1;
+}
+
+.permission-path-helper .button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 .native-sidebar,
 .universal-toolbar,
 button {
@@ -2665,8 +2685,9 @@ textarea {
 
 .rituals-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
+  height: 100%;
 }
 
 .segmented-control {
@@ -3353,8 +3374,7 @@ textarea {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
-.activity-tabs,
-.report-output-tabs {
+.activity-tabs {
   display: flex;
   min-width: 0;
   gap: 18px;
@@ -3363,8 +3383,7 @@ textarea {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.activity-tabs button,
-.report-output-tabs button {
+.activity-tabs button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
@@ -3378,8 +3397,7 @@ textarea {
   white-space: nowrap;
 }
 
-.activity-tabs button[aria-selected="true"],
-.report-output-tabs button[aria-selected="true"] {
+.activity-tabs button[aria-selected="true"] {
   color: var(--accent-main);
   border-bottom-color: var(--accent-main);
 }
@@ -3980,38 +3998,44 @@ textarea {
 
 .reports-workspace {
   display: grid;
-  grid-template-columns: minmax(300px, 0.42fr) minmax(520px, 1fr) minmax(240px, 0.32fr);
+  grid-template-columns: minmax(260px, 0.34fr) minmax(560px, 1fr) minmax(230px, 0.28fr);
   gap: 12px;
-  min-height: calc(100% - 110px);
+  min-height: 0;
 }
 
 .report-type-tabs {
   display: flex;
+  width: fit-content;
+  max-width: 100%;
   gap: 8px;
   min-width: 0;
-  margin-bottom: 12px;
+  margin: 0;
   overflow-x: auto;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
 }
 
 .report-type-tabs button {
   display: inline-flex;
-  min-height: 42px;
+  min-height: 30px;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  color: var(--text-main);
-  background: var(--bg-raised);
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
 }
 
 .report-type-tabs button[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accent-main) 55%, var(--border-subtle));
-  color: var(--accent-main);
-  background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 var(--accent-main);
+  color: var(--text-main);
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-main) 45%, var(--border-subtle));
 }
 
 .report-input-panel,
@@ -4023,7 +4047,11 @@ textarea {
 }
 
 .report-output-panel {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.report-export-panel {
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .report-input-list {
@@ -4084,8 +4112,15 @@ textarea {
 
 .report-export-actions {
   grid-template-columns: 1fr;
+  align-content: start;
   padding: 14px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.output-actions {
+  align-items: center;
+  padding: 10px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .report-settings-list {

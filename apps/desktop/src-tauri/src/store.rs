@@ -5870,6 +5870,26 @@ fn stream_title(key: &str, events: &[StoredSourceEvent]) -> String {
 }
 
 fn session_title_from_events(events: &[StoredSourceEvent]) -> String {
+    let mut document_labels = Vec::new();
+    for event in events.iter().rev() {
+        if !event.event_type.contains("editor") {
+            continue;
+        }
+        if let Some(label) = event_preferred_title(event) {
+            if !is_generic_app_title(&label)
+                && !document_labels.iter().any(|existing| existing == &label)
+            {
+                document_labels.push(label);
+            }
+        }
+        if document_labels.len() == 3 {
+            return document_labels.join(" + ");
+        }
+    }
+    if !document_labels.is_empty() {
+        return document_labels.join(" + ");
+    }
+
     if let Some(folder) = events
         .iter()
         .rev()
