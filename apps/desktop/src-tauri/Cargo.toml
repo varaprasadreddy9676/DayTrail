@@ -1,0 +1,50 @@
+[package]
+name = "daytrail-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "DayTrail desktop shell"
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[lib]
+name = "worktrace_ai_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "daytrail"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+rusqlite = { version = "0.31", features = ["backup", "bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.0", features = ["image-png", "tray-icon"] }
+thiserror = "1.0"
+url = "2.5"
+worktrace-ai-engine = { path = "../../../crates/ai-engine" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+core-foundation-sys = "0.8.7"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSRunningApplication", "NSWorkspace", "libc"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSString"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59.0", features = [
+  "Win32_Foundation",
+  "Win32_Security_Credentials",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dev-dependencies]
+tempfile = "3.10"

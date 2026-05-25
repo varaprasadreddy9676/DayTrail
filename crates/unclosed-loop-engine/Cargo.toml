@@ -1,0 +1,13 @@
+[package]
+name = "worktrace-unclosed-loop-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+worktrace-inbox-engine = { path = "../inbox-engine" }
+
+[lib]
+name = "worktrace_unclosed_loop_engine"
+path = "src/lib.rs"
+

@@ -1,0 +1,97 @@
+{
+  "name": "worktrace-ai-vscode-extension",
+  "displayName": "WorkTrace AI Editor Bridge",
+  "description": "Captures active VS Code and Cursor editor context metadata for the local WorkTrace AI desktop bridge.",
+  "version": "0.1.0",
+  "private": false,
+  "license": "MIT OR Apache-2.0",
+  "type": "commonjs",
+  "main": "./src/extension.js",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:worktrace.captureActiveEditor",
+    "onCommand:worktrace.flushEditorContext"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "worktrace.captureActiveEditor",
+        "title": "WorkTrace: Capture Active Editor Context"
+      },
+      {
+        "command": "worktrace.flushEditorContext",
+        "title": "WorkTrace: Flush Editor Context"
+      }
+    ],
+    "configuration": {
+      "title": "WorkTrace AI Editor Tracking",
+      "properties": {
+        "worktrace.editorTracking.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture active editor context metadata for WorkTrace AI."
+        },
+        "worktrace.editorTracking.includeContentHash": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hash active editor contents for deduplication without storing contents."
+        },
+        "worktrace.editorTracking.batchDelayMs": {
+          "type": "number",
+          "default": 750,
+          "minimum": 100,
+          "maximum": 10000,
+          "description": "Delay before sending a partially filled editor context batch."
+        },
+        "worktrace.editorTracking.maxBatchSize": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum editor context events per bridge batch."
+        },
+        "worktrace.editorTracking.maxQueueSize": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum queued editor context events before oldest events are dropped."
+        },
+        "worktrace.editorTracking.bridgeCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Optional native host or desktop bridge command. When empty, events are written to bridgeFile as JSON lines."
+        },
+        "worktrace.editorTracking.bridgeArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to bridgeCommand."
+        },
+        "worktrace.editorTracking.bridgeFile": {
+          "type": "string",
+          "default": "~/.worktrace/editor-bridge.jsonl",
+          "description": "Fallback desktop bridge JSONL file used when bridgeCommand is not configured."
+        },
+        "worktrace.editorTracking.bridgeTimeoutMs": {
+          "type": "number",
+          "default": 2500,
+          "minimum": 500,
+          "maximum": 30000,
+          "description": "Timeout for native bridge command responses."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check src/context.js && node --check src/bridge.js && node --check src/batching.js && node --check src/extension.js"
+  }
+}

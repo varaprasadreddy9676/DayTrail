@@ -1,0 +1,10 @@
+[package]
+name = "worktrace-report-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "worktrace_report_engine"
+path = "src/lib.rs"
+

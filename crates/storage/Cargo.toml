@@ -1,0 +1,10 @@
+[package]
+name = "worktrace-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "worktrace_storage"
+path = "src/lib.rs"
+

@@ -1,0 +1,7 @@
+{
+  "name": "ai.daytrail.desktop",
+  "description": "DayTrail local browser bridge",
+  "path": "/Users/example/.daytrail/ai.daytrail.desktop-native-host",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://__EXTENSION_ID__/"]
+}

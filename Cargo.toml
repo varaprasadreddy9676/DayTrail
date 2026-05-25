@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  "crates/core",
+  "crates/privacy",
+  "crates/agent",
+  "crates/sessionizer",
+  "crates/task-engine",
+  "crates/inbox-engine",
+  "crates/unclosed-loop-engine",
+  "crates/report-engine",
+  "crates/ai-engine",
+  "crates/storage",
+  "crates/plugin-sdk",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+

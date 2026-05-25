@@ -1,0 +1,13 @@
+[package]
+name = "worktrace-task-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+worktrace-core = { path = "../core" }
+
+[lib]
+name = "worktrace_task_engine"
+path = "src/lib.rs"
+

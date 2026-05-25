@@ -1,0 +1,10 @@
+[package]
+name = "worktrace-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "worktrace_plugin_sdk"
+path = "src/lib.rs"
+

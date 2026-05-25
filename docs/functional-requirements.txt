@@ -1,0 +1,2450 @@
+Status note: this document is the product requirements backlog and acceptance target for WorkTrace AI. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
+
+Below is the **complete comprehensive functional requirements document** for WorkTrace AI, focused only on **what the product must do**, not the technical implementation.
+
+This includes the original work command center requirements plus the later refined direction: **state recovery for your own brain**, context-anchored scratchpad, parallel streams, interrupted state snapshots, clipboard stitching, return-to-work markers, ghost agent monitoring, and developer-focused rescue scenarios. Those additions came from the uploaded notes describing WorkTrace as a “state recovery” system for high-context multitasking and short-term memory restoration.  The practical developer use cases like rabbit-hole backtracking, stale hypothesis detection, scattered AI chat finding, clipboard overflow, and ghost agent monitoring are also incorporated. 
+
+# WorkTrace AI — Complete Functional Requirements
+
+## 1. Product Vision
+
+WorkTrace AI shall be a **local-first AI work command center** that helps users recover, understand, plan, and explain their work.
+
+The product must help users answer:
+
+```text
+What was I doing?
+Where did I stop?
+What did I complete?
+What did I miss?
+Who do I need to reply to?
+What did I promise?
+What is at risk?
+Which AI tool helped me?
+Which AI thread had that solution?
+Why did I change this file?
+What should I do next?
+What should I tell my manager/client/team?
+```
+
+The core promise:
+
+```text
+Never lose track of what you did, what you promised, what is pending, where you stopped, and what to do next.
+```
+
+The product should not be only a time tracker. It should be:
+
+```text
+Personal work memory
+Task recovery system
+Commitment tracker
+AI usage ledger
+Context restoration engine
+Daily/weekly reporting assistant
+Planning assistant
+Developer safety net
+Client/meeting follow-up assistant
+```
+
+---
+
+# 2. Product Positioning
+
+## 2.1 What WorkTrace AI is
+
+WorkTrace AI is a system that observes real work signals and converts them into meaningful work memory.
+
+It should capture:
+
+```text
+Apps
+Browser activity
+AI tool usage
+Emails
+Calendar events
+Meetings
+Developer activity
+Terminal/agent activity
+Clipboard transitions
+Manual notes
+Idle/away time
+Field/client visits
+Documents
+Tasks
+Commitments
+```
+
+It should produce:
+
+```text
+Work sessions
+Parallel work streams
+Context markers
+Pending replies
+Tasks
+Commitments
+Unclosed loops
+AI-assisted outputs
+Daily reports
+Weekly reports
+Decision logs
+Risk register
+Next best actions
+Project/client memory
+```
+
+## 2.2 What WorkTrace AI is not
+
+It should not be positioned as:
+
+```text
+Employee surveillance software
+Simple time tracker
+Simple task manager
+Screen recorder
+Meeting transcription-only tool
+Calendar-only planner
+ClickUp/Jira replacement
+```
+
+It may integrate with project tools, but its primary job is to recover actual work context and prevent missed commitments.
+
+---
+
+# 3. Core User Problems
+
+## 3.1 Context loss
+
+Users jump between tasks, AI tools, code, meetings, emails, and urgent requests. They lose track of:
+
+```text
+What they were doing
+Why they were doing it
+What they already tried
+Which AI answer was useful
+Where they stopped
+What should happen next
+```
+
+## 3.2 Missed replies
+
+Users open emails or messages, mentally plan to respond, but forget to reply.
+
+## 3.3 Forgotten commitments
+
+Users say or write:
+
+```text
+I will share it tomorrow.
+I will check and update.
+We will confirm by EOD.
+I will send the MoM.
+Let me verify and get back.
+```
+
+Then those commitments disappear into emails, meetings, calls, and notes.
+
+## 3.4 Invisible AI-assisted work
+
+Users use ChatGPT, Claude, Gemini, Cursor, Copilot, Codex, Cline, Aider, and other tools, but cannot later explain:
+
+```text
+Where AI helped
+What AI produced
+Which output came from AI
+Which AI conversation had the solution
+```
+
+## 3.5 Invisible offline work
+
+Users attend face-to-face meetings, client visits, field visits, phone calls, and discussions away from the laptop. Normal app trackers show idle time, but the user was actually working.
+
+## 3.6 End-of-day reporting difficulty
+
+Users work all day but cannot explain their progress clearly to management, clients, or themselves.
+
+## 3.7 Parallel work streams
+
+A chronological timeline becomes messy when the user switches between 3–5 different work streams throughout the day. Users need separated streams, not just a single time list. 
+
+---
+
+# 4. User Roles and Role-Specific Requirements
+
+## 4.1 Fresher / Junior Developer
+
+### Problems
+
+```text
+Forgets assigned task details
+Gets stuck silently
+Cannot explain progress
+Does not know what doubts to ask
+Uses AI without understanding how to report it
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Stuck detector
+Doubt list generator
+Standup update generator
+Task understanding reminder
+Learning log
+Senior clarification tracker
+Blocked-state warning
+```
+
+### Example output
+
+```text
+You worked on the billing save issue for 2h 15m.
+You checked BillingServlet, validation flow, and asked AI about payer validation.
+No final commit/update found.
+
+Suggested standup:
+Yesterday I investigated the billing save issue for insurance cases. I checked BillingServlet and payer validation flow. I am blocked on expected sponsor validation behavior and need confirmation.
+```
+
+---
+
+## 4.2 Experienced Developer
+
+### Problems
+
+```text
+Debugging trail gets lost
+Production issues interrupt planned work
+PR review work is invisible
+AI-assisted debugging is scattered
+Uncommitted changes become confusing later
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Debugging timeline
+Rabbit-hole backtrack
+Stale hypothesis detector
+PR review tracker
+Incident journal
+AI thread finder
+Ghost agent monitor
+Uncommitted diff warning
+```
+
+The stale hypothesis detector must help the user remember why a file was changed or why code was commented out during an experiment. 
+
+---
+
+## 4.3 Tech Lead
+
+### Problems
+
+```text
+Handles many small escalations
+Unblocks people all day
+Makes many commitments
+Delegates tasks but forgets follow-up
+Needs management-ready updates
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Commitment tracker
+Delegation tracker
+Unblocking log
+Decision log
+Team follow-up radar
+Risk register
+Daily management report
+Weekly leadership report
+```
+
+---
+
+## 4.4 Engineering Manager
+
+### Problems
+
+```text
+Many meetings, unclear outcomes
+People follow-ups missed
+Delivery risks scattered
+Hard to explain what moved this week
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Meeting outcome tracker
+People follow-up tracker
+Delivery risk register
+Weekly leadership summary
+Private manager notes
+Slippage explanation
+Commitment risk dashboard
+```
+
+---
+
+## 4.5 Product Manager / Product Owner
+
+### Problems
+
+```text
+Requirements scattered across emails/calls/docs
+Scope confusion
+Feature vs customization ambiguity
+Decision history lost
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Requirement capture
+Scope classifier
+Feature vs customization detector
+Decision history
+Client-wise requirement memory
+Roadmap impact summary
+Context pack generator
+```
+
+---
+
+## 4.6 Support / Implementation Engineer
+
+### Problems
+
+```text
+Client issues come from calls/emails/messages
+Root cause forgotten
+Follow-ups missed
+Waiting-for-client/vendor unclear
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Client issue memory
+Ticket auto-summary
+Root cause tracker
+Waiting-for-client tracker
+Repeated issue detector
+Vendor follow-up tracker
+Support day summary
+```
+
+---
+
+## 4.7 Sales / Consultant / Client-Facing Lead
+
+### Problems
+
+```text
+Client visits happen offline
+Commitments are made verbally
+Proposal/MoM follow-ups missed
+Pre-call context forgotten
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Client visit clocking
+On-site visit debrief
+Pre-call briefing
+Client pain point capture
+Opportunity tracker
+Proposal reminder
+Follow-up email generator
+Client commitment tracker
+```
+
+---
+
+## 4.8 Founder / Leadership
+
+### Problems
+
+```text
+Needs visibility without micromanagement
+Needs strategic progress summary
+Needs commitment and risk visibility
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Executive weekly summary
+Strategic work timeline
+Client promise register
+Decision memory
+Risk dashboard
+What changed this week report
+```
+
+---
+
+## 4.9 Freelancer
+
+### Problems
+
+```text
+Multiple clients
+Billable/non-billable confusion
+Scope creep
+Proof of work
+Follow-up tracking
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Client-wise work ledger
+Billable session summary
+Scope creep detector
+Invoice summary generator
+Client follow-up tracker
+```
+
+---
+
+## 4.10 Student / Learner
+
+### Problems
+
+```text
+Studied many topics but forgot what
+Used AI to learn but no notes
+Assignments pending
+Doubts scattered
+```
+
+### Functional requirements
+
+The system shall provide:
+
+```text
+Learning journal
+AI-assisted learning summary
+Assignment tracker
+Doubt tracker
+Revision plan
+Study timeline
+```
+
+---
+
+# 5. Core Functional Modules
+
+## 5.1 Today Command Center
+
+The system shall provide a central dashboard showing the real state of the day.
+
+### Must show
+
+```text
+Today’s planned commitments
+Current active work
+Parallel active streams
+Completed work
+Pending replies
+Pending tasks
+Unclosed loops
+Commitments due today
+At-risk commitments
+Meetings
+Field visits
+Idle/away blocks needing classification
+AI-assisted outputs
+Ghost agent alerts
+Next best action
+Generate daily report button
+```
+
+### Must support actions
+
+```text
+Mark done
+Snooze
+Ignore
+Create task
+Create commitment
+Generate reply
+Generate MoM
+Generate report
+Add note
+Classify idle block
+Resume context
+```
+
+---
+
+## 5.2 Work Session Tracking
+
+The system shall convert raw activity into meaningful work sessions.
+
+### Inputs
+
+```text
+App/window activity
+Browser tabs
+Email threads
+Calendar events
+Meetings
+AI tools
+Documents
+Developer activity
+Terminal activity
+Clipboard transitions
+Manual notes
+Idle recovery
+Field visits
+```
+
+### Work session fields
+
+```text
+Title
+Project/client
+Category
+Start time
+End time
+Duration
+Status
+AI used yes/no
+Tools used
+Related task
+Related commitment
+Related email
+Related meeting
+Related field visit
+Related decision
+Evidence
+Confidence
+User correction flag
+```
+
+### Work session statuses
+
+```text
+In progress
+Completed
+Drafted
+Pending send
+Waiting
+Blocked
+Dormant
+Unknown
+Ignored
+```
+
+---
+
+## 5.3 Parallel Stream Timeline
+
+The system shall not only show one chronological timeline.
+
+It must separate the day into semantic parallel streams, such as:
+
+```text
+Backend API
+Client Communication
+DevOps Alert
+Tally Integration
+AG Diagnostics
+Oval MoM
+MongoDB Debugging
+```
+
+This requirement comes from the idea that a normal chronological timeline becomes useless when a user is jumping rapidly between multiple streams. 
+
+### Each stream must show
+
+```text
+Stream title
+Start/end
+Related events
+Related apps
+Related AI chats
+Related documents
+Related tasks
+Related commits
+Status
+Summary
+Last known state
+Next action
+```
+
+### Example
+
+```text
+Thread 1 — Backend API
+[Code session] → [Claude prompts] → [Terminal error] → [Git diff]
+
+Thread 2 — Client Comms
+[Email thread] → [ChatGPT draft] → [Gmail compose] → [Reply sent]
+
+Thread 3 — DevOps Alert
+[Terminal] → [Docs] → [Fix] → [Notification closed]
+```
+
+---
+
+## 5.4 Context-Anchored Workspace Scratchpad
+
+The system shall provide a scratchpad that changes based on current context.
+
+### Contexts may include
+
+```text
+Git repository
+Git branch
+Workspace folder
+Website domain
+Email thread
+Project/client
+Document
+Meeting
+```
+
+### Behavior
+
+When user switches to Project A, the Project A scratchpad appears.
+
+When user switches to Project B, Project B’s scratchpad appears.
+
+When user returns to Project A, previous Project A notes reappear.
+
+This helps prevent scratchpad notes from becoming detached from the actual work context. 
+
+### Scratchpad functions
+
+```text
+Add quick bullet
+Pin note
+Convert note to task
+Convert note to commitment
+Attach note to session
+Attach note to project
+Generate summary from notes
+```
+
+---
+
+## 5.5 Interrupted State Snapshot
+
+The system shall detect sharp context switches and capture a lightweight state snapshot.
+
+### Trigger
+
+A snapshot should be considered when:
+
+```text
+User is actively coding/debugging/writing
+Then switches to unrelated app/domain
+And stays away for more than configured threshold
+```
+
+### Snapshot may store
+
+```text
+Active workspace
+Active file
+Cursor line/position if available
+Last terminal output tail
+Git diff summary
+Last AI prompt summary
+Current browser tab title/domain
+Current task/session
+Short summary of what user was doing
+```
+
+This feature addresses the pain of leaving a debugging/coding loop and later forgetting the exact state. 
+
+### Privacy
+
+The snapshot should be metadata-first and should avoid storing large raw diffs or sensitive content unless explicitly enabled.
+
+---
+
+## 5.6 Return-to-Work Context Marker
+
+When user returns to a workspace after time away, the system shall show a small context marker.
+
+### Example
+
+```text
+Last active here: 3 hours ago.
+
+State:
+You were modifying database connection pool settings in config.json.
+
+AI Context:
+Claude suggested increasing the pool size to 50 to reduce timeout errors.
+
+Next likely step:
+Test the new setting and check connection pool logs.
+```
+
+This requirement is based on the uploaded idea of automatically generating a short “Context Marker” when returning to a workspace. 
+
+### Must include
+
+```text
+Last active time
+What user was doing
+Why they were doing it if known
+Last useful clue
+Related AI thread
+Related file/document/email
+Suggested next action
+```
+
+---
+
+## 5.7 Rabbit-Hole Backtrack
+
+The system shall help users reconstruct debugging or research paths.
+
+### Scenario
+
+User spends 45 minutes searching docs, GitHub issues, terminal errors, and AI chats, then gets interrupted and loses the thread.
+
+### Requirement
+
+User can ask:
+
+```text
+Show my error hunt.
+Where did I stop?
+What did I try for this error?
+Which page had the useful solution?
+```
+
+### Output
+
+```text
+Your Error Hunt Path:
+- Failed: npm i --legacy-peer-deps failed with Code 1
+- Discovered: GitHub Issue #402 about Webpack version mismatch
+- Tried: version override in package.json
+- Last action: halfway through applying override
+- Suggested next: finish package override and rerun build
+```
+
+This is based on the uploaded “Rabbit Hole Backtrack” scenario. 
+
+---
+
+## 5.8 Stale Hypothesis Detector
+
+The system shall detect risky uncommitted changes that were made during temporary experimentation.
+
+### Detect
+
+```text
+Commented-out code
+Large uncommitted diff
+Security/validation block removed
+Temporary logs/debug statements
+Config changes
+Database migration changes
+```
+
+### Context matching
+
+The system should match file modification times against:
+
+```text
+Browser activity
+Terminal activity
+AI activity
+Manual notes
+Work sessions
+```
+
+### Example
+
+```text
+Uncommitted State Warning:
+You commented out lines 45–60 in auth.js at 11:14 AM while testing a local CORS issue.
+You never reverted this before switching to database migration work.
+```
+
+This comes from the uploaded “Stale Hypothesis Detector” scenario. 
+
+---
+
+## 5.9 Scattered AI Chat Finder
+
+The system shall help users find which AI tool/thread had a specific solution.
+
+### Sources
+
+```text
+ChatGPT tabs
+Claude tabs
+Gemini tabs
+Cursor chats
+Cline sessions
+Aider sessions
+Codex sessions
+Local AI tools
+```
+
+### User commands
+
+```text
+Show AI threads for this project.
+Which AI chat had the regex solution?
+Find the Claude thread about user model refactor.
+Show AI chats used while this repo was open.
+```
+
+### Output
+
+```text
+AI threads related to /backend:
+- Claude — Refactoring User Models
+- ChatGPT — Regex script for log parsing
+- Cursor — Billing validation change
+```
+
+This directly reflects the uploaded scattered AI chat scenario. 
+
+---
+
+## 5.10 Clipboard Context Stitching
+
+The system shall use clipboard activity to connect related work sessions.
+
+### Behavior
+
+If user copies text/code/error from one app and pastes into another app, the system should infer those sessions are related.
+
+Examples:
+
+```text
+Terminal error copied → ChatGPT tab
+AI-generated code copied → VS Code
+Email text copied → document
+SQL copied → DB client
+```
+
+This helps link sessions even when app/window titles are not enough. The uploaded notes describe clipboard activity as a strong signal for stitching work context. 
+
+### Functional requirements
+
+The system shall track:
+
+```text
+Clipboard content hash
+Content type
+Source app
+Target app
+Short preview if enabled
+Related session
+Related stream
+Related project
+```
+
+### Privacy requirements
+
+Default should be:
+
+```text
+Hash + type + size + short safe preview only
+```
+
+Full clipboard history should be opt-in.
+
+---
+
+## 5.11 Clipboard Overflow Safety Net
+
+The system shall help recover recently overwritten clipboard content.
+
+### Scenario
+
+User copies a large SQL migration from AI, then accidentally overwrites clipboard by copying an error message.
+
+### Requirement
+
+The user should be able to open WorkTrace and retrieve important recent clipboard items, especially:
+
+```text
+Code blocks
+SQL
+JSON
+Config
+Commands
+Long structured text
+AI-generated output
+```
+
+This is based on the uploaded “Clipboard Overflow” scenario. 
+
+### User controls
+
+```text
+Enable/disable clipboard history
+Clear clipboard history
+Exclude apps/domains
+Set retention period
+Disable full content storage
+```
+
+---
+
+## 5.12 Ghost Agent Monitor
+
+The system shall detect long-running developer agents or commands that finish/fail while user is focused elsewhere.
+
+### Examples
+
+```text
+Aider
+Claude Code
+Cline
+Codex CLI
+Long-running test suite
+Build process
+Migration script
+Deployment script
+Local server
+```
+
+### Requirement
+
+If a tagged terminal process finishes, errors, or stalls while user is elsewhere, system should notify.
+
+### Example notification
+
+```text
+Local Loop Stalled:
+The autonomous refactor script in /backend encountered a compiler syntax error and exited after 14 seconds.
+```
+
+This comes from the uploaded “Ghost Agent Monitor” scenario. 
+
+### Monitor states
+
+```text
+Running
+Completed
+Failed
+Stalled
+Waiting for input
+Long idle
+Exited
+Unknown
+```
+
+---
+
+## 5.13 Reply Debt Radar
+
+The system shall detect emails/messages that likely need user response.
+
+### Detect
+
+```text
+Opened but not replied
+Latest message from someone else
+Direct question asked
+Deadline mentioned
+Client/manager/vendor sender
+Draft created but not sent
+Opened multiple times
+Marked unread again
+Commitment language present
+```
+
+### Classification
+
+```text
+High priority
+Medium priority
+Low priority
+Waiting for others
+FYI / no action
+Drafted but not sent
+```
+
+### Output
+
+```text
+Reply risks today:
+1. Oval — effort expected by tomorrow
+2. AG Diagnostics — feasibility confirmation pending
+3. Raghav — sample data clarification pending
+```
+
+---
+
+## 5.14 Draft Graveyard
+
+The system shall identify unfinished drafts and unsent outputs.
+
+### Sources
+
+```text
+Gmail drafts
+AI-generated replies
+Reports generated but not exported
+Meeting notes created but not sent
+Docs created but not shared
+Slack/message drafts if detectable
+```
+
+### Output
+
+```text
+Drafts waiting for closure:
+1. AG Diagnostics feasibility reply
+2. Oval MoM
+3. Internal task delay mail
+```
+
+---
+
+## 5.15 Promise / Commitment Tracker
+
+The system shall detect promises from emails, meetings, notes, AI chats, and manual entries.
+
+### Detect language
+
+```text
+I will share it tomorrow.
+I’ll check and update.
+We will confirm by EOD.
+I’ll send the MoM.
+Let me verify and get back.
+Will discuss internally and update.
+Need to send this by Friday.
+```
+
+### Commitment fields
+
+```text
+Title
+Source
+Committed to whom
+Target date
+Priority
+Status
+Risk level
+Evidence
+Confidence
+Related project/client
+Related task
+```
+
+### Statuses
+
+```text
+Captured
+Committed
+In progress
+Drafted
+Done
+Waiting
+Blocked
+Missed
+Deferred
+Cancelled
+```
+
+---
+
+## 5.16 Task Recovery Engine
+
+The system shall automatically create and manage tasks from work signals.
+
+### Sources
+
+```text
+Emails
+Meetings
+Manual notes
+AI chats
+Slack/Teams
+Calendar
+Documents
+Browser activity
+Git/PR activity
+Field visits
+Idle recovery notes
+Clipboard context
+Terminal/agent events
+```
+
+### Task lifecycle
+
+```text
+Captured
+Not Started
+In Progress
+Drafted
+Waiting for Reply
+Waiting for Someone
+Blocked
+Completed
+Dormant
+Ignored
+Archived
+```
+
+### Task features
+
+```text
+Source evidence
+Due date extraction
+Owner detection
+Priority scoring
+Duplicate merging
+Dormant detection
+Project/client mapping
+Target date
+```
+
+---
+
+## 5.17 Unclosed Loop Detector
+
+The system shall detect work that started but did not finish.
+
+### Detect
+
+```text
+Email opened but no reply
+Draft created but not sent
+Meeting happened but no notes/actions
+AI generated draft but no final action
+Document worked on but not shared/exported
+Task started but not completed
+Promise made but no follow-up
+Deadline mentioned but no task
+Code/debugging started but no commit/update
+Client visit happened but no debrief
+Agent command failed but no follow-up
+Temporary code change not reverted
+```
+
+### Actions
+
+```text
+Mark done
+Snooze
+Ignore
+Create task
+Merge task
+Waiting for someone
+Blocked
+Generate reply
+Generate report
+Resume context
+```
+
+---
+
+## 5.18 Commitment & Planning Engine
+
+The system shall support planning by day, week, and target date.
+
+### Views
+
+```text
+Today Plan
+This Week Plan
+Commitments
+Due Today
+Due This Week
+At Risk
+Waiting for Others
+Deferred
+Completed This Week
+```
+
+### Morning planning
+
+The system should generate:
+
+```text
+Must close today
+Should progress today
+Can defer
+Waiting for others
+At risk
+Calendar load
+Suggested focus blocks
+```
+
+### Weekly planning
+
+The system should generate:
+
+```text
+Client commitments
+Technical commitments
+Internal/team commitments
+Reports/documents due
+Field visits
+High-risk tasks
+```
+
+### Target-date planning
+
+User can ask:
+
+```text
+What should I finish by Friday?
+What commitments are due tomorrow?
+What is at risk this week?
+Can I realistically finish this today?
+```
+
+---
+
+## 5.19 Capacity-Aware Planning
+
+The system shall plan based on realistic capacity.
+
+### Inputs
+
+```text
+Calendar meetings
+Ad-hoc meetings
+Field visits
+Travel time
+Existing deadlines
+Pending replies
+Task size estimates
+Past interruption history
+Deep work availability
+```
+
+### Example
+
+```text
+Tomorrow has 4 hours of meetings and 2 hours of client travel.
+Recommended commitments:
+- Close 2 high-priority replies
+- Prepare 1 MoM
+- Do not commit to completing full Tally document.
+```
+
+---
+
+## 5.20 Smart Idle / Away Time Recovery
+
+The system shall detect significant away-from-laptop periods and prompt the user to classify them.
+
+### Prompt
+
+```text
+You were away from 2:10 PM to 2:52 PM.
+How should I record this?
+
+Break
+Lunch
+Client call
+Face-to-face meeting
+Phone call
+Travel
+Thinking / planning
+Personal time
+Do not record
+Add custom note
+```
+
+### Smart suggestions should use
+
+```text
+Calendar meeting overlap
+Meeting app opened before idle
+Previous active task
+Next active task
+Time of day
+Field visit status
+User history
+Recurring patterns
+```
+
+### Idle categories
+
+```text
+Break
+Lunch
+Personal
+Thinking/planning
+Phone call
+Face-to-face discussion
+Client meeting
+Internal meeting
+Travel
+Field visit
+Waiting
+System locked but working elsewhere
+Unknown
+Ignored
+```
+
+---
+
+## 5.21 Field Visit / Client Visit Clocking
+
+The system shall support non-laptop work.
+
+### Use cases
+
+```text
+Client site visit
+Hospital visit
+Face-to-face meeting
+Demo
+Training
+Workshop
+Travel
+On-site support
+Implementation discussion
+```
+
+### Clocking modes
+
+```text
+Manual start/end
+Calendar-assisted detection
+Optional mobile/location-assisted detection
+```
+
+### Field visit fields
+
+```text
+Client/project
+Location
+Visit type
+Start time
+End time
+Travel start/end
+People met
+Purpose
+Summary
+Decisions
+Action items
+Follow-ups
+Attachments/photos optional
+Linked calendar event
+Linked tasks
+Linked report
+```
+
+---
+
+## 5.22 On-site Visit Debrief
+
+After ending a client visit, the system shall ask:
+
+```text
+What happened in this visit?
+```
+
+The user may type or speak rough notes.
+
+The system shall generate:
+
+```text
+Visit summary
+Client pain points
+Decisions
+Action items
+Follow-up email draft
+Management report line
+Project memory update
+```
+
+---
+
+## 5.23 Meeting Intelligence
+
+The system shall support scheduled and ad-hoc meetings.
+
+### Capture
+
+```text
+Calendar meetings
+Google Meet
+Zoom
+Microsoft Teams
+Slack huddles
+Jitsi
+Manual meeting notes
+```
+
+### Extract
+
+```text
+Summary
+Action items
+Owners
+Deadlines
+Decisions
+Risks
+Open questions
+Follow-up emails needed
+```
+
+### Meeting-to-action closure
+
+The system shall track:
+
+```text
+Meeting happened
+Actions extracted
+Tasks created
+Follow-up sent?
+Closed or pending?
+```
+
+---
+
+## 5.24 Ad-hoc Meeting Detection
+
+The system shall detect unplanned meetings.
+
+### Signals
+
+```text
+Meeting app active
+No matching calendar event
+Long idle/call duration
+Manual note after meeting
+Browser meeting URL
+```
+
+### Prompt
+
+```text
+Looks like you had an ad-hoc meeting for 37 minutes.
+What was it about?
+```
+
+The system shall convert the answer into:
+
+```text
+Work session
+Meeting record
+Action items
+Commitments
+Daily report entry
+```
+
+---
+
+## 5.25 AI-Assisted Output Ledger
+
+The system shall track outputs created with AI help.
+
+### Output types
+
+```text
+Email reply
+MoM
+Technical explanation
+Code
+Query fix
+Requirement document
+Architecture design
+Interview questions
+Slack update
+Proposal
+Daily report
+Client summary
+Debugging analysis
+```
+
+### Fields
+
+```text
+Output title
+AI tool used
+Source context
+Final destination
+Status: Drafted / Sent / Shared / Completed
+Related project/client
+Evidence
+Confidence
+```
+
+---
+
+## 5.26 AI Contribution Report
+
+The system shall generate daily and weekly AI contribution reports.
+
+### Must show
+
+```text
+AI tools used
+AI usage by category
+AI-assisted outputs
+AI usage by project/client
+Drafts generated by AI but not closed
+AI-assisted completed work
+```
+
+### Example
+
+```text
+AI-assisted work today:
+- Client communication: 1h 20m
+- Technical debugging: 45m
+- Documentation: 2h
+- Requirement analysis: 1h
+- Product thinking: 50m
+```
+
+---
+
+## 5.27 Decision Log Auto-Capture
+
+The system shall capture decisions from meetings, emails, notes, AI discussions, and reports.
+
+### Decision fields
+
+```text
+Decision
+Reason
+Source
+Date
+People involved
+Project/client
+Evidence
+Related task
+Related meeting
+Related email
+```
+
+### Example
+
+```text
+Decision:
+Public HTML result links are not feasible.
+
+Reason:
+Base64 data is required for EMR and AI-based downstream analysis.
+```
+
+---
+
+## 5.28 Project / Client Memory Pages
+
+The system shall maintain a living page for every project/client.
+
+### Sections
+
+```text
+Latest status
+Open tasks
+Pending replies
+Commitments
+Decisions
+Meetings
+Field visits
+AI-assisted outputs
+Documents/reports
+People involved
+Timeline
+Risks
+Next actions
+```
+
+---
+
+## 5.29 Work Memory Chat
+
+The user shall be able to ask questions over local work memory.
+
+### Example questions
+
+```text
+Where did I stop?
+What was I doing before lunch?
+Did I reply to Sampat?
+What did I promise Oval?
+What did I use AI for today?
+Which AI chat had that solution?
+Why did I change auth.js?
+What is pending from yesterday?
+Why did Tally document get delayed?
+What should I close before EOD?
+```
+
+### Answers must include
+
+```text
+Answer
+Source evidence
+Confidence
+Related sessions/tasks
+Suggested next action
+```
+
+---
+
+## 5.30 Next Best Action
+
+The system shall recommend what the user should do next.
+
+### Inputs
+
+```text
+Pending replies
+Due commitments
+At-risk tasks
+Calendar capacity
+Draft graveyard
+Unclosed loops
+SLA risks
+Project priority
+Relationship priority
+Current context
+```
+
+### Example
+
+```text
+Recommended next actions:
+1. Send AG Diagnostics reply — drafted but not sent
+2. Finalize Oval MoM — promised by tomorrow
+3. Reply to Raghav — direct question pending
+4. Continue Tally document — dormant from yesterday
+```
+
+---
+
+## 5.31 End-of-Day Shutdown Ritual
+
+The system shall guide the user through closure at day end.
+
+### Prompt
+
+```text
+Before you close:
+- 3 pending replies
+- 2 promises due tomorrow
+- 1 meeting without notes
+- 2 tasks touched but not closed
+- 1 AI draft not sent
+- 1 agent failed without follow-up
+
+Generate report?
+Create tomorrow priority list?
+Snooze low-priority items?
+```
+
+### Outputs
+
+```text
+Daily management report
+Tomorrow plan
+Carried-forward tasks
+Pending reply list
+Commitment risk list
+AI contribution summary
+```
+
+---
+
+## 5.32 Morning Planning Ritual
+
+At start of day, the system shall suggest a plan.
+
+### Output
+
+```text
+Must close today
+Should progress today
+Can defer
+Waiting for others
+At risk
+Calendar load
+Suggested focus blocks
+```
+
+---
+
+## 5.33 Weekly Planning & Weekly Review
+
+### Weekly planning
+
+```text
+This week’s commitments
+Project-wise goals
+Client commitments
+Technical deliverables
+Management updates
+Field visits
+High-risk items
+```
+
+### Weekly review
+
+```text
+Committed
+Completed
+Moved
+Missed
+AI-assisted completions
+Ad-hoc work impact
+Meeting load
+Risks
+Next week priorities
+```
+
+---
+
+## 5.34 Work Interruption Explanation
+
+The system shall explain why planned work slipped.
+
+### Example
+
+```text
+Tally document was not completed because:
+- 2 ad-hoc meetings consumed 1h 20m
+- 4 urgent emails required response
+- 1 technical debugging session took 45m
+- AG Diagnostics reply took priority
+```
+
+---
+
+## 5.35 Planned vs Actual View
+
+The system shall compare planned work with actual work.
+
+### Example
+
+```text
+Planned:
+- Finish Oval MoM
+- Reply to AG Diagnostics
+- Work on Tally document
+
+Actual:
+- Replied to AG Diagnostics
+- Handled MongoDB issue
+- Joined 2 ad-hoc meetings
+- Oval MoM partially drafted
+
+Carried forward:
+- Tally document
+```
+
+---
+
+## 5.36 Work Closure Score
+
+The system shall avoid toxic productivity scoring.
+
+Instead, it shall show work closure.
+
+### Example
+
+```text
+Work closure today:
+- 8 tasks captured
+- 5 completed
+- 2 waiting
+- 1 unclosed
+- 3 pending replies
+- 2 promises due tomorrow
+```
+
+---
+
+## 5.37 Stuck Detector
+
+The system shall detect possible stuck states.
+
+### Signals
+
+```text
+Same task active for long time
+Repeated searches around same error
+Repeated AI prompts around same issue
+No commit/update
+No status message sent
+Long debugging without output
+```
+
+### Prompt
+
+```text
+You may be stuck. Send update?
+
+“I checked X and Y. I am blocked at Z. Need help on validation flow.”
+```
+
+---
+
+## 5.38 Doubt List Generator
+
+The system shall generate a list of doubts/questions to ask.
+
+### Inputs
+
+```text
+Repeated searches
+AI questions
+Error messages
+Stuck sessions
+Manual notes
+Code activity
+```
+
+### Output
+
+```text
+Doubts to ask:
+1. Which validation handles payer amount?
+2. Should cancellation be blocked after vendor acknowledgement?
+3. Which API logs should be checked?
+```
+
+---
+
+## 5.39 Standup Update Generator
+
+The system shall generate standup updates.
+
+### Sections
+
+```text
+Yesterday
+Today
+Blockers
+Need help
+AI-assisted work
+```
+
+---
+
+## 5.40 Delegation Tracker
+
+For leads/managers, the system shall track tasks assigned to others.
+
+### Fields
+
+```text
+Assignee
+Task
+Source
+Expected update date
+Status
+Last update
+Risk
+Reminder
+```
+
+### Example
+
+```text
+Delegated:
+- Narasimha: complete API
+- Sahana: complete UI
+
+Expected update:
+Tomorrow
+
+Status:
+No update found
+```
+
+---
+
+## 5.41 People Follow-up Tracker
+
+The system shall track people-related follow-ups privately.
+
+### Track
+
+```text
+1:1 discussion notes
+Task ownership concerns
+Performance follow-ups
+Blocker communication
+Pending feedback
+Private notes
+```
+
+This must be private by default.
+
+---
+
+## 5.42 Risk Register
+
+The system shall auto-detect risks.
+
+### Risk examples
+
+```text
+Client commitment at risk
+Task dormant
+Dependency waiting too long
+No update from assignee
+Deadline approaching
+Repeated blocker
+Draft not sent
+Meeting action not closed
+Agent failed
+Uncommitted risky code
+```
+
+---
+
+## 5.43 Scope / Requirement Classifier
+
+The system shall classify incoming requirements.
+
+### Categories
+
+```text
+Client-specific customization
+Product roadmap feature
+Configuration
+Integration requirement
+Bug
+Enhancement
+Operational process change
+Support request
+```
+
+---
+
+## 5.44 Feature vs Customization Detector
+
+For each requirement, the system shall help classify:
+
+```text
+Standard configurable behavior
+New development
+Client-specific customization
+Product roadmap candidate
+Integration change
+Operational workaround
+```
+
+---
+
+## 5.45 Pre-call Briefing
+
+Before a meeting or client visit, the system shall generate a briefing.
+
+### Include
+
+```text
+Last discussion
+Open commitments
+Pending replies
+Recent decisions
+Recent AI drafts
+Suggested agenda
+Risks
+Questions to ask
+```
+
+---
+
+## 5.46 Context Pack Generator
+
+For any email, meeting, project, client, or task, the system shall generate a context pack.
+
+### Example
+
+```text
+Context Pack: AG Diagnostics
+
+Last communication:
+Vendor proposed HTML result link.
+
+Our position:
+Not feasible for EMR/AI use; need base64 PDF.
+
+Open items:
+- Cancellation/modification feasible with development
+- Need final response
+
+Suggested reply:
+...
+```
+
+---
+
+## 5.47 Relationship-Based Priority
+
+The system shall prioritize work based on relationship/context.
+
+### Priority hierarchy
+
+```text
+Management
+Client
+Critical vendor
+Deadline today
+Team dependency
+Internal FYI
+Automated alert
+Newsletter
+```
+
+---
+
+## 5.48 Personal Work SLA
+
+The user shall configure work SLAs.
+
+### Examples
+
+```text
+Client emails: respond within 4 business hours
+Manager emails: same day
+Direct mentions: review within 2 hours
+Drafts: close before EOD
+Promises: remind before due
+```
+
+### Alert
+
+```text
+SLA risk:
+Oval reply due in 2 hours.
+```
+
+---
+
+## 5.49 Forgotten Work Recovery
+
+The system shall detect old unfinished work.
+
+### Example
+
+```text
+You worked on these recently but did not close them:
+- Tally integration document — last touched 2 days ago
+- Jitsi test plan — last touched last week
+```
+
+---
+
+## 5.50 Daily Work Replay
+
+The system shall generate a semantic replay of the day, not a screen recording.
+
+### Example
+
+```text
+09:45–10:20 — Email triage, AG Diagnostics thread identified
+10:20–10:55 — Used ChatGPT to draft feasibility response
+11:00–11:35 — Ad-hoc call about Oval EMR feasibility
+12:10–12:45 — MongoDB query review
+```
+
+---
+
+## 5.51 Work Lost to Coordination Insight
+
+The system shall summarize work split for leads/managers.
+
+### Example
+
+```text
+Today’s work split:
+- Client communication: 2h
+- Internal coordination: 1.5h
+- Meetings: 2h
+- Technical work: 1h
+- AI-assisted documentation: 1h
+```
+
+---
+
+## 5.52 Role-Specific Modes
+
+The system shall support role modes.
+
+### Supported modes
+
+```text
+Fresher / Junior Developer
+Developer
+Tech Lead
+Engineering Manager
+Product Manager
+Support / Implementation
+Sales / Consultant
+Founder / Leadership
+Freelancer
+Student
+```
+
+Each mode shall adjust:
+
+```text
+Dashboard
+Report templates
+Priority rules
+Suggested actions
+Planning logic
+AI prompts
+Rituals
+```
+
+---
+
+# 6. Report Requirements
+
+## 6.1 Daily Management Report
+
+Must include:
+
+```text
+Summary
+Completed work
+In-progress work
+Client/project work
+Technical work
+AI-assisted work
+Meetings
+Field visits
+Pending replies
+Pending tasks
+Commitments
+Blockers
+Risks
+Tomorrow priorities
+```
+
+---
+
+## 6.2 Daily Self Report
+
+Must include:
+
+```text
+Timeline
+Parallel streams
+Context switches
+Work sessions
+AI usage
+Tasks captured
+Tasks completed
+Missed replies
+Unclosed loops
+Personal notes
+Idle/away classifications
+Developer warnings
+```
+
+---
+
+## 6.3 Weekly Report
+
+Must include:
+
+```text
+Major accomplishments
+Project-wise progress
+AI-assisted outputs
+Recurring blockers
+Pending reply debt
+Task aging
+Meeting load
+Field visits
+Commitment completion rate
+Next week priorities
+```
+
+---
+
+## 6.4 AI Contribution Report
+
+Must include:
+
+```text
+AI tools used
+AI usage by category
+AI-assisted outputs
+AI usage by project
+Drafts generated but not closed
+AI-assisted completed work
+```
+
+---
+
+## 6.5 Project / Client Report
+
+Must include:
+
+```text
+Project summary
+Work completed
+Pending tasks
+Commitments
+Meetings
+Field visits
+Decisions
+Open blockers
+Next actions
+Risks
+```
+
+---
+
+## 6.6 Standup Report
+
+Must include:
+
+```text
+Yesterday
+Today
+Blockers
+Need help
+AI-assisted work
+```
+
+---
+
+## 6.7 Leadership Weekly Summary
+
+Must include:
+
+```text
+What moved
+What is stuck
+What is at risk
+Client commitments
+Team blockers
+Decisions
+Next week focus
+```
+
+---
+
+# 7. User Interaction Requirements
+
+## 7.1 Command Bar
+
+The system shall provide a command bar.
+
+### Example commands
+
+```text
+/what-did-i-do
+/pending
+/ai-threads
+/error-hunt
+/context
+/stuck
+/eod
+/plan-week
+/reply-debt
+/commitments
+/field-visit
+/standup
+```
+
+## 7.2 Ritual Screens
+
+The system shall support ritual flows:
+
+```text
+Morning Plan
+Return-to-Work Restore
+End-of-Day Shutdown
+Weekly Review
+Field Visit Debrief
+Meeting Closure
+Context Pack Generation
+```
+
+## 7.3 Evidence Drawer
+
+For every AI-generated claim, the system shall show evidence.
+
+Example:
+
+```text
+Why is this marked as pending reply?
+
+Evidence:
+- Latest sender is not you
+- Email contains “please confirm”
+- No sent reply found after latest message
+- Thread opened twice today
+```
+
+## 7.4 User Corrections
+
+The system shall allow corrections.
+
+Examples:
+
+```text
+This is not a task
+This is FYI only
+This is already done
+This belongs to another project
+This was not break, it was phone call
+This AI session was for documentation, not coding
+```
+
+Corrections should improve future behavior.
+
+---
+
+# 8. Privacy and Control Functional Requirements
+
+## 8.1 Default privacy posture
+
+The system shall not capture by default:
+
+```text
+Screenshots
+Audio
+Full email body
+Full AI prompt/response
+Raw terminal commands
+Full clipboard content
+URL query parameters
+Private/incognito browser activity
+```
+
+## 8.2 User controls
+
+The user shall be able to:
+
+```text
+Pause tracking
+Exclude apps
+Exclude domains
+Exclude projects
+Delete a session
+Delete a day
+Delete a project
+Clear clipboard history
+Disable clipboard capture
+Disable idle prompts
+Disable field location tracking
+Export data
+Purge all data
+```
+
+## 8.3 Transparency
+
+The system shall show:
+
+```text
+What is being tracked
+What is not being tracked
+Where data is stored
+Which connectors are enabled
+Which AI provider is used
+What was sent to AI
+What was redacted
+```
+
+---
+
+# 9. Functional Prioritization
+
+## P0 — Core product value
+
+```text
+Today Command Center
+Work sessions
+Parallel streams
+Context marker on return
+Context-anchored scratchpad
+Reply Debt Radar
+Promise / Commitment Tracker
+Task Recovery
+Unclosed Loop Detector
+AI-Assisted Output Ledger
+Daily report
+Next Best Action
+Manual notes
+Privacy controls
+```
+
+## P1 — Strong differentiation
+
+```text
+Interrupted state snapshot
+Rabbit-hole backtrack
+Scattered AI chat finder
+Smart idle recovery
+Field visit clocking
+Meeting-to-action closure
+Planning engine
+Weekly review
+Project/client memory
+Work memory chat
+Draft graveyard
+Decision log
+```
+
+## P2 — Advanced power-user features
+
+```text
+Clipboard overflow safety net
+Ghost agent monitor
+Stale hypothesis detector
+Doubt list generator
+Standup generator
+Delegation tracker
+People follow-up tracker
+Risk register
+Scope classifier
+Pre-call briefing
+Context pack generator
+Role-specific modes
+```
+
+---
+
+# 10. Final Functional Requirement Summary
+
+WorkTrace AI shall function as a **personal AI work memory and recovery system** that captures real work signals, groups them into parallel work streams, restores interrupted context, detects missed replies and promises, tracks AI-assisted outputs, records offline/field work, supports planning, and generates clear daily/weekly reports.
+
+The product’s highest-value experience should be:
+
+```text
+When I return to any task, WorkTrace tells me exactly where I stopped, what I tried, what mattered, which AI thread helped, what is still pending, and what I should do next.
+```
+
+That is the core functional requirement that makes the product irreplaceable.

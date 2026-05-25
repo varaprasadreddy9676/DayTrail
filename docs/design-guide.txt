@@ -1,0 +1,464 @@
+# WorkTrace AI: Complete UI/UX Specification Document
+
+**Target Architecture:** Tauri v2 Core Shell | React + TypeScript + Tailwind Frontend
+**Design Paradigm:** Desktop-Native, High-Density, Data-Informed Adaptive System
+
+---
+
+## 1. Design System & Visual Foundation
+
+To erase any web-app traits, the application leverages native OS layout grids, pixel-dense type scaling, and dynamic transparency layers (macOS Sidebar Material / Windows 11 Mica).
+
+### 1.1 Color Tokens & Material Surfaces
+
+| Layer | Token Name | macOS Value (Dark/Light) | Windows 11 Value (Mica/Mica Alt) | Functional Purpose |
+| --- | --- | --- | --- | --- |
+| **Base Shell** | `--bg-app` | Transparent (`NSVisualEffectView`) | Transparent (DwmApi Mica Runtime) | Host desktop bleed-through layer |
+| **Sidebar** | `--bg-sidebar` | `rgba(240,240,240,0.6)` / `rgba(28,28,30,0.4)` | `rgba(243,243,243,0.7)` / `rgba(32,32,32,0.7)` | Nav tree & project canvas selectors |
+| **Main Canvas** | `--bg-canvas` | `#FFFFFF` / `#121214` | `#FBFBFB` / `#202020` | Feed, code timelines, data sheets |
+| **Surfaces** | `--bg-surface` | `#F5F5F7` / `#1A1A1E` | `#F3F3F3` / `#2D2D2D` | Cards, timelines, scratchpad docks |
+| **Borders** | `--border-subtle` | `rgba(0,0,0,0.08)` / `rgba(255,255,255,0.06)` | `rgba(0,0,0,0.06)` / `rgba(255,255,255,0.09)` | High-contrast single-pixel panel seams |
+| **Accent Primary** | `--accent-main` | `#007AFF` / `#0A84FF` | `#0078D4` / `#60CDFF` | Primary action anchors, focus state links |
+
+### 1.2 High-Density Typography Scale
+
+Font selection scales down by default to match native system application information density.
+
+* **Global Text Anti-Aliasing:** Enforced via `-webkit-font-smoothing: antialiased`.
+* **System Stacks:**
+* *macOS:* `-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display"`
+* *Windows:* `"Segoe UI Variable Text", "Segoe UI", Tahoma, Geneva, sans-serif`
+* *Monospace:* `"SF Mono", Menlo, Monaco, Consolas, "Cascadia Code", monospace`
+
+
+
+```css
+/* Type Scale Rules Matrix */
+--text-caption:   font-size: 11px; tracking: 0.01em; line-height: 14px; /* Metadata, timestamps */
+--text-ui:        font-size: 13px; tracking: 0.00em; line-height: 18px; /* Default labels, body lists */
+--text-header:    font-size: 14px; tracking: -0.01em; font-weight: 600;  /* Pane titles, sub-headers */
+--text-title:     font-size: 18px; tracking: -0.02em; font-weight: 600;  /* Workspace focus display */
+
+```
+
+---
+
+## 2. Window & Shell Architecture
+
+WorkTrace AI utilizes a dual-window configuration managed directly through the Tauri runtime: the Main App Shell and the Global Command Overlay.
+
+### 2.1 Main App Shell Window Configurations
+
+```json
+{
+  "label": "main",
+  "title": "WorkTrace AI",
+  "width": 1120,
+  "height": 780,
+  "minWidth": 900,
+  "minHeight": 600,
+  "resizable": true,
+  "decorations": true,
+  "titleBarStyle": "Transparent",
+  "hiddenTitle": true,
+  "transparent": true
+}
+
+```
+
+### 2.2 Global Command Overlay (Spotlight Mode)
+
+```json
+{
+  "label": "command-bar",
+  "width": 680,
+  "height": 420,
+  "resizable": false,
+  "decorations": false,
+  "transparent": true,
+  "alwaysOnTop": true,
+  "center": true,
+  "skipTaskbar": true
+}
+
+```
+
+```
++-----------------------------------------------------------+
+| [O O O]                    Search Work Memory             | [Titlebar Area: 44px]
++------------+----------------------------------------------+
+|            |                                              |
+|  Sidebar   |                 Main Canvas                  |
+|  (240px)   |                   (Flex)                     |
+|            |                                              |
+|            |                                              |
++------------+----------------------------------------------+
+| Status Bar |                                              | [Footer: 24px]
++------------+----------------------------------------------+
+
+```
+
+---
+
+## 3. Core Views & Layout Navigation
+
+The workspace workspace layouts are bound directly to a three-pane structural split screen to completely mitigate layout shifting.
+
+### 3.1 Layout Pane Definition
+
+```tsx
+// Global Shell Wrapper Layout Blueprint
+export default function MainApplicationShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen w-screen overflow-hidden select-none bg-transparent font-sans text-[13px] text-neutral-800 dark:text-neutral-200">
+      
+      {/* PANE 1: NATIVE SIDEBAR (Fixed 240px) */}
+      <aside className="w-[240px] h-full flex flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] backdrop-blur-xl">
+        {/* macOS Traffic Lights Spacer */}
+        <div className="h-11 w-full" data-tauri-drag-region />
+        
+        {/* Workspace Quick-Selectors */}
+        <div className="flex-1 overflow-y-auto px-2.5 py-1 space-y-0.5">
+          <SidebarItem label="Today's Command Center" icon="dashboard" active />
+          <SidebarItem label="Parallel Stream Timeline" icon="streams" />
+          <SidebarItem label="Project & Client Memory" icon="archive" />
+          <SidebarItem label="System Outputs Ledger" icon="ledger" />
+          <div className="pt-4 pb-1 px-2 text-[11px] font-semibold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase">Active Streams</div>
+          <SidebarItem label="Core Backend API" icon="folder" project />
+          <SidebarItem label="Oval Integration" icon="folder" project />
+        </div>
+
+        {/* Global Operational Status Footer */}
+        <footer className="h-10 px-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-neutral-400">
+          <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"/> Agent Streaming</div>
+          <div>Ollama Local</div>
+        </footer>
+      </aside>
+
+      {/* CANVAS FRAME (Flex-1) */}
+      <main className="flex-1 h-full flex flex-col bg-[var(--bg-canvas)]">
+        {/* Window Handle / Universal Toolbar */}
+        <header data-tauri-drag-region className="h-11 w-full border-b border-[var(--border-subtle)] flex items-center justify-between px-4">
+          <div className="font-semibold text-[14px]">Today's Command Center</div>
+          <div className="flex items-center gap-2">
+            <button className="px-2 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-[12px] hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50">Run Ritual</button>
+          </div>
+        </header>
+
+        {/* Content Render Pane */}
+        <section className="flex-1 overflow-hidden relative">
+          {children}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+```
+
+---
+
+## 4. Feature View Layout Implementations
+
+### 4.1 Today’s Command Center Dashboard
+
+Organized as a high-density operational center prioritizing actions and safety nets over chronological metrics.
+
+```
++-----------------------------------------------------------------------+
+|  [!] 3 Pending Replies Risk  |  [➜] Next Best Action                  | [Alert Strip]
++------------------------------+----------------------------------------+
+|  [ Work Sessions Grid ]      |  [ Active Action Cards ]               | [Splits]
+|                              |                                        |
+|  09:00 - 10:20 | Core API    |  * [ ] Finalize Oval MoM               |
+|  10:20 - 11:15 | Client Sync |  * [ ] Resolve MongoDB Timeout Bug     |
+|                              |                                        |
+|  [ Current State ]           |  [ System Safety Nets ]                |
+|  Active Repo: /src/core      |  * Draft Graveyard: 2 Items Waiting    |
+|  Branch: feat/auth           |  * Stuck Detector: 0 Flags             |
++------------------------------+----------------------------------------+
+
+```
+
+* **Alert Strip Component:** Anchored to top frame (`h-12`). Uses low-saturation warnings (`bg-amber-500/10 border-amber-500/20 text-amber-600`). Clicking invokes filtered context view.
+* **Split Work Canvas:** Divided exactly 60/40 via fixed layout coordinates. Left pane renders aggregated semantic `work_sessions` blocks; right pane renders real-time structural checklists generated from the **Next Best Action** engine.
+
+### 4.2 The Parallel Streams View
+
+Transforms unstructured background activity timelines into isolated, project-bounded swimming lanes.
+
+```tsx
+// Parallel Stream Lane Component
+export function ProjectParallelLane({ projectTitle, events }: { projectTitle: string, events: any[] }) {
+  return (
+    <div className="flex border-b border-[var(--border-subtle)] h-20 items-stretch bg-[var(--bg-canvas)]">
+      {/* Anchor Column */}
+      <div className="w-48 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 flex flex-col justify-between">
+        <div className="font-medium truncate">{projectTitle}</div>
+        <div className="text-[11px] text-neutral-400">3 Sessions today</div>
+      </div>
+      
+      {/* Horizontal Time Chunk Track */}
+      <div className="flex-1 relative overflow-x-auto overflow-y-hidden flex items-center px-4 gap-1 bg-neutral-50/50 dark:bg-neutral-900/10">
+        {events.map((evt, i) => (
+          <div 
+            key={i} 
+            className="h-12 rounded border border-neutral-300/40 dark:border-neutral-700/50 bg-white dark:bg-neutral-800 px-2.5 py-1.5 flex flex-col justify-between select-none min-w-[140px]"
+            style={{ width: `${evt.durationRelative}%` }}
+          >
+            <div className="font-medium text-[11px] truncate">{evt.title}</div>
+            <div className="flex items-center justify-between text-[10px] text-neutral-400">
+              <span>{evt.timeSpan}</span>
+              <span className="font-mono text-cyan-500 text-[9px] uppercase tracking-tight">{evt.sourceType}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+```
+
+### 4.3 The Ritual Execution Screen
+
+A highly focused layout containing structured workspace contextual panels alongside live AI output editors.
+
+```
++------------------------------------+----------------------------------+
+| Context Ledger Source Feed         | Generated AI Report Output Edit  |
+|                                    |                                  |
+| * Checked 4 Files in /src/core     | # Daily Work Execution Report    |
+| * Caught 2 Client Mail Threads     |                                  |
+| * Fixed Local Mongo Connection     | ## Work Closures Completed       |
+|                                    | * Deployed base64 validation pipe|
+| [ Regenerate Context Data Block ]  | * Resolved Oval feedback draft   |
++------------------------------------+----------------------------------+
+
+```
+
+* **The Left Rail (Context Validation):** Iterates over all compiled `source_events`, `idle_blocks`, and `outputs` inside the selected execution slice as an interactive checklist. Deselecting an item completely blocks it from processing contexts.
+* **The Right Rail (Monaco Editor / Markdown Canvas):** Renders raw generated logs inside a native text workspace component. Support markdown native layout rendering directly on save action.
+
+### 4.4 Project Memory Canvas
+
+A semantic ledger tracking historical interactions and state changes grouped by project assets.
+
+* **Grid Framework:** Evaluates information via strict tabular formatting rules for instant data processing.
+* **Context Sections Hierarchy:** Uses a layout segment block split:
+1. *Top:* Project KPI Summary Metrics (Decisions count, Pending Reply debt, Open promises).
+2. *Bottom Left:* **Decision Log Auto-Capture Ledger** (tabular rows showing Decision statement, Date, Source anchor link).
+3. *Bottom Right:* **Context Pack Generator Terminal** (interactive action module that renders copyable briefings instantly).
+
+
+
+---
+
+## 5. The Ambient Shell & Overlay Interfaces
+
+### 5.1 Global Spotlight Bar (`Cmd + K` Interface)
+
+The Spotlight Bar features a completely hidden background wrapper (`bg-transparent`), containing a floating panel with distinct architectural dimensions.
+
+```
++-----------------------------------------------------------+
+|  [Q] Search everything or ask local work memory...        | [Input Pane: 48px]
++-----------------------------------------------------------+
+|  [Results / Chat Display Area]                            | [Height-Adaptive Panel]
+|                                                           |
+|  > Did I send the Feasibility report to AG Diagnostics?   |
+|                                                           |
+|  AI Answer Block:                                         |
+|  "No. A draft was generated at 2:14 PM today but remains  |
+|   unsent in your Draft Graveyard."                        |
+|                                                           |
+|  Source Verification Anchors: [Mail Draft #304]           |
++-----------------------------------------------------------+
+
+```
+
+* **Shadowing & Borders:** Constructed with an intensive overlay container backdrop ring: `box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.3), 0 8px 10px -6px rgb(0 0 0 / 0.3); border: 1px solid var(--border-subtle)`.
+* **Adaptive Context Window:** Renders empty state suggestions by default. Typing a terminal flag (`/tasks`, `/session`) instantly drops system constraints to optimize query routing speeds.
+
+### 5.2 Floating Context-Anchored Scratchpad Overlay
+
+An absolute-positioned window that snaps directly to the bottom right of the primary display context (`width: 320px`, `height: 240px`).
+
+* **Ambient Sync State:** The application checks active file paths in the background. If you toggle focus to `repo/worktrace-core`, the workspace card smoothly updates its content stack to reflect matching text indexes.
+* **Interaction Physics:** Features an absolute single-stroke header section utilizing a cursor toggle: `cursor: grab; active: cursor: grabbing`.
+
+---
+
+## 6. System Micro-Interactions & Core States
+
+### 6.1 Native Global Shortcuts Configuration
+
+All interactions are mapped straight to physical layout bindings utilizing Tauri's global shortcut registration layer.
+
+| Physical Interaction | Global Scope Execution Payload | Expected UX Surface Feedback Loop |
+| --- | --- | --- |
+| `Option + Space` | Invoke System Command Bar Layer | Displays or hides Spotlight search box smoothly. |
+| `Cmd + Shift + D` | Quick-Log Context Scratchpad Entry | Drops target note capture sheet from system cursor anchor position. |
+| `Cmd + E` (In App) | Initiate End-of-Day Shutdown Ritual | Triggers execution view, shifting canvas layout to focus mode. |
+| `Esc` (In Overlay) | Destroy View Shell Focus | Instantly minimises/hides foreground floating container. |
+
+### 6.2 Proactive System Notifications & Safety Warnings
+
+When the application captures an anomaly (e.g., **Stuck Developer Session** or **SLA Breach**), it completely bypasses web-based push layers. Instead, it fires a native system toast notification utilizing Tauri's `plugin-notification` channel.
+
+```
++-------------------------------------------+
+|  WorkTrace AI                             |
+|  Session Block Warning: Stuck Detector    | [System Toast Layout]
+|  You have run 'npm test' 6 times with     |
+|  identical error output. Generate doubt?  |
++-------------------------------------------+
+
+```
+
+### 6.3 Empty States, Sync Blocks, and Load Frameworks
+
+* **List Scrolling & Clipping Boundaries:** All structural sub-containers enforce rigid boundary rules: `overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-subtle) transparent`.
+* **No Data State Configurations:** Bypasses cartoon vector patterns completely. Displays standard mono typeface indicator text inside the workspace grid core:
+```
+[-] 0 Active Sessions Found in Target Range
+Check active terminal stream watcher hooks if this persists.
+
+```
+
+
+* **Selection Highlight Controls:** To avoid broken web selections while double-clicking data matrix rows, specific interactive areas use selective text behavior bindings:
+
+```css
+/* UI Toggle Selection Rule Constraints */
+.clickable-row {
+  cursor: pointer;
+}
+.clickable-row:active {
+  background-color: var(--bg-surface);
+}
+.clickable-row ::selection {
+  background: transparent; /* Prevents visual noise during double-clicks */
+}
+
+```
+
+This specification document provides a production-ready blueprint for building the WorkTrace AI design framework. By combining native system effects with tight CSS controls, the interface delivers the responsive, data-dense layout expected of professional desktop developer utilities.
+
+
+Absolutely. To make this an bulletproof desktop app, the system tray (Windows) or status menu bar (macOS) is non-negotiable. If a user closes the main window, the application **must** live on invisibly in the background, continuously running your terminal and browser watchers.
+
+If clicking the "X" button actually kills your process or if your icon stands out like an ugly, unaligned web logo in the status bar, the illusion is broken instantly.
+
+Here is the native System Tray & Background Lifestyle specification to append directly to the UI/UX document.
+
+---
+
+## 7. System Tray & Menu Bar Specification
+
+### 7.1 Asset Design & OS Adapting (The "Template" Rule)
+
+Never use colored or static multi-color PNGs for your system tray.
+
+* **macOS Menu Bar:** Enforces strict monochrome scaling. Icons must be drawn as transparent vector line-art and set as a **Template Image** (`icon_as_template(true)` in Tauri v2). The OS automatically flips the icon color from solid black to solid white depending on whether the user is running dark mode, light mode, or a colorful desktop wallpaper.
+* **Windows System Tray:** Uses flat geometry. Dark mode requires white outlines, light mode requires dark grey outlines (`#555555`).
+
+### 7.2 Native Context Menu Tree Architectural Schema
+
+When a user right-clicks your tray icon, it should instantly render the system's native window dropdown, matching system fonts and hover styles flawlessly.
+
+```
++------------------------------------+
+|  WorkTrace AI: Tracking Active     |  <- Descriptive Disabled Label (Context Indicator)
+|  --------------------------------  |
+|  Show Command Center     (⌥Space)  |  <- Focus Window Target
+|  Quick-Capture Note      (⌥Shift+D)|  <- Spawns context scratchpad
+|  --------------------------------  |
+|  Pause Ambient Watchers            |  <- Toggle state
+|  Run End-of-Day Ritual   (⌘E)      |  <- Deep link shortcut
+|  --------------------------------  |
+|  Settings...                       |
+|  Quit WorkTrace                    |  <- Explicitly destroys background daemon process
++------------------------------------+
+
+```
+
+---
+
+## 8. Main Window Lifecycle Overrides (Close-to-Tray)
+
+By default, hitting the close window button (`X`) kills a web-view runtime. For a native tracking daemon, we must intercept the window close event and convert it into a background execution hide state.
+
+In your Rust lifecycle core (`src-tauri/src/lib.rs`), implement this handler block:
+
+```rust
+use tauri::{Manager, WebviewWindowEvent};
+
+pub fn run() {
+    tauri::Builder::default()
+        .setup(|app| {
+            // Core Tray Setup
+            let toggle = tauri::menu::MenuItemBuilder::with_id("toggle", "Show Command Center").build(app)?;
+            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "Quit WorkTrace").build(app)?;
+            let menu = tauri::menu::MenuBuilder::new(app).items(&[&toggle, &quit]).build()?;
+            
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .icon_as_template(true) // Crucial for macOS theme mapping
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "toggle" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => (),
+                })
+                .on_tray_icon_event(|tray, event| match event {
+                    // Left-clicking the icon pops open the primary command window instantly
+                    tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } => {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => (),
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        // INTERCEPT WINDOW CLOSE EVENTS (Preventing hard death)
+        .on_window_event(|window, event| match event {
+            WebviewWindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close(); // Block the OS from wiping the memory thread
+                let _ = window.hide(); // Minimize silently into your tray icon
+            }
+            _ => (),
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+```
+
+---
+
+## 9. Dynamic System Tray Status Indicators
+
+A premium utility doesn't just sit there; it reflects system states subtly via its tray representation icon layout updates.
+
+| Visual Tray State | Indicator Condition | Behavioral UX Action |
+| --- | --- | --- |
+| **Idle Monochrome** | Standby mode. Data logs clear. | Standard template line-art icon (`tray_idle.png`). |
+| **Pulsing / Dot Glow** | System active, watch loops parsing logs. | A tiny solid state 2px indicator accent aligns to bottom right of main asset file frame. |
+| **Error Stalled / Warning Alert** | A workflow is flagged as stuck or an alert threshold is breached. | The tray icon swaps to a warning indicator accent layout, catching the eye dynamically in the peripheral vision field. |
+
+With these parameters fully written into your application's Rust core layer, your software acts identical to high-caliber native background services like Tailscale, Docker Desktop, or Raycast.
+
+Are your watcher scripts already written natively in Rust as separate background threads, or do you plan to handle file monitoring via the Node/Frontend runtime?

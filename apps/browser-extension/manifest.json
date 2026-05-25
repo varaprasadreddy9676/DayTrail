@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "DayTrail Browser Bridge",
+  "version": "0.1.0",
+  "description": "Captures browser tab context for the local DayTrail desktop app.",
+  "permissions": ["activeTab", "nativeMessaging", "storage", "tabs"],
+  "background": {
+    "service_worker": "src/service_worker.js",
+    "type": "module"
+  },
+  "options_page": "src/options.html",
+  "action": {
+    "default_title": "Send tab to DayTrail"
+  }
+}

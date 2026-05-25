@@ -1,0 +1,62 @@
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Editor and tool state
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+
+# Logs and diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Node dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Rust build output
+target/
+
+# Tauri and platform packaging artifacts
+*.app/
+*.dmg
+*.msi
+*.msix
+*.nsis
+*.deb
+*.rpm
+*.AppImage
+*.dSYM/
+
+# Extension/package artifacts
+*.tgz
+*.vsix
+web-ext-artifacts/
+
+# Local app data and databases
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+.worktrace/
+.daytrail/

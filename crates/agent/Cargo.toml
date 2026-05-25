@@ -1,0 +1,10 @@
+[package]
+name = "worktrace-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "worktrace_agent"
+path = "src/lib.rs"
+

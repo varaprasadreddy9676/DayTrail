@@ -1,0 +1,1670 @@
+Status note: this document is the product requirements backlog and architecture target for WorkTrace AI. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
+
+Yes — now the technical requirement must satisfy **four non-negotiables**:
+
+```text
+1. Should feel like a real native desktop app
+2. Should not be a memory/CPU eater
+3. Should be fast to build and robust
+4. Should reuse one UI codebase across macOS, Windows, Linux
+```
+
+Given those constraints, the best direction is:
+
+> **Tauri v2 + Rust background agent + React/TypeScript UI + SQLite + optional DuckDB + local/cloud LLM adapter.**
+
+This is also validated by the Trace reverse-engineering notes you shared: Trace appears to use **Tauri v2.0.6, Rust backend, TypeScript/JS frontend via Vite, DuckDB + SQLite, and Diesel ORM**, with a native tray/menu/updater/plugin setup. 
+
+---
+
+# WorkTrace AI — Complete Technical Requirements
+
+## 1. Final Recommended Stack
+
+## 1.1 Desktop shell
+
+```text
+Framework: Tauri v2
+Frontend: React + TypeScript + Vite
+Styling: Tailwind CSS + custom desktop component system
+Backend/Core: Rust
+Local DB: SQLite
+Analytics DB: DuckDB optional
+Search: SQLite FTS5
+AI: Ollama / LM Studio / OpenAI-compatible local endpoint / cloud API optional
+Browser tracking: Chrome/Edge extension
+Editor tracking: VS Code/Cursor extension
+Terminal tracking: shell integration + optional PTY/session watcher
+```
+
+## 1.2 Why this stack
+
+### Tauri + Rust gives
+
+```text
+Low memory footprint
+Small binary size
+Native tray/menu/window support
+Cross-platform support
+Strong background agent capability
+Access to OS APIs
+Good security model
+Open-source contributor friendliness
+```
+
+### React/TypeScript gives
+
+```text
+Fast development
+One UI codebase
+Large contributor pool
+Easy markdown rendering
+Reusable components
+Good ecosystem
+```
+
+### SQLite gives
+
+```text
+Local-first storage
+No server requirement
+Fast writes
+Simple backup/export
+Works offline
+Great for event logs
+```
+
+### DuckDB optional gives
+
+```text
+Fast local analytics
+Good for weekly/monthly summaries
+Large activity history analysis
+```
+
+Trace’s architecture uses the same broad pattern: Tauri/Rust frontend-backend split with SQLite/DuckDB-style local storage, which is a strong signal that this stack is practical for this product category. 
+
+---
+
+# 2. Important Decision: Tauri vs Flutter vs Native
+
+## 2.1 Options comparison
+
+| Option        |           Native feel | Performance | Cross-platform |   Dev speed | Contributor friendliness | Best for                    |
+| ------------- | --------------------: | ----------: | -------------: | ----------: | -----------------------: | --------------------------- |
+| Swift/AppKit  |    Excellent on macOS |   Excellent |           Poor |      Medium |                  Limited | macOS-only premium app      |
+| Flutter       |                  Good | Medium/Good |      Excellent |        Fast |                     Good | UI-heavy cross-platform app |
+| Electron      |     Web-app feel risk |       Heavy |      Excellent |   Very fast |                Excellent | SaaS-like desktop apps      |
+| Slint + Rust  |          Native/light |   Excellent |           Good | Medium/Slow |        Smaller ecosystem | Lightweight Rust apps       |
+| Tauri + React | Good if designed well |   Excellent |      Excellent |        Fast |                Excellent | Our case                    |
+
+## 2.2 Final choice
+
+Use:
+
+```text
+Tauri + Rust + React
+```
+
+But with one strict rule:
+
+> **Do not design the UI like a website. Design it like a native desktop command center.**
+
+Tauri can feel native if you use:
+
+```text
+Native menu
+Native tray
+Native keyboard shortcuts
+Native notifications
+Native window behavior
+Desktop density
+Command palette
+Resizable panes
+Local-first settings
+System theme integration
+No web-style landing page UI
+```
+
+---
+
+# 3. Native Feel Requirements
+
+The app must not feel like a web dashboard wrapped in a shell.
+
+## 3.1 Desktop shell requirements
+
+The app shall support:
+
+```text
+Native menu bar
+System tray/menu bar icon
+Global shortcut
+Command palette
+Native notifications
+Auto-launch on login
+Background agent mode
+Dock visibility setting
+Menu bar-only mode
+Multiple window support later
+Native settings window feel
+System light/dark mode
+System accent awareness where possible
+```
+
+## 3.2 UI style requirements
+
+Avoid:
+
+```text
+Large web cards
+Marketing-site gradients
+Huge empty whitespace
+Browser-like top nav
+SaaS dashboard feel
+Heavy charts everywhere
+```
+
+Use:
+
+```text
+Compact desktop density
+Sidebar + detail pane
+Command bar
+Keyboard-first navigation
+Resizable split panes
+Markdown preview panels
+Evidence drawers
+Native-feeling modals
+Subtle shadows
+Fast transitions
+No heavy animations
+```
+
+## 3.3 Primary screens
+
+Keep screens minimal:
+
+```text
+1. Today Command Center
+2. Parallel Streams
+3. Context Scratchpad
+4. Rituals
+5. Search / Command Bar
+6. Settings
+```
+
+Do not build 40 screens. Most intelligence should render as markdown panels.
+
+---
+
+# 4. Runtime Architecture
+
+## 4.1 Process model
+
+Use two layers:
+
+```text
+worktrace-agent
+  Rust background process
+  Always running
+  Captures signals
+  Writes to SQLite
+  Runs lightweight rules
+  Schedules AI jobs
+
+worktrace-ui
+  Tauri window
+  Opens only when needed
+  Reads from local DB
+  Renders markdown/views
+  Sends commands to agent
+```
+
+The UI should be closable without stopping tracking.
+
+## 4.2 Runtime flow
+
+```text
+Watchers
+  ↓
+Normalizer
+  ↓
+Privacy Redactor
+  ↓
+Event Coalescer
+  ↓
+SQLite WAL
+  ↓
+Deterministic Engines
+  ↓
+Prompt Router
+  ↓
+Markdown/UI Rituals
+```
+
+## 4.3 Core principle
+
+Rust should handle facts.
+
+LLM should handle interpretation.
+
+```text
+Rust/rules:
+- collect events
+- normalize data
+- apply privacy controls
+- coalesce events
+- link entities
+- detect deterministic states
+- prepare compact context
+
+LLM:
+- summarize
+- classify fuzzy meaning
+- generate markdown
+- suggest next action
+- explain work context
+```
+
+Do not let the LLM be the only source of truth.
+
+---
+
+# 5. Performance Requirements
+
+## 5.1 Resource targets
+
+```text
+Idle CPU: < 1%
+Normal tracking CPU: < 3–5%
+Background memory: 50–120 MB target
+Maximum normal memory: < 150 MB
+UI memory when open: < 200–300 MB
+No continuous LLM inference
+No screenshots/audio by default
+Dashboard open time: < 1 second for today view
+Command search response: < 300 ms for local indexed results
+```
+
+## 5.2 Hard performance rules
+
+```text
+Do not write every second
+Do not run AI continuously
+Do not store screenshots by default
+Do not store audio by default
+Do not render huge timelines directly
+Do not load full history into React state
+Do not keep multiple WebViews alive unnecessarily
+Do not run long analytics on UI thread
+```
+
+## 5.3 Event coalescing
+
+Bad:
+
+```text
+1 event per second while Chrome is active for 20 minutes
+```
+
+Good:
+
+```text
+1 coalesced event:
+Chrome / ChatGPT / 20 minutes
+```
+
+Coalescing key:
+
+```text
+source + app + title + domain + workspace_context
+```
+
+## 5.4 Write batching
+
+Flush to DB only when:
+
+```text
+30 seconds elapsed
+OR 50 events collected
+OR app is quitting
+OR session boundary detected
+```
+
+## 5.5 UI loading
+
+The UI shall:
+
+```text
+Use paginated queries
+Use virtualized lists
+Load today only by default
+Lazy-load historical details
+Render markdown from compact summaries
+Use local indexed search
+```
+
+---
+
+# 6. Local Database Requirements
+
+## 6.1 Primary DB
+
+Use:
+
+```text
+SQLite
+```
+
+Enable:
+
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA temp_store = MEMORY;
+PRAGMA busy_timeout = 5000;
+PRAGMA foreign_keys = ON;
+```
+
+## 6.2 Optional analytics DB
+
+Use DuckDB only for:
+
+```text
+Weekly/monthly analytics
+Heavy aggregation
+Long-range reporting
+Trend analysis
+```
+
+Do not use DuckDB for every small write. SQLite remains the operational store.
+
+## 6.3 Storage principles
+
+```text
+Raw facts first
+Summaries later
+Metadata-first
+No heavy content by default
+Compact old events
+Keep reports/decisions/commitments longer
+```
+
+---
+
+# 7. Core Data Tables
+
+## 7.1 `source_events`
+
+Stores normalized raw events.
+
+```sql
+CREATE TABLE source_events (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    app TEXT,
+    title TEXT,
+    domain TEXT,
+    url_redacted TEXT,
+    workspace_key TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    sensitivity TEXT DEFAULT 'normal',
+    metadata_json TEXT,
+    created_at INTEGER NOT NULL
+);
+```
+
+## 7.2 `workspace_contexts`
+
+Stores stable work contexts.
+
+```sql
+CREATE TABLE workspace_contexts (
+    id TEXT PRIMARY KEY,
+    context_key TEXT NOT NULL UNIQUE,
+    context_type TEXT NOT NULL,
+    label TEXT,
+    git_repo TEXT,
+    git_branch TEXT,
+    folder_path TEXT,
+    domain TEXT,
+    email_thread_id TEXT,
+    project_id TEXT,
+    last_seen_at INTEGER,
+    metadata_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+This supports context-anchored scratchpads and return-to-work markers. Your uploaded requirements describe a scratchpad that changes automatically by workspace, file folder, git branch, or website domain. 
+
+## 7.3 `work_sessions`
+
+```sql
+CREATE TABLE work_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    project_id TEXT,
+    context_id TEXT,
+    category TEXT,
+    status TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    ai_used INTEGER DEFAULT 0,
+    confidence REAL DEFAULT 0,
+    summary TEXT,
+    evidence_json TEXT,
+    user_corrected INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+## 7.4 `parallel_streams`
+
+```sql
+CREATE TABLE parallel_streams (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    stream_type TEXT,
+    project_id TEXT,
+    context_id TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    summary TEXT,
+    confidence REAL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+## 7.5 `stream_events`
+
+```sql
+CREATE TABLE stream_events (
+    stream_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    confidence REAL DEFAULT 0,
+    PRIMARY KEY (stream_id, event_id)
+);
+```
+
+Parallel streams are important because a single chronological timeline becomes noisy when the user is switching between multiple work streams. Your notes explicitly call for horizontal semantic lanes such as Backend API, Client Comms, and DevOps Alert. 
+
+## 7.6 `scratchpad_notes`
+
+```sql
+CREATE TABLE scratchpad_notes (
+    id TEXT PRIMARY KEY,
+    context_id TEXT NOT NULL,
+    note TEXT NOT NULL,
+    pinned INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+## 7.7 `state_snapshots`
+
+```sql
+CREATE TABLE state_snapshots (
+    id TEXT PRIMARY KEY,
+    context_id TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    snapshot_type TEXT NOT NULL,
+    summary TEXT,
+    terminal_tail TEXT,
+    git_diff_summary TEXT,
+    active_file TEXT,
+    cursor_position TEXT,
+    ai_context_summary TEXT,
+    metadata_json TEXT,
+    created_at INTEGER NOT NULL
+);
+```
+
+This supports interrupted state snapshots: last terminal output, uncommitted diff summary, last AI prompt summary, and cursor position. 
+
+## 7.8 `clipboard_events`
+
+```sql
+CREATE TABLE clipboard_events (
+    id TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes INTEGER,
+    source_app TEXT,
+    target_app TEXT,
+    related_context_id TEXT,
+    related_session_id TEXT,
+    stored_preview TEXT,
+    stored_full_content INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+```
+
+Clipboard monitoring should default to metadata/hash mode. Clipboard context stitching is useful because copied errors/code between terminal, AI tools, and IDEs can bind related activity into one micro-task. 
+
+## 7.9 `agent_runs`
+
+```sql
+CREATE TABLE agent_runs (
+    id TEXT PRIMARY KEY,
+    context_id TEXT,
+    tool_name TEXT,
+    command_label TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    status TEXT,
+    exit_code INTEGER,
+    summary TEXT,
+    error_tail TEXT,
+    notified INTEGER DEFAULT 0,
+    metadata_json TEXT
+);
+```
+
+This supports ghost-agent monitoring for Cline, Aider, Claude Code, Codex CLI, test suites, and build scripts. 
+
+## 7.10 Other core tables
+
+Also include:
+
+```text
+tasks
+commitments
+email_threads
+meetings
+field_visits
+idle_blocks
+ai_usage
+outputs
+decisions
+quick_notes
+reports
+projects
+people
+work_graph_edges
+```
+
+---
+
+# 8. Work Graph Requirements
+
+## 8.1 `work_graph_edges`
+
+The system must maintain a generic graph table linking everything.
+
+```sql
+CREATE TABLE work_graph_edges (
+    id TEXT PRIMARY KEY,
+    from_type TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_type TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    confidence REAL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+```
+
+## 8.2 Supported relations
+
+```text
+session_contains_event
+session_related_to_task
+task_from_email
+task_from_meeting
+commitment_from_email
+commitment_from_note
+ai_helped_output
+decision_from_meeting
+field_visit_created_task
+idle_block_related_to_session
+clipboard_links_sessions
+snapshot_belongs_to_context
+stream_contains_session
+```
+
+## 8.3 Why this matters
+
+This lets the app answer:
+
+```text
+Why is this task pending?
+Which AI chat helped this output?
+What did this meeting create?
+Where did I stop in this project?
+Which email caused this commitment?
+```
+
+---
+
+# 9. Watcher Architecture
+
+## 9.1 Watcher interface
+
+Every watcher must implement:
+
+```rust
+pub trait Watcher {
+    fn id(&self) -> &'static str;
+    fn source_type(&self) -> SourceType;
+    async fn start(&mut self) -> Result<(), WatcherError>;
+    async fn stop(&mut self) -> Result<(), WatcherError>;
+    async fn health(&self) -> WatcherHealth;
+}
+```
+
+## 9.2 Event contract
+
+Every watcher emits:
+
+```rust
+pub struct SourceEvent {
+    pub id: String,
+    pub source: String,
+    pub event_type: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub duration_ms: i64,
+    pub app: Option<String>,
+    pub title: Option<String>,
+    pub domain: Option<String>,
+    pub url_redacted: Option<String>,
+    pub workspace_key: Option<String>,
+    pub metadata_json: Option<String>,
+    pub sensitivity: Sensitivity,
+}
+```
+
+## 9.3 Required watchers
+
+```text
+Window watcher
+Browser watcher
+Idle watcher
+Clipboard watcher
+Workspace watcher
+Git watcher
+Terminal/agent watcher
+AI tool watcher
+Manual note watcher
+Email connector
+Calendar connector
+Meeting watcher
+Field visit watcher
+```
+
+---
+
+# 10. Platform-Specific Watcher Requirements
+
+## 10.1 macOS
+
+Use:
+
+```text
+Accessibility API
+CoreGraphics
+AppKit bridge where needed
+NSWorkspace app activation notifications
+CGWindowList APIs where permitted
+Keychain
+Launch Agent for autostart
+Native notification center
+```
+
+## 10.2 Windows
+
+Use:
+
+```text
+Win32 GetForegroundWindow
+UI Automation where needed
+Windows Credential Manager
+Task Scheduler / Startup entry
+Toast notifications
+Power/session lock events
+```
+
+## 10.3 Linux
+
+Use:
+
+```text
+X11 active window APIs
+Wayland support where possible but limited
+DBus where available
+Secret Service for credentials
+systemd user service/autostart
+Desktop notifications
+```
+
+## 10.4 Platform abstraction
+
+Create one trait:
+
+```rust
+pub trait PlatformAdapter {
+    fn active_window(&self) -> Result<ActiveWindow>;
+    fn idle_duration(&self) -> Result<Duration>;
+    fn notify(&self, notification: Notification) -> Result<()>;
+    fn keychain_get(&self, key: &str) -> Result<Option<String>>;
+    fn keychain_set(&self, key: &str, value: &str) -> Result<()>;
+}
+```
+
+Each OS implements this separately.
+
+---
+
+# 11. Browser Extension Requirements
+
+## 11.1 Supported browsers
+
+Initial:
+
+```text
+Chrome
+Edge
+```
+
+Later:
+
+```text
+Firefox
+Safari
+```
+
+## 11.2 Capture
+
+```text
+Active tab title
+Domain
+Redacted URL
+Tab activation time
+AI tool domain
+Document/email page context where possible
+Private/incognito ignored by default
+```
+
+## 11.3 Communication
+
+Preferred:
+
+```text
+Native messaging host
+```
+
+Alternative:
+
+```text
+Localhost HTTP/WebSocket with per-install token
+```
+
+## 11.4 Security
+
+```text
+Validate all messages
+Use per-install auth token
+Do not accept arbitrary local requests
+Redact URL before storage
+Do not capture incognito by default
+Minimal permissions
+```
+
+---
+
+# 12. UI Architecture Requirements
+
+## 12.1 One UI codebase
+
+Use:
+
+```text
+React + TypeScript
+Vite
+Tailwind
+Zustand or Jotai for small state
+TanStack Query for data fetching/cache
+React Markdown renderer
+Virtualized lists
+Command palette
+```
+
+Avoid:
+
+```text
+Redux boilerplate unless necessary
+Heavy chart libraries by default
+Large UI frameworks that make it feel SaaS-like
+Too many animations
+Browser-style routing complexity
+```
+
+## 12.2 Desktop component system
+
+Create your own components:
+
+```text
+CommandPalette
+MarkdownPanel
+EvidenceDrawer
+ActionBar
+NativeSidebar
+SplitPane
+StreamLane
+ContextMarker
+ScratchpadPanel
+RitualCard
+StatusBadge
+TrayStatus
+```
+
+## 12.3 Native-feel rules
+
+```text
+Keyboard shortcuts everywhere
+Cmd/Ctrl+K command bar
+Cmd/Ctrl+N quick note
+Cmd/Ctrl+Shift+P command palette
+System theme
+Compact rows
+Resizable panes
+No web-style landing page
+No huge navbar
+No browser-like buttons
+```
+
+## 12.4 UI data flow
+
+```text
+React UI
+  ↓
+Tauri commands
+  ↓
+Rust query layer
+  ↓
+SQLite
+```
+
+Do not query SQLite directly from frontend.
+
+---
+
+# 13. AI Engine Requirements
+
+## 13.1 Provider support
+
+Support:
+
+```text
+Ollama
+LM Studio
+llama.cpp
+OpenAI-compatible local endpoint
+OpenAI API
+Anthropic API
+Gemini API
+OpenRouter-compatible providers
+```
+
+## 13.2 Unified GenAI interface
+
+Implement one prompt router.
+
+```rust
+pub enum PromptKind {
+    MorningPlan,
+    EndOfDayReview,
+    NextBestAction,
+    ContextMarker,
+    ParallelStreamSummary,
+    ReplyDebtAnalysis,
+    CommitmentReview,
+    StuckDetector,
+    ErrorHuntBacktrack,
+    StaleHypothesisWarning,
+    AiThreadFinder,
+    FieldVisitDebrief,
+    MeetingClosure,
+    WeeklyReview,
+}
+
+pub async fn run_prompt(
+    kind: PromptKind,
+    context: PromptContext,
+    schema: Option<serde_json::Value>,
+) -> Result<PromptResult, WorkTraceError> {
+    // provider routing
+    // local/cloud selection
+    // privacy redaction
+    // token budgeting
+    // prompt versioning
+    // schema validation
+    // response logging metadata only
+}
+```
+
+## 13.3 AI execution policy
+
+```text
+Rules first
+LLM second
+No continuous inference
+Batch jobs
+On-demand report generation
+Cache outputs
+Track prompt versions
+Validate JSON output
+Keep evidence references
+```
+
+## 13.4 Prompt audit metadata
+
+For each AI call store:
+
+```text
+prompt_kind
+prompt_version
+model_used
+provider
+input_hash
+output_hash
+latency_ms
+schema_validation_status
+created_at
+```
+
+Do not store full prompt/response by default.
+
+---
+
+# 14. Deterministic Engines
+
+These must run before AI.
+
+## 14.1 Sessionizer
+
+Groups raw events into sessions.
+
+Rules:
+
+```text
+time proximity
+same context key
+same repo/domain/email thread
+clipboard link
+AI usage proximity
+manual note proximity
+calendar/meeting overlap
+```
+
+## 14.2 Stream engine
+
+Groups sessions into parallel streams.
+
+Rules:
+
+```text
+same repo
+same branch
+same email thread
+same project keywords
+same AI chat title
+same document
+same clipboard chain
+```
+
+## 14.3 Idle recovery engine
+
+Detects idle blocks and prompts user.
+
+Rules:
+
+```text
+idle > threshold
+overlaps calendar
+meeting app active before idle
+field visit active
+common lunch time
+returns to same context
+```
+
+## 14.4 Unclosed loop engine
+
+Detects:
+
+```text
+draft not sent
+meeting no notes
+AI output not used
+task started not completed
+promise due no output
+agent failed no follow-up
+state snapshot unresolved
+```
+
+## 14.5 Stale hypothesis engine
+
+Compares:
+
+```text
+git diff timestamps
+browser/AI/terminal context
+uncommitted changes
+temporary comments
+debug statements
+```
+
+## 14.6 Ghost agent engine
+
+Monitors tagged commands/processes:
+
+```text
+running
+completed
+failed
+stalled
+waiting for input
+long idle
+```
+
+---
+
+# 15. Privacy and Security Requirements
+
+## 15.1 Default capture policy
+
+By default, do not capture:
+
+```text
+Screenshots
+Audio
+Full email body
+Full AI prompt/response
+Raw terminal commands
+Full clipboard content
+URL query parameters
+Private/incognito activity
+```
+
+## 15.2 Redaction
+
+Redact:
+
+```text
+API keys
+JWTs
+Bearer tokens
+Passwords
+OTP
+Database URLs
+Session IDs
+Query params
+Long secret-like strings
+Patient/client identifiers if configured
+```
+
+## 15.3 Local encryption
+
+Support:
+
+```text
+SQLCipher or encrypted sensitive columns
+OS keychain-backed encryption key
+```
+
+## 15.4 Local IPC security
+
+If using local HTTP/WebSocket:
+
+```text
+Bind to 127.0.0.1 only
+Use per-install token
+Validate origin
+Rate-limit sensitive commands
+No unauthenticated export/delete
+Disable debug endpoints in production
+```
+
+## 15.5 Tauri security
+
+Use:
+
+```text
+Strict CSP
+Minimal plugin permissions
+No arbitrary shell execution from UI
+No broad filesystem access
+Allowlist only required commands
+Separate dev/prod configs
+Disable devtools in release
+```
+
+The Tauri internals in your uploaded binary extract show plugin IPC, shell, dialog, notification, window, path, and invoke handling, so permission minimization and IPC hardening should be treated as core requirements. 
+
+---
+
+# 16. Build Hardening Requirements
+
+Trace’s reverse-engineered notes show a binary that was “not stripped” and exposed source/module structure, schema, IPC commands, license path, update URL, plugins, and dependencies.  For WorkTrace AI:
+
+```text
+Strip release binaries
+Remove debug symbols from public builds
+Avoid leaking local source paths
+Use release profile optimization
+Sign and notarize macOS builds
+Use hardened runtime
+Sanitize logs
+Do not hardcode secrets
+Store tokens in OS keychain
+Use signed auto-updates
+Separate open-source code from paid license secrets if needed
+```
+
+Rust release profile:
+
+```toml
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+```
+
+---
+
+# 17. Licensing and Open Source Requirements
+
+## 17.1 Open-source friendliness
+
+Use a monorepo that contributors understand.
+
+```text
+Clear crates
+Clear plugin SDK
+Good docs
+Easy dev setup
+Mock data mode
+Local-only development
+No cloud dependency for contributors
+```
+
+## 17.2 License strategy
+
+Options:
+
+```text
+Apache-2.0: maximum adoption
+AGPL: stronger protection against closed hosted forks
+Dual license: community + commercial
+```
+
+Recommended:
+
+```text
+Core local app: Apache-2.0 or AGPL depending business strategy
+Enterprise sync/server: commercial or source-available later
+Plugin SDK: MIT/Apache-2.0
+```
+
+## 17.3 Paid feature safety
+
+If paid editions exist:
+
+```text
+Signed license token
+Server validation when online
+Offline grace period
+Device activation limits
+License stored in Keychain/Credential Manager
+No simple local isPro boolean
+```
+
+---
+
+# 18. Monorepo Structure
+
+```text
+worktrace-ai/
+  apps/
+    desktop/
+      src/
+      src-tauri/
+    browser-extension/
+    vscode-extension/
+    mobile-companion/
+
+  crates/
+    agent/
+    core/
+    platform/
+      macos/
+      windows/
+      linux/
+    storage/
+    privacy/
+    sessionizer/
+    stream-engine/
+    context-engine/
+    task-engine/
+    inbox-engine/
+    commitment-engine/
+    planning-engine/
+    meeting-engine/
+    field-work-engine/
+    idle-recovery-engine/
+    ai-engine/
+    report-engine/
+    search/
+    plugin-sdk/
+
+  connectors/
+    gmail/
+    outlook/
+    google-calendar/
+    outlook-calendar/
+    slack/
+    github/
+    jira/
+    clickup/
+
+  docs/
+    architecture.md
+    privacy.md
+    database.md
+    ai-engine.md
+    plugin-api.md
+    security.md
+    local-ai-setup.md
+    contributor-guide.md
+    roadmap.md
+```
+
+---
+
+# 19. Module Responsibilities
+
+## 19.1 `agent`
+
+```text
+Starts background service
+Owns watcher lifecycle
+Handles event pipeline
+Runs scheduled jobs
+Coordinates DB writes
+Exposes local commands
+```
+
+## 19.2 `platform`
+
+```text
+OS-specific APIs
+Active window
+Idle time
+Notifications
+Keychain
+Autostart
+Permissions
+```
+
+## 19.3 `storage`
+
+```text
+SQLite connection pool
+Migrations
+Repository layer
+FTS indexing
+Batch writes
+Compaction
+```
+
+## 19.4 `privacy`
+
+```text
+Redaction
+Exclusions
+Sensitivity classification
+Prompt-safe context generation
+Data purge/export
+```
+
+## 19.5 `context-engine`
+
+```text
+Workspace context detection
+Context markers
+State snapshots
+Scratchpad binding
+Return-to-work restore
+```
+
+## 19.6 `stream-engine`
+
+```text
+Parallel stream grouping
+Stream summaries
+Stream event linking
+```
+
+## 19.7 `ai-engine`
+
+```text
+Provider adapters
+Prompt router
+Schema validation
+Token budgeting
+AI call audit metadata
+```
+
+## 19.8 `report-engine`
+
+```text
+Markdown generation
+Daily report
+Weekly report
+Standup report
+Context pack
+Management summary
+```
+
+---
+
+# 20. Testing Requirements
+
+## 20.1 Unit tests
+
+```text
+Redaction
+Event coalescing
+Session grouping
+Stream grouping
+Idle classification
+Reply detection
+Commitment detection
+Graph linking
+```
+
+## 20.2 Integration tests
+
+```text
+Watcher → event → DB
+Browser extension → native bridge
+AI prompt → JSON schema validation
+SQLite migration
+FTS search
+Report generation
+```
+
+## 20.3 Scenario tests
+
+Create test fixtures for:
+
+```text
+Interrupted coding session
+Rabbit-hole error hunt
+AI chat scattered across tools
+Clipboard overwritten
+Ghost agent failed
+Email opened but not replied
+Meeting without notes
+Client visit debrief
+Idle marked as phone call
+Stale hypothesis warning
+```
+
+## 20.4 Performance tests
+
+Test:
+
+```text
+8-hour simulated workday
+50k source_events
+1 year compacted history
+10k tasks/commitments
+UI load under 1 second
+Memory stable under target
+CPU near idle when inactive
+```
+
+---
+
+# 21. Packaging and Distribution
+
+## 21.1 Platforms
+
+```text
+macOS: .dmg / .app
+Windows: .msi / .exe
+Linux: AppImage / deb / rpm
+```
+
+## 21.2 Updates
+
+```text
+Signed auto-updates
+Staged rollout
+Rollback support
+Release channel: stable/beta/nightly
+```
+
+## 21.3 Permissions onboarding
+
+The app must clearly explain permissions:
+
+```text
+Accessibility: active window tracking
+Browser extension: active tab metadata
+Calendar/email: pending replies and meetings
+Notifications: reminders and alerts
+Clipboard: optional context stitching
+Location/mobile: optional field visit detection
+```
+
+---
+
+# 22. Observability and Diagnostics
+
+Add internal diagnostics page:
+
+```text
+Agent status
+Watcher health
+DB size
+Events today
+Flush queue size
+AI jobs today
+Average AI latency
+Last connector sync
+Memory usage
+CPU usage
+Failed jobs
+Permission status
+```
+
+This is important so users trust that the app is lightweight.
+
+---
+
+# 23. UI Screens to Build First
+
+## 23.1 Today Feed
+
+```text
+Current context
+Parallel streams
+Needs attention
+Reply debt
+Commitment risks
+Ghost agent alerts
+Recent state snapshots
+Next best action
+```
+
+## 23.2 Context Restore
+
+```text
+Return-to-work marker
+Last active state
+Related AI threads
+Related terminal/git/browser clues
+Scratchpad
+Resume button
+```
+
+## 23.3 Rituals
+
+```text
+Morning plan
+End-of-day shutdown
+Weekly review
+Field visit debrief
+Meeting closure
+```
+
+## 23.4 Command Bar
+
+```text
+/what-did-i-do
+/context
+/error-hunt
+/ai-threads
+/pending
+/eod
+/plan-week
+/stuck
+/commitments
+```
+
+---
+
+# 24. Final Build Order
+
+## Phase 1 — Local shell and fact store
+
+```text
+Tauri app
+Rust agent
+SQLite WAL
+source_events
+workspace_contexts
+work_graph_edges
+manual notes
+basic UI shell
+```
+
+## Phase 2 — Lightweight tracking
+
+```text
+Window watcher
+Browser extension
+Idle watcher
+Event coalescing
+Batch writes
+Today feed
+```
+
+## Phase 3 — Context recovery
+
+```text
+Context scratchpad
+Parallel streams
+State snapshots
+Return-to-work markers
+Clipboard hash stitching
+```
+
+## Phase 4 — LLM rituals
+
+```text
+Prompt router
+Ollama adapter
+Markdown panels
+Morning plan
+EOD shutdown
+Next best action
+Error-hunt backtrack
+AI thread finder
+```
+
+## Phase 5 — Work command center
+
+```text
+Email connector
+Calendar connector
+Reply debt
+Commitments
+Unclosed loops
+Meeting closure
+Field visit debrief
+```
+
+## Phase 6 — Developer safety net
+
+```text
+Git diff analyzer
+Stale hypothesis detector
+Terminal/agent watcher
+Ghost agent monitor
+Standup generator
+Doubt list generator
+```
+
+## Phase 7 — Hardening and open-source release
+
+```text
+Encryption
+Security hardening
+Plugin SDK
+Docs
+Testing
+Signed installers
+Auto-update
+Contributor guide
+```
+
+---
+
+# 25. Final Technical Decision
+
+Use:
+
+```text
+Tauri v2 + Rust agent + React/TypeScript UI + SQLite + FTS5 + optional DuckDB + local-first LLM adapter
+```
+
+But enforce this architecture:
+
+```text
+Native-feeling desktop shell
+Rust-owned background work
+React only for UI
+SQLite as fact store
+LLM only on demand/batch
+No screenshots/audio by default
+Metadata-first capture
+Event coalescing
+Markdown-first intelligence panels
+One UI codebase across macOS/Windows/Linux
+```
+
+This gives you the balance you want:
+
+```text
+Fast development
+Robust background processing
+Low memory/CPU usage
+Cross-platform reuse
+Open-source contributor friendliness
+Native-like desktop experience
+```

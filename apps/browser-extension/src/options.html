@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DayTrail Browser Bridge</title>
+    <style>
+      body {
+        color: #16181d;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 24px;
+        max-width: 720px;
+      }
+
+      code {
+        background: #eef1f4;
+        border-radius: 4px;
+        padding: 2px 5px;
+      }
+
+      button {
+        border: 1px solid #9aa4b2;
+        border-radius: 6px;
+        background: #ffffff;
+        cursor: pointer;
+        font: inherit;
+        padding: 8px 12px;
+      }
+
+      ul {
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DayTrail Browser Bridge</h1>
+    <p>Native host: <code>ai.daytrail.desktop</code></p>
+    <button id="capture-active-tab" type="button">Capture active tab</button>
+    <h2>Recent bridge events</h2>
+    <ul id="recent-events"></ul>
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "daytrail",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Local-first work memory, AI usage, and timesheet tracking for desktop teams.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "desktop:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets",
+    "desktop:test": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets",
+    "desktop:build": "cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml --release",
+    "desktop:dmg": "scripts/build-macos-unsigned.sh",
+    "browser-extension:check": "node --check apps/browser-extension/src/service_worker.js && node --check apps/browser-extension/src/options.js && node --check apps/browser-extension/src/privacy.js && node --check apps/browser-extension/src/batching.js",
+    "browser-extension:pack": "scripts/package-browser-extension.sh",
+    "vscode-extension:check": "npm --prefix apps/vscode-extension run check",
+    "terminal:bridge": "scripts/worktrace-terminal-bridge.sh",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "release:check": "scripts/release-check.sh"
+  }
+}
