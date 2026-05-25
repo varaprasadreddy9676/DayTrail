@@ -89,6 +89,7 @@ type BackendQuickNote = {
 
 type BackendSettings = {
   browserBridgeEnabled: boolean;
+  terminalBridgePath?: string | null;
   launchAtLogin?: boolean;
   excludedDomains: string[];
   aiProvider?: string;
@@ -101,6 +102,15 @@ type BackendSettings = {
 type BackendStorageLocationInfo = {
   databasePath: string;
   backupDir: string;
+};
+
+type BackendTerminalBridgeInstallResult = {
+  shell: string;
+  profilePath: string;
+  bridgeScriptPath: string;
+  metadataPath: string;
+  alreadyInstalled: boolean;
+  message: string;
 };
 
 type BackendDatabaseTransferResult = {
@@ -1565,6 +1575,7 @@ export default function App() {
   const [exportStatus, setExportStatus] = useState("Ready");
   const [storageInfo, setStorageInfo] = useState<BackendStorageLocationInfo | null>(null);
   const [storageStatus, setStorageStatus] = useState("Storage ready");
+  const [terminalBridgeStatus, setTerminalBridgeStatus] = useState("Ready to install");
   const [settingsConfigJson, setSettingsConfigJson] = useState("");
   const [databaseRestorePath, setDatabaseRestorePath] = useState("");
   const [permissionSummary, setPermissionSummary] =
@@ -2077,6 +2088,21 @@ export default function App() {
     }
   }
 
+  async function installTerminalBridge() {
+    setTerminalBridgeStatus("Installing terminal bridge...");
+    const result = await invokeTauri<BackendTerminalBridgeInstallResult>(
+      "install_terminal_bridge",
+    );
+
+    if (!result) {
+      setTerminalBridgeStatus("Install failed");
+      return;
+    }
+
+    setTerminalBridgeStatus(result.message);
+    await refreshTodaySnapshot();
+  }
+
   async function generateDailyReport() {
     await generateRitual("eod");
   }
@@ -2498,6 +2524,7 @@ export default function App() {
               onExportSettingsConfig={exportSettingsConfig}
               onImportSettingsConfig={importSettingsConfig}
               onLoadStorageInfo={loadStorageLocations}
+              onInstallTerminalBridge={installTerminalBridge}
               onOpenCapturePermission={openCapturePermissionSettings}
               onOpenExports={() => setActiveView("automation")}
               onOpenSavedNotes={() => setActiveView("memory")}
@@ -2517,6 +2544,7 @@ export default function App() {
               settingsConfigJson={settingsConfigJson}
               storageInfo={storageInfo}
               storageStatus={storageStatus}
+              terminalBridgeStatus={terminalBridgeStatus}
               toggleFolder={toggleFolder}
             />
           )}
@@ -4832,6 +4860,7 @@ function SettingsView({
   onBackupDatabase,
   onExportSettingsConfig,
   onImportSettingsConfig,
+  onInstallTerminalBridge,
   onLoadStorageInfo,
   onOpenCapturePermission,
   onOpenExports,
@@ -4852,6 +4881,7 @@ function SettingsView({
   settingsConfigJson,
   storageInfo,
   storageStatus,
+  terminalBridgeStatus,
   toggleFolder,
 }: {
   aiConfig: AiConfig;
@@ -4863,6 +4893,7 @@ function SettingsView({
   onBackupDatabase: () => void;
   onExportSettingsConfig: () => void;
   onImportSettingsConfig: () => void;
+  onInstallTerminalBridge: () => void;
   onLoadStorageInfo: () => void;
   onOpenCapturePermission: (permissionId: string) => void;
   onOpenExports: () => void;
@@ -4883,6 +4914,7 @@ function SettingsView({
   settingsConfigJson: string;
   storageInfo: BackendStorageLocationInfo | null;
   storageStatus: string;
+  terminalBridgeStatus: string;
   toggleFolder: (folderId: string) => void;
 }) {
   const [activeSettings, setActiveSettings] = useState<
@@ -4980,7 +5012,11 @@ function SettingsView({
                   </div>
                   <strong>{captureHealth?.status?.replace("_", " ") ?? "Waiting"}</strong>
                 </div>
-                <CaptureHealthPanel summary={captureHealth} />
+                <CaptureHealthPanel
+                  onInstallTerminalBridge={onInstallTerminalBridge}
+                  summary={captureHealth}
+                  terminalBridgeStatus={terminalBridgeStatus}
+                />
               </section>
               <div className="settings-card-grid">
                 <section className="settings-section">
@@ -5319,7 +5355,15 @@ function SettingsView({
   );
 }
 
-function CaptureHealthPanel({ summary }: { summary?: BackendCaptureHealthSummary }) {
+function CaptureHealthPanel({
+  onInstallTerminalBridge,
+  summary,
+  terminalBridgeStatus,
+}: {
+  onInstallTerminalBridge?: () => void;
+  summary?: BackendCaptureHealthSummary;
+  terminalBridgeStatus?: string;
+}) {
   const checks = summary?.checks ?? [];
   const status = summary?.status?.replace("_", " ") ?? "Waiting";
 
@@ -5336,14 +5380,37 @@ function CaptureHealthPanel({ summary }: { summary?: BackendCaptureHealthSummary
             <span>Switch to another app, browser tab, editor, or terminal. If this stays empty, macOS Accessibility permission is likely missing.</span>
           </div>
         )}
-        {checks.map((check) => (
-          <article className="health-check-row" data-state={check.status} key={check.id}>
-            <span>{check.label}</span>
-            <strong>{check.status.replace("_", " ")}</strong>
-            <em>{check.detail}</em>
-            <small>{check.lastSeenAt ? formatDateTime(check.lastSeenAt) : check.action || "Waiting for activity"}</small>
-          </article>
-        ))}
+        {checks.map((check) => {
+          const isTerminalBridge = check.id === "terminal-bridge";
+          const canInstallTerminalBridge =
+            isTerminalBridge
+            && check.status !== "ok"
+            && Boolean(onInstallTerminalBridge)
+            && (
+              Boolean(check.action?.toLowerCase().includes("install"))
+              || terminalBridgeStatus === "Install failed"
+            );
+          return (
+            <article className="health-check-row" data-state={check.status} key={check.id}>
+              <span>{check.label}</span>
+              <strong>{check.status.replace("_", " ")}</strong>
+              <em>{check.detail}</em>
+              <small>
+                {isTerminalBridge && terminalBridgeStatus && terminalBridgeStatus !== "Ready to install"
+                  ? terminalBridgeStatus
+                  : check.lastSeenAt
+                    ? formatDateTime(check.lastSeenAt)
+                    : check.action || "Waiting for activity"}
+              </small>
+              {canInstallTerminalBridge && (
+                <button className="button compact" onClick={onInstallTerminalBridge} type="button">
+                  <Icon name="sync" />
+                  Install terminal bridge
+                </button>
+              )}
+            </article>
+          );
+        })}
       </div>
     </div>
   );

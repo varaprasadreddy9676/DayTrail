@@ -56,6 +56,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         settings::get_settings,
         settings::update_settings,
         settings::set_ai_api_key,
+        settings::install_terminal_bridge,
         settings::get_storage_locations,
         settings::export_settings_config,
         settings::import_settings_config,

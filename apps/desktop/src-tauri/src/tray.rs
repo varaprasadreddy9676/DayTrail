@@ -42,7 +42,7 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
         ],
     )?;
 
-    TrayIconBuilder::with_id("daytrail-tray")
+    let mut tray = TrayIconBuilder::with_id("daytrail-tray")
         .tooltip("DayTrail")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -71,8 +71,13 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
                 let app = tray.app_handle();
                 show_main_window(app);
             }
-        })
-        .build(app)?;
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+
+    tray.build(app)?;
 
     Ok(())
 }
