@@ -520,7 +520,7 @@ button {
 
 .sidebar-app-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   min-width: 0;
   align-items: center;
   gap: 10px;
@@ -530,6 +530,18 @@ button {
   color: inherit;
   background: transparent;
   text-align: left;
+}
+
+.sidebar-app-row--live {
+  background: color-mix(in srgb, var(--accent-main) 8%, transparent);
+}
+
+.sidebar-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #30d158;
+  flex-shrink: 0;
 }
 
 .sidebar-app-row:hover {
@@ -557,7 +569,7 @@ button {
   border-radius: 5px;
 }
 
-.sidebar-app-row > span:last-child {
+.sidebar-app-row > span:nth-child(2) {
   display: grid;
   min-width: 0;
   gap: 1px;
@@ -656,6 +668,97 @@ button {
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-bg);
+}
+
+.sidebar-offline-action {
+  padding: 6px 8px 2px;
+}
+
+.sidebar-log-offline {
+  width: 100%;
+  justify-content: center;
+  color: var(--text-soft);
+  font-size: 11px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+}
+
+.sidebar-log-offline:hover {
+  color: var(--text-main);
+  border-color: var(--accent-main);
+  background: color-mix(in srgb, var(--accent-main) 8%, transparent);
+}
+
+/* ── Offline time log modal ─────────────────────────────────────── */
+
+.offline-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.offline-modal {
+  width: 340px;
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.offline-modal h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.offline-modal p {
+  margin: -8px 0 0;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.offline-modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.offline-modal label,
+.offline-modal-full {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.offline-modal input,
+.offline-modal select {
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.offline-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .sidebar-footer {
@@ -972,8 +1075,8 @@ kbd {
 }
 
 .panel-block.hourly-panel {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: min(720px, calc(100vh - 160px));
   min-height: 360px;
 }
@@ -1030,6 +1133,7 @@ kbd {
 }
 
 .hour-timeline-list {
+  flex: 1;
   display: grid;
   min-height: 0;
   align-content: start;
@@ -3455,6 +3559,144 @@ textarea {
   font-size: 11px;
   line-height: 17px;
   resize: none;
+}
+
+/* ── AI Thinking Loader ────────────────────────────────────────── */
+
+.ai-thinking-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 280px;
+  background: var(--bg-canvas);
+  padding: 24px;
+}
+
+.ai-thinking-svg {
+  width: 140px;
+  height: 140px;
+  overflow: visible;
+}
+
+/* Core node */
+.ai-core {
+  fill: color-mix(in srgb, var(--accent-main) 30%, transparent);
+  stroke: var(--accent-main);
+  stroke-width: 1.5;
+  transform-origin: 80px 80px;
+  animation: ai-core-beat 1.8s ease-in-out infinite;
+}
+
+.ai-core-inner {
+  fill: var(--accent-main);
+  transform-origin: 80px 80px;
+  animation: ai-core-beat 1.8s ease-in-out infinite 0.3s;
+}
+
+@keyframes ai-core-beat {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.25); opacity: 1; }
+}
+
+/* Pulsing rings */
+.ai-ring {
+  fill: none;
+  stroke: var(--accent-main);
+}
+
+.ai-ring-1 {
+  stroke-width: 1.2;
+  animation: ai-ring-out 2.4s ease-out infinite;
+}
+
+.ai-ring-2 {
+  stroke-width: 0.9;
+  animation: ai-ring-out 2.4s ease-out infinite 0.8s;
+}
+
+.ai-ring-3 {
+  stroke-width: 0.6;
+  animation: ai-ring-out 2.4s ease-out infinite 1.6s;
+}
+
+@keyframes ai-ring-out {
+  0% { opacity: 0.6; stroke-dasharray: 0 1000; }
+  20% { stroke-dasharray: 1000 0; }
+  100% { opacity: 0; stroke-dasharray: 1000 0; }
+}
+
+/* Spoke lines */
+.ai-spoke {
+  stroke: var(--accent-main);
+  stroke-width: 0.8;
+  stroke-dasharray: 4 4;
+  opacity: 0.3;
+  animation: ai-spoke-flow 1.2s linear infinite;
+}
+
+.ai-spoke-delay {
+  animation-delay: 0.6s;
+}
+
+@keyframes ai-spoke-flow {
+  to { stroke-dashoffset: -16; }
+}
+
+/* Orbiting dot groups */
+.ai-orbit {
+  /* transform-origin set per-group */
+}
+
+.ai-orbit-1 {
+  transform-origin: 80px 80px;
+  animation: ai-spin 2s linear infinite;
+}
+
+.ai-orbit-2 {
+  transform-origin: 80px 80px;
+  animation: ai-spin 3.5s linear infinite reverse;
+}
+
+.ai-orbit-3 {
+  transform-origin: 80px 80px;
+  animation: ai-spin 6s linear infinite;
+}
+
+@keyframes ai-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ai-orb {
+  fill: var(--accent-main);
+  opacity: 0.85;
+}
+
+.ai-orb-2 {
+  fill: color-mix(in srgb, var(--accent-main) 70%, var(--success) 30%);
+  opacity: 0.75;
+}
+
+.ai-orb-3 {
+  fill: color-mix(in srgb, var(--accent-main) 50%, transparent);
+  opacity: 0.6;
+}
+
+/* Cycling message */
+.ai-thinking-message {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  animation: ai-msg-in 2.8s ease-out forwards;
+}
+
+@keyframes ai-msg-in {
+  0% { opacity: 0; transform: translateY(5px); }
+  18% { opacity: 1; transform: translateY(0); }
+  78% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0.3; transform: translateY(-3px); }
 }
 
 .health-check-row {

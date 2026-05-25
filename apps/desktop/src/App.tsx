@@ -1825,6 +1825,8 @@ export default function App() {
     useState<BackendCapturePermissionSummary | null>(null);
   const [permissionStatus, setPermissionStatus] = useState("Checking permissions...");
   const [permissionSetupDismissed, setPermissionSetupDismissed] = useState(false);
+  const [logOfflineOpen, setLogOfflineOpen] = useState(false);
+  const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
 
   const displayStreams = useMemo(() => mapStreams(todaySnapshot), [todaySnapshot]);
   const displaySessions = useMemo(() => mapSessions(todaySnapshot), [todaySnapshot]);
@@ -1832,6 +1834,23 @@ export default function App() {
     () => todaySnapshot?.appUsageSummary?.apps ?? [],
     [todaySnapshot],
   );
+
+  // Most recently captured app — always visible in sidebar even if outside top-8
+  const liveAppName = useMemo(() => {
+    const events = todaySnapshot?.sourceEvents ?? [];
+    if (!events.length) return null;
+    const latest = events.reduce((best, ev) => ev.endedAt > best.endedAt ? ev : best);
+    return eventAppLabel(latest);
+  }, [todaySnapshot]);
+
+  const sidebarApps = useMemo(() => {
+    const top8 = displayApps.slice(0, 8);
+    if (!liveAppName || top8.some((a) => a.app === liveAppName)) return top8;
+    const liveEntry = displayApps.find((a) => a.app === liveAppName);
+    if (!liveEntry) return top8;
+    // Pin active app at top, keep total at 8
+    return [liveEntry, ...top8.filter((a) => a.app !== liveAppName).slice(0, 7)];
+  }, [displayApps, liveAppName]);
   const displaySourceFeed = useMemo(() => mapSourceFeed(todaySnapshot), [todaySnapshot]);
   const displayAiThreads = useMemo(() => mapAiThreads(todaySnapshot), [todaySnapshot]);
   const displayMemoryFacts = useMemo(() => mapMemoryFacts(todaySnapshot), [todaySnapshot]);
@@ -2362,6 +2381,36 @@ export default function App() {
     addToast("success", "Settings saved");
   }
 
+  async function submitOfflineBlock(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const now = new Date();
+    const todayPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const startedAt = new Date(`${todayPrefix}T${offlineForm.start}:00`).getTime();
+    const endedAt = new Date(`${todayPrefix}T${offlineForm.end}:00`).getTime();
+    if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt <= startedAt) {
+      addToast("error", "Invalid time range", "End time must be after start time.");
+      return;
+    }
+    const result = await invokeTauri("upsert_idle_block", {
+      input: {
+        id: null,
+        startedAt,
+        endedAt,
+        category: offlineForm.category,
+        classified: true,
+        evidenceJson: null,
+      },
+    });
+    if (result) {
+      setLogOfflineOpen(false);
+      setOfflineForm({ start: "", end: "", category: "Away from desk" });
+      addToast("success", "Offline time logged", `${offlineForm.category} block saved.`);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Could not log offline time", "Backend unavailable.");
+    }
+  }
+
   async function toggleTracking() {
     const nextPaused = !isPaused;
 
@@ -2426,12 +2475,16 @@ export default function App() {
     );
   }
 
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
   async function analyzeRawExport() {
+    setIsAnalyzing(true);
     setExportStatus("Analyzing with configured AI...");
     const report = await invokeTauri<BackendReport>(
       "analyze_export_range",
       exportRangeArgs(),
     );
+    setIsAnalyzing(false);
 
     if (!report?.bodyMarkdown) {
       setExportStatus("AI analysis unavailable");
@@ -2628,18 +2681,18 @@ export default function App() {
           ))}
         </nav>
 
-        {displayApps.length > 0 && (
+        {sidebarApps.length > 0 && (
           <section className="sidebar-section sidebar-apps" aria-label="Apps today">
             <span className="sidebar-label">Apps Today</span>
-            {displayApps.slice(0, 8).map((app) => (
+            {sidebarApps.map((app) => (
               <button
-                className="sidebar-app-row"
+                className={`sidebar-app-row${app.app === liveAppName ? " sidebar-app-row--live" : ""}`}
                 key={app.app}
                 onClick={() => {
                   setActiveAppName(app.app);
                   setActiveView("apps");
                 }}
-                title={`${app.app} - ${formatDuration(app.durationMs)}`}
+                title={`${app.app} - ${formatDuration(app.durationMs)}${app.app === liveAppName ? " · Active now" : ""}`}
                 type="button"
               >
                 <AppIcon appName={app.app} />
@@ -2647,10 +2700,28 @@ export default function App() {
                   <strong>{app.app}</strong>
                   <em>{formatDuration(app.durationMs)}</em>
                 </span>
+                {app.app === liveAppName && <span className="sidebar-live-dot" aria-label="Active now" />}
               </button>
             ))}
           </section>
         )}
+
+        <div className="sidebar-offline-action">
+          <button
+            className="button compact sidebar-log-offline"
+            onClick={() => {
+              const now = new Date();
+              const pad = (n: number) => String(n).padStart(2, "0");
+              const hm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+              const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+              setOfflineForm({ start: hm(oneHourAgo), end: hm(now), category: "Away from desk" });
+              setLogOfflineOpen(true);
+            }}
+            type="button"
+          >
+            + Log offline time
+          </button>
+        </div>
 
         <footer className="sidebar-footer">
           <button
@@ -2757,6 +2828,7 @@ export default function App() {
               exportPreview={exportPreview}
               exportStatus={exportStatus}
               exportToDate={exportToDate}
+              isAnalyzing={isAnalyzing}
               onAnalyze={analyzeRawExport}
               onExport={generateRawExport}
               setExportFromDate={setExportFromDate}
@@ -2842,6 +2914,57 @@ export default function App() {
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {logOfflineOpen && (
+        <div className="offline-modal-backdrop" onClick={() => setLogOfflineOpen(false)}>
+          <form
+            className="offline-modal"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={submitOfflineBlock}
+          >
+            <h3>Log offline time</h3>
+            <p>Record time when your laptop was closed or you were away.</p>
+            <div className="offline-modal-row">
+              <label>
+                Start
+                <input
+                  required
+                  type="time"
+                  value={offlineForm.start}
+                  onChange={(e) => setOfflineForm((prev) => ({ ...prev, start: e.target.value }))}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  required
+                  type="time"
+                  value={offlineForm.end}
+                  onChange={(e) => setOfflineForm((prev) => ({ ...prev, end: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="offline-modal-full">
+              Category
+              <select
+                value={offlineForm.category}
+                onChange={(e) => setOfflineForm((prev) => ({ ...prev, category: e.target.value }))}
+              >
+                <option>Away from desk</option>
+                <option>Lunch / break</option>
+                <option>Meeting</option>
+                <option>Travel</option>
+                <option>Exercise</option>
+                <option>Focus time (offline)</option>
+              </select>
+            </label>
+            <div className="offline-modal-actions">
+              <button className="button" type="submit">Save block</button>
+              <button className="button ghost" onClick={() => setLogOfflineOpen(false)} type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -4753,6 +4876,65 @@ function AiLedgerView({
   );
 }
 
+const AI_THINKING_MESSAGES = [
+  "Reading your chaos…",
+  "Judging your 47 open tabs…",
+  "Counting every ⌘+Tab…",
+  "Translating meetings into billable time…",
+  "Finding deep meaning in loginwindow…",
+  "Untangling your focus sessions…",
+  "Converting procrastination into insights…",
+  "Consulting the tab oracle…",
+  "Weighing your VS Code existentialism…",
+  "Normalising your browser rabbit holes…",
+];
+
+function AiThinkingLoader() {
+  const [msgIdx, setMsgIdx] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setMsgIdx((i) => (i + 1) % AI_THINKING_MESSAGES.length), 2800);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="ai-thinking-loader" aria-label="AI analysis in progress">
+      <svg className="ai-thinking-svg" viewBox="0 0 160 160" aria-hidden="true">
+        {/* Pulsing outward rings */}
+        <circle className="ai-ring ai-ring-1" cx="80" cy="80" r="22" />
+        <circle className="ai-ring ai-ring-2" cx="80" cy="80" r="40" />
+        <circle className="ai-ring ai-ring-3" cx="80" cy="80" r="58" />
+        {/* Connection lines from center to orbit nodes */}
+        <line className="ai-spoke" x1="80" y1="80" x2="80" y2="52" />
+        <line className="ai-spoke" x1="80" y1="80" x2="80" y2="38" />
+        <line className="ai-spoke" x1="80" y1="80" x2="80" y2="108" />
+        <line className="ai-spoke ai-spoke-delay" x1="80" y1="80" x2="80" y2="22" />
+        <line className="ai-spoke ai-spoke-delay" x1="80" y1="80" x2="130" y2="109" />
+        <line className="ai-spoke ai-spoke-delay" x1="80" y1="80" x2="30" y2="109" />
+        {/* Orbit group 1: 1 dot, fast, inner ring (r=28) */}
+        <g className="ai-orbit ai-orbit-1">
+          <circle cx="80" cy="52" r="5" className="ai-orb" />
+        </g>
+        {/* Orbit group 2: 2 dots, medium, mid ring (r=42) */}
+        <g className="ai-orbit ai-orbit-2">
+          <circle cx="80" cy="38" r="4" className="ai-orb ai-orb-2" />
+          <circle cx="80" cy="122" r="4" className="ai-orb ai-orb-2" />
+        </g>
+        {/* Orbit group 3: 3 dots, slow, outer ring (r=58) */}
+        <g className="ai-orbit ai-orbit-3">
+          <circle cx="80" cy="22" r="3.5" className="ai-orb ai-orb-3" />
+          <circle cx="130" cy="109" r="3.5" className="ai-orb ai-orb-3" />
+          <circle cx="30" cy="109" r="3.5" className="ai-orb ai-orb-3" />
+        </g>
+        {/* Core node */}
+        <circle className="ai-core" cx="80" cy="80" r="10" />
+        <circle className="ai-core-inner" cx="80" cy="80" r="5" />
+      </svg>
+      <p className="ai-thinking-message" key={msgIdx}>{AI_THINKING_MESSAGES[msgIdx]}</p>
+    </div>
+  );
+}
+
 function AutomationView({
   aiProvider,
   candidates,
@@ -4760,6 +4942,7 @@ function AutomationView({
   exportPreview,
   exportStatus,
   exportToDate,
+  isAnalyzing,
   onAnalyze,
   onExport,
   setExportFromDate,
@@ -4771,6 +4954,7 @@ function AutomationView({
   exportPreview: string;
   exportStatus: string;
   exportToDate: string;
+  isAnalyzing: boolean;
   onAnalyze: () => void;
   onExport: () => void;
   setExportFromDate: (value: string) => void;
@@ -4836,17 +5020,21 @@ function AutomationView({
               <Icon name="archive" />
               Preview export
             </button>
-            <button className="button compact primary" onClick={onAnalyze} type="button">
+            <button className="button compact primary" disabled={isAnalyzing} onClick={onAnalyze} type="button">
               <Icon name="ritual" />
-              Analyze with {aiProvider}
+              {isAnalyzing ? "Analyzing…" : `Analyze with ${aiProvider}`}
             </button>
           </div>
-          <textarea
-            aria-label="Activity export or AI analysis"
-            className="export-preview"
-            readOnly
-            value={exportPreview || "Preview the selected date range or run AI analysis."}
-          />
+          {isAnalyzing ? (
+            <AiThinkingLoader />
+          ) : (
+            <textarea
+              aria-label="Activity export or AI analysis"
+              className="export-preview"
+              readOnly
+              value={exportPreview || "Preview the selected date range or run AI analysis."}
+            />
+          )}
         </section>
       </div>
     </div>

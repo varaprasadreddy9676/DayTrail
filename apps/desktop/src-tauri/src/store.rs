@@ -4006,6 +4006,10 @@ impl WorktraceStore {
         if self.pause_state()?.paused {
             return Ok(());
         }
+        // Skip system idle/lock-screen apps — they are not work.
+        if is_idle_system_app(app_name) {
+            return Ok(());
+        }
         let settings = self.get_settings()?;
         if is_excluded(app_name, &settings.excluded_apps) {
             return Ok(());
@@ -6085,6 +6089,25 @@ fn is_self_app_label(value: &str) -> bool {
     clean_app_label(value).is_some_and(|label| label == DISPLAY_APP_NAME)
 }
 
+/// Returns true for macOS system apps that indicate the screen is locked, the
+/// screensaver is running, or the user is otherwise idle/away. Time spent in
+/// these apps must never count as billable work.
+fn is_idle_system_app(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "loginwindow"
+            | "com.apple.loginwindow"
+            | "screensaver"
+            | "com.apple.screensaver"
+            | "com.apple.notificationcenter"
+            | "lockscreen"
+            | "com.apple.lockscreen"
+            | "systemevents"
+            | "com.apple.systemevents"
+    )
+}
+
 fn looks_like_path(value: &str) -> bool {
     value.starts_with('/') || value.starts_with("~/") || value.contains("\\")
 }
@@ -6391,6 +6414,10 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
             .and_then(clean_app_label)
             .unwrap_or_else(|| event.source.clone());
         if is_self_app_label(&app) {
+            continue;
+        }
+        // Exclude lock-screen / screensaver events retroactively (old data).
+        if is_idle_system_app(event.app.as_deref().unwrap_or_default()) {
             continue;
         }
         app_buckets.entry(app).or_default().push(event);
@@ -7423,18 +7450,32 @@ fn ai_tools_from_events(events: &[&SourceEvent]) -> Vec<AiToolUsage> {
 }
 
 fn source_event_ai_tool(event: &SourceEvent) -> Option<&'static str> {
+    // When a real domain is captured, do NOT fall back to the app name as the
+    // title — this prevents "ChatGPT Atlas" (a browser whose name contains
+    // "chatgpt") from being flagged as AI when the user is actually visiting
+    // Gmail, YouTube, or any non-AI site inside that browser.
+    let title = if event.domain.is_some() {
+        event.title.as_deref()
+    } else {
+        event.title.as_deref().or(event.app.as_deref())
+    };
     detect_ai_tool(
         event.domain.as_deref(),
-        event.title.as_deref().or(event.app.as_deref()),
+        title,
         event.url_redacted.as_deref(),
         event.metadata_json.as_deref(),
     )
 }
 
 fn source_event_ai_tools(event: &SourceEvent) -> Vec<&'static str> {
+    let title = if event.domain.is_some() {
+        event.title.as_deref()
+    } else {
+        event.title.as_deref().or(event.app.as_deref())
+    };
     detect_ai_tools(
         event.domain.as_deref(),
-        event.title.as_deref().or(event.app.as_deref()),
+        title,
         event.url_redacted.as_deref(),
         event.metadata_json.as_deref(),
     )
