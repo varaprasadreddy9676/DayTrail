@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -342,6 +342,17 @@ describe("WorkTrace command center", () => {
     expect(screen.getAllByText(/chatgpt/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/top apps today/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/google chrome/i).length).toBeGreaterThan(0);
+
+    const dayTrackerRow = screen.getAllByText(/10 AM/i)
+      .map((node) => node.closest("button"))
+      .find((node): node is HTMLButtonElement => Boolean(node));
+    if (!dayTrackerRow) {
+      throw new Error("Expected active day tracker row");
+    }
+    fireEvent.contextMenu(dayTrackerRow);
+    await user.click(screen.getByRole("button", { name: /set current task from this hour/i }));
+    expect(screen.getByRole("heading", { level: 3, name: /set current task/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
 
     await user.click(screen.getAllByRole("button", { name: /sqlite capture block/i })[0]);
 

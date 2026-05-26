@@ -672,93 +672,7 @@ button {
   box-shadow: 0 0 0 3px var(--success-bg);
 }
 
-/* ── Work context widget ─────────────────────────────────────────── */
-
-.work-context-widget {
-  padding: 4px 8px;
-}
-
-.work-context-btn {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  width: 100%;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.work-context-btn:hover {
-  border-color: var(--accent-main);
-  background: color-mix(in srgb, var(--accent-main) 6%, transparent);
-}
-
-.work-context-btn--active {
-  border-color: color-mix(in srgb, var(--accent-main) 50%, transparent);
-  background: color-mix(in srgb, var(--accent-main) 8%, transparent);
-}
-
-.work-context-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--border-strong);
-  flex-shrink: 0;
-}
-
-.work-context-dot--set {
-  background: #30d158;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #30d158 25%, transparent);
-}
-
-.work-context-label {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.work-context-label strong {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-main);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.work-context-label em {
-  font-size: 10px;
-  font-style: normal;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.work-context-badge {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.work-context-badge.billable {
-  background: color-mix(in srgb, #30d158 20%, transparent);
-  color: #30d158;
-}
-
-.work-context-badge.non-billable {
-  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
-  color: var(--text-muted);
-}
+/* ── Work context modal ─────────────────────────────────────────── */
 
 .work-context-modal {
   width: 400px;
@@ -1377,6 +1291,52 @@ kbd {
 .hour-row[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent-main) 10%, transparent);
   box-shadow: inset 3px 0 0 var(--accent-main);
+}
+
+.hour-row:hover {
+  background: color-mix(in srgb, var(--accent-main) 6%, transparent);
+}
+
+.hour-context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  background: transparent;
+}
+
+.hour-context-menu {
+  position: fixed;
+  display: grid;
+  width: 230px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.24),
+    0 0 0 1px color-mix(in srgb, white 5%, transparent);
+}
+
+.hour-context-menu button {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: left;
+}
+
+.hour-context-menu button:last-child {
+  border-bottom: 0;
+}
+
+.hour-context-menu button:hover,
+.hour-context-menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent-main) 10%, transparent);
 }
 
 .hour-row .hour-label {

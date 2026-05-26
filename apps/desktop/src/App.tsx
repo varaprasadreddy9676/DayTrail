@@ -1,6 +1,6 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildActivityView } from "./lib/viewModels/activityViewModel";
 import { buildAiImpactView } from "./lib/viewModels/aiImpactViewModel";
 import { isSimpleVisibleApp } from "./lib/viewModels/appClassification";
@@ -1836,7 +1836,7 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
   };
 }
 
-// ── Work Context Widget ───────────────────────────────────────────────────────
+// ── Work Context Editor ───────────────────────────────────────────────────────
 
 interface WorkContextForm {
   client: string;
@@ -1846,75 +1846,44 @@ interface WorkContextForm {
   billable: boolean;
 }
 
-function WorkContextWidget({
+function WorkContextEditorModal({
   context,
+  initialForm,
+  onClose,
   onSave,
   onClear,
 }: {
   context: BackendActiveWorkContext | null | undefined;
+  initialForm?: Partial<WorkContextForm>;
+  onClose: () => void;
   onSave: (form: WorkContextForm) => void;
   onClear: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [form, setForm] = useState<WorkContextForm>({
-    client: context?.client ?? "",
-    project: context?.project ?? "",
-    task: context?.task ?? "",
-    ticketId: context?.ticketId ?? "",
-    billable: context?.billable ?? true,
+    client: initialForm?.client ?? context?.client ?? "",
+    project: initialForm?.project ?? context?.project ?? "",
+    task: initialForm?.task ?? context?.task ?? "",
+    ticketId: initialForm?.ticketId ?? context?.ticketId ?? "",
+    billable: initialForm?.billable ?? context?.billable ?? true,
   });
 
-  // Sync form when context changes externally
-  useEffect(() => {
-    if (!open) {
-      setForm({
-        client: context?.client ?? "",
-        project: context?.project ?? "",
-        task: context?.task ?? "",
-        ticketId: context?.ticketId ?? "",
-        billable: context?.billable ?? true,
-      });
-    }
-  }, [context, open]);
-
   const hasContext = Boolean(context?.client || context?.project || context?.task);
-  const label = context?.project || context?.client || context?.task || "Set current task";
-  const sublabel = [context?.client, context?.ticketId].filter(Boolean).join(" · ");
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     onSave(form);
-    setOpen(false);
+    onClose();
   }
 
   return (
-    <>
-      <div className="work-context-widget">
-        <button
-          className={`work-context-btn${hasContext ? " work-context-btn--active" : ""}`}
-          onClick={() => setOpen(true)}
-          title="Set current work context (client / project / task)"
-          type="button"
-        >
-          <span className={`work-context-dot${hasContext ? " work-context-dot--set" : ""}`} />
-          <span className="work-context-label">
-            <strong>{label}</strong>
-            {sublabel && <em>{sublabel}</em>}
-          </span>
-          {context?.billable === false && <span className="work-context-badge non-billable">NB</span>}
-          {context?.billable === true && hasContext && <span className="work-context-badge billable">$</span>}
-        </button>
-      </div>
-
-      {open && (
-        <div className="offline-modal-backdrop" onClick={() => setOpen(false)}>
+        <div className="offline-modal-backdrop" onClick={onClose}>
           <form
             className="offline-modal work-context-modal"
             onClick={(e) => e.stopPropagation()}
             onSubmit={handleSubmit}
           >
-            <h3>Current work context</h3>
-            <p>Tag all new activity with this context until you change it.</p>
+            <h3>Set current task</h3>
+            <p>Use this when you want future activity tagged to a client, project, or ticket.</p>
             <label className="offline-modal-full">
               Client / Organisation
               <input
@@ -1936,7 +1905,7 @@ function WorkContextWidget({
             <label className="offline-modal-full">
               Task / Description
               <input
-                placeholder="e.g. Bug 124238 – EMR Casesheet"
+                placeholder="e.g. Bug 124238 - EMR Casesheet"
                 type="text"
                 value={form.task}
                 onChange={(e) => setForm((prev) => ({ ...prev, task: e.target.value }))}
@@ -1958,8 +1927,8 @@ function WorkContextWidget({
                   value={form.billable ? "yes" : "no"}
                   onChange={(e) => setForm((prev) => ({ ...prev, billable: e.target.value === "yes" }))}
                 >
-                  <option value="yes">Yes — billable</option>
-                  <option value="no">No — internal / personal</option>
+                  <option value="yes">Yes - billable</option>
+                  <option value="no">No - internal / personal</option>
                 </select>
               </label>
             </div>
@@ -1968,18 +1937,16 @@ function WorkContextWidget({
               {hasContext && (
                 <button
                   className="button ghost"
-                  onClick={() => { onClear(); setOpen(false); }}
+                  onClick={() => { onClear(); onClose(); }}
                   type="button"
                 >
                   Clear
                 </button>
               )}
-              <button className="button ghost" onClick={() => setOpen(false)} type="button">Cancel</button>
+              <button className="button ghost" onClick={onClose} type="button">Cancel</button>
             </div>
           </form>
         </div>
-      )}
-    </>
   );
 }
 
@@ -2041,6 +2008,7 @@ export default function App() {
   const [permissionSetupDismissed, setPermissionSetupDismissed] = useState(false);
   const [logOfflineOpen, setLogOfflineOpen] = useState(false);
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
+  const [workContextEditor, setWorkContextEditor] = useState<Partial<WorkContextForm> | null>(null);
 
   // Review / timesheet state
   const [reviewFromDate, setReviewFromDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -3040,12 +3008,6 @@ export default function App() {
           </section>
         )}
 
-        <WorkContextWidget
-          context={todaySnapshot?.activeWorkContext}
-          onSave={saveWorkContext}
-          onClear={clearWorkContext}
-        />
-
         <div className="sidebar-offline-action">
           <button
             className="button compact sidebar-log-offline"
@@ -3118,6 +3080,8 @@ export default function App() {
                 setActiveHourDetail(hour);
                 setActiveView("hour");
               }}
+              onOpenWorkContextEditor={(initialForm) => setWorkContextEditor(initialForm)}
+              onClearWorkContext={clearWorkContext}
               onUpdateAction={updateAction}
               idleGapCount={todaySnapshot?.idleBlocks.filter((block) => !block.classified).length ?? 0}
               isPaused={isPaused}
@@ -3337,6 +3301,16 @@ export default function App() {
             </div>
           </form>
         </div>
+      )}
+
+      {workContextEditor && (
+        <WorkContextEditorModal
+          context={todaySnapshot?.activeWorkContext}
+          initialForm={workContextEditor}
+          onClear={clearWorkContext}
+          onClose={() => setWorkContextEditor(null)}
+          onSave={saveWorkContext}
+        />
       )}
     </div>
   );
@@ -3636,6 +3610,8 @@ function TodayView({
   isPaused,
   onGenerateReport,
   onOpenHour,
+  onOpenWorkContextEditor,
+  onClearWorkContext,
   onUpdateAction,
   pendingReplyCount,
   selectedStream,
@@ -3654,6 +3630,8 @@ function TodayView({
   isPaused: boolean;
   onGenerateReport: () => void;
   onOpenHour: (hour: number) => void;
+  onOpenWorkContextEditor: (initialForm: Partial<WorkContextForm>) => void;
+  onClearWorkContext: () => void;
   onUpdateAction: (actionId: string, state: ActionItem["state"]) => void;
   pendingReplyCount: number;
   selectedStream: Stream;
@@ -3793,6 +3771,8 @@ function TodayView({
       <section className="today-hero-grid" aria-label="Daily timeline and selected hour">
         <HourlyTimelinePanel
           buckets={hourBuckets}
+          onClearWorkContext={onClearWorkContext}
+          onOpenWorkContextEditor={onOpenWorkContextEditor}
           onSelectHour={handleSelectHour}
           selectedHour={activeHour}
         />
@@ -3898,14 +3878,23 @@ function TodayView({
 
 function HourlyTimelinePanel({
   buckets,
+  onClearWorkContext,
+  onOpenWorkContextEditor,
   onSelectHour,
   selectedHour,
 }: {
   buckets: HourBucket[];
+  onClearWorkContext: () => void;
+  onOpenWorkContextEditor: (initialForm: Partial<WorkContextForm>) => void;
   onSelectHour: (hour: number) => void;
   selectedHour: number;
 }) {
   const [showFullDay, setShowFullDay] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    bucket: HourBucket;
+    x: number;
+    y: number;
+  } | null>(null);
   const totalDuration = buckets.reduce((sum, bucket) => sum + bucket.durationMs, 0);
   const activeBuckets = buckets.filter((bucket) => bucket.durationMs > 0);
   const visibleBuckets = showFullDay || activeBuckets.length === 0 ? buckets : activeBuckets;
@@ -3917,6 +3906,23 @@ function HourlyTimelinePanel({
   }, new Map<string, number>())]
     .sort((left, right) => right[1] - left[1])
     .slice(0, 6);
+  const suggestedContextForBucket = (bucket: HourBucket): Partial<WorkContextForm> => {
+    const topApp = bucket.apps[0] ?? null;
+    const rawContext = topApp?.contexts.find((context) => context && context !== topApp.app);
+    return {
+      project: rawContext ? compactDisplayLabel(rawContext) : "",
+      task: topApp ? `${bucket.label} - ${topApp.app}` : `${bucket.label} work`,
+      billable: true,
+    };
+  };
+  const openContextMenu = (event: MouseEvent, bucket: HourBucket) => {
+    event.preventDefault();
+    setContextMenu({
+      bucket,
+      x: Math.min(event.clientX, window.innerWidth - 240),
+      y: Math.min(event.clientY, window.innerHeight - 120),
+    });
+  };
 
   return (
     <section className="panel-block hourly-panel">
@@ -3962,6 +3968,7 @@ function HourlyTimelinePanel({
               className="hour-row"
               key={bucket.hour}
               onClick={() => onSelectHour(bucket.hour)}
+              onContextMenu={(event) => openContextMenu(event, bucket)}
               title={`${bucket.label}: ${bucket.apps.map((app) => `${app.app} ${formatDuration(app.durationMs)}`).join(", ") || "No activity"}`}
               type="button"
             >
@@ -3991,6 +3998,34 @@ function HourlyTimelinePanel({
           );
         })}
       </div>
+      {contextMenu && (
+        <div className="hour-context-menu-backdrop" onClick={() => setContextMenu(null)}>
+          <div
+            className="hour-context-menu"
+            onClick={(event) => event.stopPropagation()}
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              onClick={() => {
+                onOpenWorkContextEditor(suggestedContextForBucket(contextMenu.bucket));
+                setContextMenu(null);
+              }}
+              type="button"
+            >
+              Set current task from this hour
+            </button>
+            <button
+              onClick={() => {
+                onClearWorkContext();
+                setContextMenu(null);
+              }}
+              type="button"
+            >
+              Clear current task
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
