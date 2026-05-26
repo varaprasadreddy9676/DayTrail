@@ -1394,8 +1394,8 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
     use std::{collections::VecDeque, ffi::c_void, ptr};
 
     const CACHE_TTL_SECS: u64 = 10;
-    const MAX_DEPTH: u32 = 10;
-    const MAX_NODES: usize = 400;
+    const MAX_DEPTH: u32 = 15;   // Electron trees can be 10–12 levels deep
+    const MAX_NODES: usize = 800;
 
     // --- check cache first ---
     {
@@ -1471,33 +1471,52 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
         out
     }
 
-    unsafe fn bfs_heading(root: AXUIElementRef, app_name: &str) -> Option<String> {
-        // root is already owned by the caller; push it into the queue
+    /// BFS from `root` (already owned/retained).
+    ///
+    /// Two strategies — whichever fires first wins:
+    ///   1. **AXHeading**: any `<h1>`/`<h2>` element in the content tree whose
+    ///      text differs from the app name.  Returned immediately.
+    ///   2. **AXWebArea.AXTitle**: the Chromium/Electron page `<title>` attribute,
+    ///      exposed on the web-area element.  Stored as a fallback; returned only
+    ///      if no heading is found within the node budget.
+    unsafe fn bfs_find_title(root: AXUIElementRef, app_name: &str) -> Option<String> {
         let mut queue: VecDeque<(AXUIElementRef, u32)> = VecDeque::new();
         queue.push_back((root, 0));
         let mut visited = 0usize;
+        let mut web_area_title: Option<String> = None;
 
         while let Some((el, depth)) = queue.pop_front() {
-            // Check role
             let role = ax_str(el, "AXRole").unwrap_or_default();
+
+            // ── Strategy 1: explicit heading ────────────────────────────────
             if role == "AXHeading" {
                 let val = ax_str(el, "AXValue").or_else(|| ax_str(el, "AXTitle"));
                 if let Some(v) = val {
                     if v.len() > 3 && !v.eq_ignore_ascii_case(app_name) {
-                        // Release remaining queue elements
                         CFRelease(el as CFTypeRef);
-                        for (e, _) in queue.drain(..) {
-                            CFRelease(e as CFTypeRef);
-                        }
+                        for (e, _) in queue.drain(..) { CFRelease(e as CFTypeRef); }
                         return Some(v);
                     }
                 }
             }
 
-            // Expand children if within limits
+            // ── Strategy 2: page-title via AXWebArea ────────────────────────
+            // Electron exposes the page <title> as the AXWebArea's AXTitle.
+            // Format is usually "Conversation Name - Claude" or just the name.
+            if role == "AXWebArea" && web_area_title.is_none() {
+                if let Some(t) = ax_str(el, "AXTitle") {
+                    // Strip "Title - AppName" → "Title" using the pattern helper
+                    let stripped = enrich_title_from_pattern(&t, app_name)
+                        .unwrap_or_else(|| t.clone());
+                    if stripped.len() > 3 && !stripped.eq_ignore_ascii_case(app_name) {
+                        web_area_title = Some(stripped);
+                    }
+                }
+            }
+
+            // Expand children within limits
             if depth < MAX_DEPTH && visited < MAX_NODES {
-                let children = ax_children(el);
-                for child in children {
+                for child in ax_children(el) {
                     queue.push_back((child, depth + 1));
                 }
             }
@@ -1505,7 +1524,8 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
             CFRelease(el as CFTypeRef);
             visited += 1;
         }
-        None
+
+        web_area_title // fallback: page title from the web area (if any)
     }
 
     let enriched = unsafe {
@@ -1513,11 +1533,13 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
         if app_el.is_null() {
             None
         } else {
-            // Get focused or main window
+            // Try focused window first, fall back to main window
             let key_fw = CFString::new("AXFocusedWindow");
             let key_mw = CFString::new("AXMainWindow");
             let mut win_val: CFTypeRef = ptr::null();
-            if AXUIElementCopyAttributeValue(app_el, key_fw.as_concrete_TypeRef(), &mut win_val) != 0 || win_val.is_null() {
+            if AXUIElementCopyAttributeValue(app_el, key_fw.as_concrete_TypeRef(), &mut win_val) != 0
+                || win_val.is_null()
+            {
                 win_val = ptr::null();
                 AXUIElementCopyAttributeValue(app_el, key_mw.as_concrete_TypeRef(), &mut win_val);
             }
@@ -1526,7 +1548,7 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
             if win_val.is_null() {
                 None
             } else {
-                bfs_heading(win_val as AXUIElementRef, app_name)
+                bfs_find_title(win_val as AXUIElementRef, app_name)
             }
         }
     };
