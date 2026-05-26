@@ -125,7 +125,9 @@ describe("WorkTrace command center", () => {
 
   it("hydrates command-center data from the Tauri today snapshot", async () => {
     const user = userEvent.setup();
-    const now = Date.UTC(2026, 4, 23, 10, 30);
+    const todayAtMidmorning = new Date();
+    todayAtMidmorning.setHours(10, 30, 0, 0);
+    const now = todayAtMidmorning.getTime();
     const invoke = vi.fn(async (command: string) => {
       if (command !== "today") {
         return null;
@@ -347,6 +349,20 @@ describe("WorkTrace command center", () => {
     expect(screen.getAllByText(/app\.tsx - worktrace/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/https:\/\/chatgpt\.com\/c\/thread/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: /close session details/i }));
+
+    await user.click(screen.getByRole("button", { name: /view full hour breakdown/i }));
+    const chromeHourRow = screen.getAllByText(/google chrome/i)
+      .map((node) => node.closest("button"))
+      .find((node): node is HTMLButtonElement => Boolean(node?.getAttribute("aria-label")?.match(/breakdown/i)));
+    if (!chromeHourRow) {
+      throw new Error("Expected Google Chrome hour breakdown row");
+    }
+    await user.click(chromeHourRow);
+
+    expect(screen.getByText(/app breakdown/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: /google chrome/i })).toBeInTheDocument();
+    expect(screen.getByText(/event timeline/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/chatgpt - worktrace summary/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /^activity$/i }));
 
