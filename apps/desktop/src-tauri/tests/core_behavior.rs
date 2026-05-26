@@ -135,6 +135,91 @@ fn stores_tasks_notes_settings_and_exports_them() {
 }
 
 #[test]
+fn defaults_to_simple_mode_and_persists_display_settings() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    let defaults = store.get_settings().expect("default settings");
+    assert_eq!(defaults.experience_mode, "simple");
+    assert!(!defaults.show_system_apps);
+    assert!(!defaults.show_raw_events);
+    assert!(!defaults.show_capture_confidence);
+    assert_eq!(defaults.show_ai_details, "summary");
+
+    let updated = store
+        .update_settings(SettingsPatch {
+            experience_mode: Some("pro".into()),
+            show_system_apps: Some(true),
+            show_raw_events: Some(true),
+            show_capture_confidence: Some(true),
+            show_ai_details: Some("detailed".into()),
+            ..SettingsPatch::default()
+        })
+        .expect("update display settings");
+
+    assert_eq!(updated.experience_mode, "pro");
+    assert!(updated.show_system_apps);
+    assert!(updated.show_raw_events);
+    assert!(updated.show_capture_confidence);
+    assert_eq!(updated.show_ai_details, "detailed");
+}
+
+#[test]
+fn daily_report_is_non_empty_when_work_sessions_exist() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 20 * 60_000;
+    let end = start + 15 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("report-vscode".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("DayTrail App.tsx".into()),
+            url: None,
+            workspace_key: Some("/repo/daytrail".into()),
+            started_at: Some(start),
+            ended_at: Some(end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record source event");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("report-system-settings".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("System Settings".into()),
+            title: Some("Accessibility".into()),
+            url: None,
+            workspace_key: None,
+            started_at: Some(end),
+            ended_at: Some(end + 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record system source event");
+    store
+        .materialize_work_memory()
+        .expect("materialize work session");
+
+    let report = store.generate_daily_report().expect("daily report");
+
+    assert!(report.body_markdown.contains("## Summary"));
+    assert!(report.body_markdown.contains("## What happened"));
+    assert!(report.body_markdown.contains("## Work sessions"));
+    assert!(report.body_markdown.contains("## Apps used"));
+    assert!(report.body_markdown.contains("## AI detected"));
+    assert!(report.body_markdown.contains("## Needs review"));
+    assert!(report.body_markdown.contains("DayTrail"));
+    assert!(!report.body_markdown.contains("System Settings"));
+}
+
+#[test]
 fn stores_ai_settings_with_keychain_reference_only() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
@@ -623,7 +708,7 @@ fn migrates_legacy_capture_tables_used_by_startup_indexes() {
         .generate_daily_report()
         .expect("generate report with legacy reports table");
     assert!(report.title.contains("Daily Work Execution Report"));
-    assert!(report.body_markdown.contains("Daily Work Execution Report"));
+    assert!(report.body_markdown.contains("Daily Work Report"));
 
     let conn = Connection::open(&db_path).expect("open migrated database");
     let workspace_key_count: i64 = conn
@@ -1708,6 +1793,61 @@ fn materializes_source_events_into_sessions_streams_and_graph_edges() {
 }
 
 #[test]
+fn sessionizer_splits_long_back_to_back_project_contexts() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Utc::now().timestamp_millis();
+
+    for event in [
+        SourceEventInput {
+            id: Some("project-a".into()),
+            source: "active-window".into(),
+            event_type: "editor".into(),
+            app: Some("Code".into()),
+            title: Some("Auth.tsx".into()),
+            url: None,
+            workspace_key: Some("/repo/project-a".into()),
+            started_at: Some(now),
+            ended_at: Some(now + 16 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        },
+        SourceEventInput {
+            id: Some("project-b".into()),
+            source: "active-window".into(),
+            event_type: "editor".into(),
+            app: Some("Code".into()),
+            title: Some("Billing.tsx".into()),
+            url: None,
+            workspace_key: Some("/repo/project-b".into()),
+            started_at: Some(now + 16 * 60_000 + 1_000),
+            ended_at: Some(now + 25 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        },
+    ] {
+        store
+            .record_source_event(event)
+            .expect("record source event");
+    }
+
+    let summary = store
+        .materialize_work_memory()
+        .expect("materialize work memory");
+    assert_eq!(summary.work_sessions, 2);
+
+    let today = store.today_snapshot().expect("today snapshot");
+    let summaries = today
+        .work_sessions
+        .iter()
+        .filter_map(|session| session.summary.as_deref())
+        .collect::<Vec<_>>();
+    assert!(summaries.iter().any(|summary| summary.contains("project-a")));
+    assert!(summaries.iter().any(|summary| summary.contains("project-b")));
+}
+
+#[test]
 fn today_snapshot_falls_back_to_recent_source_events_when_sessions_are_not_persisted() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
@@ -1915,6 +2055,7 @@ fn today_snapshot_exposes_session_evidence_ai_usage_and_automation_candidates() 
     );
     assert!(today.app_usage_summary.apps.iter().any(|app| {
         app.app == "VS Code"
+            && app.category == "work"
             && app.projects.iter().any(|project| {
                 project.label == "billing-api"
                     && project.ai_tools.iter().any(|tool| tool.tool == "Copilot")
@@ -1922,6 +2063,7 @@ fn today_snapshot_exposes_session_evidence_ai_usage_and_automation_candidates() 
     }));
     assert!(today.app_usage_summary.apps.iter().any(|app| {
         app.app == "Google Chrome"
+            && app.category == "browser"
             && app.projects.iter().any(|project| {
                 project.label == "chatgpt.com"
                     && project.ai_tools.iter().any(|tool| tool.tool == "ChatGPT")
@@ -1947,11 +2089,10 @@ fn today_snapshot_exposes_session_evidence_ai_usage_and_automation_candidates() 
         .any(|candidate| candidate.title == "billing-api"));
 
     let daily_report = store.generate_daily_report().expect("daily report");
-    assert!(daily_report.body_markdown.contains("## Work activity"));
-    assert!(daily_report
-        .body_markdown
-        .contains("## App and project usage"));
-    assert!(daily_report.body_markdown.contains("## AI usage"));
+    assert!(daily_report.body_markdown.contains("## What happened"));
+    assert!(daily_report.body_markdown.contains("## Work sessions"));
+    assert!(daily_report.body_markdown.contains("## Apps used"));
+    assert!(daily_report.body_markdown.contains("## AI detected"));
     assert!(daily_report.body_markdown.contains("billing-api"));
     assert!(daily_report.body_markdown.contains("Google Chrome"));
     assert!(daily_report.body_markdown.contains("ChatGPT"));

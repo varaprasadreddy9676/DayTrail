@@ -78,6 +78,24 @@ pub struct Settings {
     pub ai_api_key_ref: Option<String>,
     pub ai_redact_secrets: bool,
     pub full_clipboard_history: bool,
+    #[serde(default = "default_experience_mode")]
+    pub experience_mode: String,
+    #[serde(default)]
+    pub show_system_apps: bool,
+    #[serde(default)]
+    pub show_raw_events: bool,
+    #[serde(default)]
+    pub show_capture_confidence: bool,
+    #[serde(default = "default_show_ai_details")]
+    pub show_ai_details: String,
+}
+
+fn default_experience_mode() -> String {
+    "simple".into()
+}
+
+fn default_show_ai_details() -> String {
+    "summary".into()
 }
 
 impl Default for Settings {
@@ -97,6 +115,11 @@ impl Default for Settings {
             ai_api_key_ref: None,
             ai_redact_secrets: true,
             full_clipboard_history: false,
+            experience_mode: default_experience_mode(),
+            show_system_apps: false,
+            show_raw_events: false,
+            show_capture_confidence: false,
+            show_ai_details: default_show_ai_details(),
         }
     }
 }
@@ -117,6 +140,11 @@ pub struct SettingsPatch {
     pub ai_endpoint: Option<String>,
     pub ai_redact_secrets: Option<bool>,
     pub full_clipboard_history: Option<bool>,
+    pub experience_mode: Option<String>,
+    pub show_system_apps: Option<bool>,
+    pub show_raw_events: Option<bool>,
+    pub show_capture_confidence: Option<bool>,
+    pub show_ai_details: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +287,7 @@ pub struct AppUsageSummary {
 #[serde(rename_all = "camelCase")]
 pub struct AppUsage {
     pub app: String,
+    pub category: String,
     pub duration_ms: i64,
     pub events: usize,
     pub projects: Vec<AppProjectUsage>,

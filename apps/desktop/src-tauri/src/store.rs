@@ -1226,6 +1226,27 @@ impl WorktraceStore {
                 "full_clipboard_history" => {
                     settings.full_clipboard_history = matches!(value.as_str(), "1" | "true");
                 }
+                "experience_mode" => {
+                    settings.experience_mode = match value.as_str() {
+                        "pro" => "pro".to_string(),
+                        _ => "simple".to_string(),
+                    };
+                }
+                "show_system_apps" => {
+                    settings.show_system_apps = matches!(value.as_str(), "1" | "true");
+                }
+                "show_raw_events" => {
+                    settings.show_raw_events = matches!(value.as_str(), "1" | "true");
+                }
+                "show_capture_confidence" => {
+                    settings.show_capture_confidence = matches!(value.as_str(), "1" | "true");
+                }
+                "show_ai_details" => {
+                    settings.show_ai_details = match value.as_str() {
+                        "detailed" => "detailed".to_string(),
+                        _ => "summary".to_string(),
+                    };
+                }
                 _ => {}
             }
         }
@@ -1329,6 +1350,46 @@ impl WorktraceStore {
                 &now,
             )?;
         }
+        if let Some(value) = patch.experience_mode {
+            let value = value.trim();
+            anyhow::ensure!(
+                matches!(value, "simple" | "pro"),
+                "experience mode must be simple or pro"
+            );
+            Self::upsert_setting_locked(&conn, "experience_mode", value, &now)?;
+        }
+        if let Some(value) = patch.show_system_apps {
+            Self::upsert_setting_locked(
+                &conn,
+                "show_system_apps",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.show_raw_events {
+            Self::upsert_setting_locked(
+                &conn,
+                "show_raw_events",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.show_capture_confidence {
+            Self::upsert_setting_locked(
+                &conn,
+                "show_capture_confidence",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.show_ai_details {
+            let value = value.trim();
+            anyhow::ensure!(
+                matches!(value, "summary" | "detailed"),
+                "AI details mode must be summary or detailed"
+            );
+            Self::upsert_setting_locked(&conn, "show_ai_details", value, &now)?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -1407,6 +1468,11 @@ impl WorktraceStore {
             ai_endpoint: Some(settings.ai_endpoint),
             ai_redact_secrets: Some(settings.ai_redact_secrets),
             full_clipboard_history: Some(settings.full_clipboard_history),
+            experience_mode: Some(settings.experience_mode),
+            show_system_apps: Some(settings.show_system_apps),
+            show_raw_events: Some(settings.show_raw_events),
+            show_capture_confidence: Some(settings.show_capture_confidence),
+            show_ai_details: Some(settings.show_ai_details),
         })?;
 
         {
@@ -1701,7 +1767,14 @@ impl WorktraceStore {
         let pause_state = self.pause_state()?;
         let settings = self.get_settings()?;
         let next_best_action = self.next_best_action()?;
-        let capture_health = build_capture_health(&source_events, &settings, &pause_state);
+        let required_permissions_granted =
+            crate::permissions::capture_permission_summary().all_required_granted;
+        let capture_health = build_capture_health_with_permission_state(
+            &source_events,
+            &settings,
+            &pause_state,
+            required_permissions_granted,
+        );
         let unclosed_loop_inbox = build_unclosed_loop_inbox(
             &pending_replies,
             &commitments,
@@ -2185,7 +2258,8 @@ impl WorktraceStore {
         let mut stmt = conn.prepare(
             r#"
             SELECT id, title, status, started_at, ended_at, duration_ms, ai_used,
-                   confidence, summary, evidence_json
+                   confidence, summary, evidence_json, billing_status, billable,
+                   client_label, project_label, ticket_id, review_notes
             FROM work_sessions
             WHERE context_id = ?1
             ORDER BY ended_at DESC
@@ -2348,7 +2422,9 @@ impl WorktraceStore {
         snapshot.tasks = self.list_tasks(None)?;
         let generated_at = now_utc();
         let title = format!("Daily Work Execution Report - {}", snapshot.local_date);
-        let deterministic_markdown = build_daily_report_markdown(&snapshot);
+        let include_system_apps =
+            snapshot.settings.experience_mode == "pro" || snapshot.settings.show_system_apps;
+        let deterministic_markdown = build_daily_report_markdown(&snapshot, include_system_apps);
         let ai_markdown = self.try_generate_ai_markdown(
             "End-of-day work review",
             "Rewrite this DayTrail factual report into a concise executive markdown report. Do not invent facts. Keep all source-backed tasks, commitments, reply debt, AI deliverables, and risks.",
@@ -5746,15 +5822,30 @@ fn build_sessions_from_source_events(
     let mut sessions = Vec::new();
     let mut current: Vec<StoredSourceEvent> = Vec::new();
     let mut last_end = None;
+    let mut current_anchor: Option<String> = None;
 
     for event in events {
-        let starts_new = last_end
+        let gap_starts_new = last_end
             .map(|ended_at| event.started_at.saturating_sub(ended_at) > idle_gap_ms)
             .unwrap_or(false);
-        if starts_new && !current.is_empty() {
+        let event_anchor = session_anchor_key(event);
+        let context_starts_new = !current.is_empty()
+            && current_anchor.is_some()
+            && event_anchor.is_some()
+            && current_anchor != event_anchor
+            && current
+                .first()
+                .map(|first| event.started_at.saturating_sub(first.started_at) >= 15 * 60_000)
+                .unwrap_or(false);
+
+        if (gap_starts_new || context_starts_new) && !current.is_empty() {
             sessions.push(materialize_session(std::mem::take(&mut current)));
+            current_anchor = None;
         }
         last_end = Some(event.ended_at);
+        if current_anchor.is_none() {
+            current_anchor = event_anchor;
+        }
         current.push(event.clone());
     }
 
@@ -5762,6 +5853,14 @@ fn build_sessions_from_source_events(
         sessions.push(materialize_session(current));
     }
     sessions
+}
+
+fn session_anchor_key(event: &StoredSourceEvent) -> Option<String> {
+    let workspace = event.workspace_key.as_deref()?;
+    if looks_like_project_path(workspace) {
+        return Some(file_name_from_path(workspace).to_ascii_lowercase());
+    }
+    None
 }
 
 fn materialize_session(events: Vec<StoredSourceEvent>) -> MaterializedSession {
@@ -6685,6 +6784,7 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
             files.truncate(20);
 
             AppUsage {
+                category: classify_app_category(&app).to_string(),
                 app,
                 duration_ms,
                 events: app_events.len(),
@@ -6791,12 +6891,32 @@ fn automation_suggested_steps(examples: &[String], ai_tools: &[String]) -> Vec<S
     steps
 }
 
-fn build_capture_health(
+fn build_capture_health_with_permission_state(
     events: &[SourceEvent],
     settings: &Settings,
     pause_state: &PauseState,
+    required_permissions_granted: bool,
 ) -> CaptureHealthSummary {
-    let checks = vec![
+    let mut checks = vec![CaptureHealthCheck {
+        id: "os-permissions".to_string(),
+        label: "OS permissions".to_string(),
+        status: if required_permissions_granted {
+            "ok".to_string()
+        } else {
+            "needs_setup".to_string()
+        },
+        detail: if required_permissions_granted {
+            "Required desktop capture permissions are granted.".to_string()
+        } else {
+            "Grant Accessibility for the installed DayTrail app to make app and window-title capture reliable.".to_string()
+        },
+        last_seen_at: Some(now_ms()),
+        evidence_count: usize::from(required_permissions_granted),
+        action: (!required_permissions_granted)
+            .then_some("Open Privacy & Security > Accessibility.".to_string()),
+    }];
+
+    checks.extend(vec![
         capture_health_check(
             "active-window",
             "Apps",
@@ -6884,7 +7004,7 @@ fn build_capture_health(
                 + settings.excluded_projects.len(),
             action: None,
         },
-    ];
+    ]);
 
     let ok_count = checks
         .iter()
@@ -8310,22 +8430,67 @@ fn build_weekly_review_markdown(snapshot: &TodaySnapshot) -> String {
     markdown
 }
 
-fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
+fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bool) -> String {
     let mut markdown = String::new();
     markdown.push_str(&format!(
-        "# Daily Work Execution Report - {}\n\n",
+        "# Daily Work Report - {}\n\n",
         snapshot.local_date
     ));
 
-    markdown.push_str("## Current state\n");
+    let session_total_ms: i64 = snapshot
+        .work_sessions
+        .iter()
+        .map(|session| session.duration_ms.max(0))
+        .sum();
+    let tracked_ms = if session_total_ms > 0 {
+        session_total_ms
+    } else {
+        snapshot.app_usage_summary.total_duration_ms.max(0)
+    };
+    let needs_review_count =
+        snapshot.unclosed_loop_inbox.len()
+            + snapshot.loop_risks.len()
+            + snapshot.idle_blocks.iter().filter(|block| !block.classified).count()
+            + snapshot
+                .work_sessions
+                .iter()
+                .filter(|session| session.billing_status == "draft")
+                .count();
+
+    markdown.push_str("## Summary\n");
     markdown.push_str(&format!(
-        "- Tracking: {}\n",
+        "- Tracking is {}.\n",
         if snapshot.pause_state.paused {
             "paused"
         } else {
             "active"
         }
     ));
+    markdown.push_str(&format!(
+        "- Worked for {} across {} work session(s).\n",
+        format_duration_words(tracked_ms),
+        snapshot.work_sessions.len()
+    ));
+    if let Some(session) = snapshot.work_sessions.first() {
+        markdown.push_str(&format!(
+            "- Main thread: {} for {}.\n",
+            clean_report_text(&session.title),
+            format_duration_words(session.duration_ms)
+        ));
+    }
+    if !snapshot.ai_usage_summary.tools.is_empty() {
+        markdown.push_str(&format!(
+            "- AI tools detected: {}.\n",
+            snapshot
+                .ai_usage_summary
+                .tools
+                .iter()
+                .take(5)
+                .map(|tool| clean_report_text(&tool.tool))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     if let Some(context) = &snapshot.project_context {
         markdown.push_str(&format!(
             "- Active context: {}\n",
@@ -8333,29 +8498,27 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
         ));
     }
 
-    markdown.push_str("\n## Work activity\n");
+    markdown.push_str("\n## What happened\n");
     if snapshot.work_sessions.is_empty() {
-        if snapshot.source_events.is_empty() {
-            markdown.push_str("- No app, browser, editor, or terminal signals captured today.\n");
-        } else {
-            markdown.push_str(&format!(
-                "- {} activity record(s) captured across {} app(s).\n",
-                snapshot.source_events.len(),
-                snapshot.app_usage_summary.apps.len()
-            ));
-        }
+        markdown.push_str(
+            "- Keep working for a few minutes and DayTrail will summarize the main work threads.\n",
+        );
     } else {
-        markdown.push_str(&format!(
-            "- {} work session(s) captured.\n",
-            snapshot.work_sessions.len()
-        ));
+        for session in snapshot.work_sessions.iter().take(6) {
+            markdown.push_str(&session_story_bullet(snapshot, session));
+        }
+    }
+
+    markdown.push_str("\n## Work sessions\n");
+    if snapshot.work_sessions.is_empty() {
+        markdown.push_str("- No work sessions captured yet.\n");
+    } else {
         for session in snapshot.work_sessions.iter().take(6) {
             markdown.push_str(&format!(
-                "- {} - {} ({}, {} event(s))\n",
+                "- {} - {} ({})\n",
                 clean_report_text(&session.title),
                 format_duration_words(session.duration_ms),
-                clean_report_text(&session.status),
-                session.evidence_event_ids.len()
+                clean_report_text(&session.status)
             ));
             if let Some(summary) = session.summary.as_deref().and_then(clean_capture_label) {
                 markdown.push_str(&format!("  - {}\n", clean_report_text(&summary)));
@@ -8363,13 +8526,20 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
         }
     }
 
-    if !snapshot.app_usage_summary.apps.is_empty() {
-        markdown.push_str("\n## App and project usage\n");
+    markdown.push_str("\n## Apps used\n");
+    let visible_apps = snapshot
+        .app_usage_summary
+        .apps
+        .iter()
+        .filter(|app| include_system_apps || is_simple_visible_report_app(&app.app))
+        .collect::<Vec<_>>();
+
+    if !visible_apps.is_empty() {
         markdown.push_str(&format!(
-            "- Total captured app time: {}\n",
-            format_duration_words(snapshot.app_usage_summary.total_duration_ms)
+            "- Total app time: {}\n",
+            format_duration_words(visible_apps.iter().map(|app| app.duration_ms.max(0)).sum())
         ));
-        for app in snapshot.app_usage_summary.apps.iter().take(8) {
+        for app in visible_apps.into_iter().take(8) {
             let project_label = app
                 .projects
                 .first()
@@ -8385,26 +8555,37 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
                     .collect::<Vec<_>>()
                     .join(", ")
             };
+            let example_label = app
+                .projects
+                .iter()
+                .flat_map(|project| project.examples.iter())
+                .next()
+                .map(|example| clean_report_text(example))
+                .filter(|example| !example.is_empty());
             markdown.push_str(&format!(
-                "- {} - {} on {} ({} event(s), AI: {})\n",
+                "- {} - {} on {}{} (AI: {})\n",
                 clean_report_text(&app.app),
                 format_duration_words(app.duration_ms),
                 project_label,
-                app.events,
+                example_label
+                    .as_deref()
+                    .map(|example| format!(" - {example}"))
+                    .unwrap_or_default(),
                 ai_tools
             ));
         }
+    } else {
+        markdown.push_str("- No app activity captured yet.\n");
     }
 
-    markdown.push_str("\n## AI usage\n");
+    markdown.push_str("\n## AI detected\n");
     if snapshot.ai_usage_summary.tools.is_empty() {
-        markdown.push_str("- No AI tool usage detected from captured apps or browser tabs.\n");
+        markdown.push_str("- No AI activity detected from apps or browser tabs.\n");
     } else {
         markdown.push_str(&format!(
-            "- Total AI usage: {} across {} tool(s); {} output(s) tracked.\n",
+            "- Total AI activity: {} across {} tool(s).\n",
             format_duration_words(snapshot.ai_usage_summary.total_duration_ms),
-            snapshot.ai_usage_summary.tools.len(),
-            snapshot.ai_usage_summary.output_count
+            snapshot.ai_usage_summary.tools.len()
         ));
         for tool in snapshot.ai_usage_summary.tools.iter().take(8) {
             let contexts = if tool.contexts.is_empty() {
@@ -8418,11 +8599,47 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
                     .join(", ")
             };
             markdown.push_str(&format!(
-                "- {} - {} ({} event(s), {})\n",
+                "- {} - {} ({})\n",
                 clean_report_text(&tool.tool),
                 format_duration_words(tool.duration_ms),
-                tool.events,
                 contexts
+            ));
+        }
+    }
+
+    markdown.push_str("\n## Needs review\n");
+    if needs_review_count == 0 {
+        markdown.push_str("- No review items detected from current sessions.\n");
+    } else {
+        for item in snapshot.unclosed_loop_inbox.iter().take(5) {
+            markdown.push_str(&format!(
+                "- {} - {}\n",
+                clean_report_text(&item.title),
+                clean_report_text(&item.detail)
+            ));
+        }
+        for risk in snapshot.loop_risks.iter().take(5) {
+            markdown.push_str(&format!(
+                "- {} - {}\n",
+                clean_report_text(&risk.title),
+                clean_report_text(&risk.reason)
+            ));
+        }
+        for block in snapshot.idle_blocks.iter().filter(|block| !block.classified).take(3) {
+            markdown.push_str(&format!(
+                "- Classify idle gap: {}\n",
+                format_duration_words(block.duration_ms)
+            ));
+        }
+        for session in snapshot
+            .work_sessions
+            .iter()
+            .filter(|session| session.billing_status == "draft")
+            .take(5)
+        {
+            markdown.push_str(&format!(
+                "- Review draft session: {}\n",
+                clean_report_text(&session.title)
             ));
         }
     }
@@ -8548,6 +8765,221 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot) -> String {
     markdown.push_str("- AI export uses configured redaction and local settings.\n");
 
     markdown
+}
+
+fn session_story_bullet(snapshot: &TodaySnapshot, session: &WorkSessionSummary) -> String {
+    let evidence_ids = session
+        .evidence_event_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let events = snapshot
+        .source_events
+        .iter()
+        .filter(|event| {
+            if !evidence_ids.is_empty() {
+                evidence_ids.contains(event.id.as_str())
+            } else {
+                event.started_at < session.ended_at && event.ended_at > session.started_at
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut app_durations: HashMap<String, i64> = HashMap::new();
+    let mut contexts = Vec::new();
+    for event in events {
+        if let Some(app) = event.app.as_deref().and_then(clean_app_label) {
+            if is_simple_visible_report_app(&app) {
+                *app_durations.entry(app).or_default() += event.duration_ms.max(0);
+            }
+        }
+        if let Some(context) = event
+            .workspace_key
+            .as_deref()
+            .or(event.domain.as_deref())
+            .and_then(clean_capture_label)
+        {
+            if !contexts.iter().any(|existing| existing == &context) {
+                contexts.push(context);
+            }
+        }
+    }
+    let mut apps = app_durations.into_iter().collect::<Vec<_>>();
+    apps.sort_by_key(|(_, duration_ms)| std::cmp::Reverse(*duration_ms));
+    let app_label = apps
+        .iter()
+        .take(3)
+        .map(|(app, duration_ms)| format!("{} ({})", app, format_duration_words(*duration_ms)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let context_label = contexts
+        .into_iter()
+        .take(2)
+        .map(|context| clean_report_text(&context))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut parts = vec![
+        clean_report_text(&session.title),
+        format_duration_words(session.duration_ms),
+    ];
+    if !app_label.is_empty() {
+        parts.push(format!("mostly in {app_label}"));
+    }
+    if !context_label.is_empty() {
+        parts.push(format!("context: {context_label}"));
+    }
+    if session.ai_used {
+        parts.push("AI tools detected".to_string());
+    }
+
+    format!("- {}\n", parts.join(" - "))
+}
+
+fn classify_app_category(app_name: &str) -> &'static str {
+    let normalized = app_name
+        .chars()
+        .filter(|ch| !matches!(*ch, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}'))
+        .collect::<String>()
+        .trim()
+        .to_lowercase();
+    if normalized.is_empty() {
+        return "unknown";
+    }
+    if normalized == "idle" || normalized == "away" || normalized.contains("idle") {
+        return "idle";
+    }
+
+    const SYSTEM_APPS: &[&str] = &[
+        "system settings",
+        "system preferences",
+        "activity monitor",
+        "notification center",
+        "usernotificationcenter",
+        "loginwindow",
+        "windowserver",
+        "control center",
+        "dock",
+        "problem reporter",
+    ];
+    const UTILITY_APPS: &[&str] = &[
+        "finder",
+        "preview",
+        "textedit",
+        "quicktime player",
+        "archive utility",
+        "screenshot",
+        "font book",
+    ];
+    const AI_APPS: &[&str] = &[
+        "chatgpt",
+        "claude",
+        "claude code",
+        "gemini",
+        "copilot",
+        "github copilot",
+        "codex",
+        "aider",
+        "cline",
+    ];
+    const COMMUNICATION_APPS: &[&str] = &[
+        "slack",
+        "microsoft teams",
+        "teams",
+        "mail",
+        "outlook",
+        "messages",
+        "discord",
+        "zoom",
+        "google meet",
+    ];
+    const BROWSER_APPS: &[&str] = &[
+        "safari",
+        "firefox",
+        "firefox developer edition",
+        "google chrome",
+        "google chrome canary",
+        "chrome",
+        "brave browser",
+        "brave",
+        "microsoft edge",
+        "edge",
+        "arc",
+        "chromium",
+        "opera",
+        "vivaldi",
+        "chatgpt atlas",
+    ];
+    const WORK_APPS: &[&str] = &[
+        "code",
+        "visual studio code",
+        "vs code",
+        "vs code insiders",
+        "cursor",
+        "terminal",
+        "iterm",
+        "iterm2",
+        "warp",
+        "xcode",
+        "intellij idea",
+        "webstorm",
+        "pycharm",
+        "goland",
+        "datagrip",
+        "zed",
+        "sublime text",
+        "mysql workbench",
+        "postman",
+        "docker",
+        "figma",
+        "notion",
+        "obsidian",
+    ];
+
+    if SYSTEM_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "system";
+    }
+    if UTILITY_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "utility";
+    }
+    if AI_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "ai";
+    }
+    if COMMUNICATION_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "communication";
+    }
+    if BROWSER_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "browser";
+    }
+    if WORK_APPS
+        .iter()
+        .any(|name| normalized == *name || normalized.contains(*name))
+    {
+        return "work";
+    }
+    "unknown"
+}
+
+fn is_simple_visible_report_app(app_name: &str) -> bool {
+    !matches!(
+        classify_app_category(app_name),
+        "system" | "utility" | "idle" | "unknown"
+    )
 }
 
 fn build_export_analysis_markdown(export: &ExportPayload) -> String {
@@ -8845,4 +9277,48 @@ pub fn default_database_path() -> Result<PathBuf> {
         .or_else(dirs::home_dir)
         .context("failed to resolve data directory")?;
     Ok(base.join(DATA_DIR_NAME).join(DB_FILE_NAME))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_pause_state() -> PauseState {
+        PauseState {
+            paused: false,
+            reason: None,
+            updated_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn capture_health_degrades_when_required_os_permissions_are_missing() {
+        let summary = build_capture_health_with_permission_state(
+            &[],
+            &Settings::default(),
+            &test_pause_state(),
+            false,
+        );
+
+        assert_eq!(summary.status, "needs_setup");
+        assert!(summary.checks.iter().any(|check| {
+            check.id == "os-permissions"
+                && check.status == "needs_setup"
+                && check.detail.contains("Accessibility")
+        }));
+    }
+
+    #[test]
+    fn capture_health_does_not_overstate_empty_capture_as_healthy() {
+        let mut settings = Settings::default();
+        settings.terminal_bridge_path = Some("/tmp/daytrail-shell-integration".into());
+        let summary =
+            build_capture_health_with_permission_state(&[], &settings, &test_pause_state(), true);
+
+        assert_eq!(summary.status, "warming_up");
+        assert!(summary
+            .checks
+            .iter()
+            .any(|check| check.id == "os-permissions" && check.status == "ok"));
+    }
 }

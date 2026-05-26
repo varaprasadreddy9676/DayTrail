@@ -25,6 +25,14 @@ pub fn capture_permission_summary_for_platform(
     platform: &str,
     accessibility_granted: bool,
 ) -> CapturePermissionSummary {
+    capture_permission_summary_for_platform_with_browser_check(platform, accessibility_granted, None)
+}
+
+fn capture_permission_summary_for_platform_with_browser_check(
+    platform: &str,
+    accessibility_granted: bool,
+    browser_automation_check: Option<CapturePermissionCheck>,
+) -> CapturePermissionSummary {
     let executable_path = std::env::current_exe()
         .ok()
         .and_then(|path| path.canonicalize().ok().or(Some(path)))
@@ -39,7 +47,7 @@ pub fn capture_permission_summary_for_platform(
         executable_path.as_deref(),
     );
     let checks = match platform {
-        "macos" => macos_permission_checks(accessibility_granted),
+        "macos" => macos_permission_checks(accessibility_granted, browser_automation_check),
         "windows" => windows_permission_checks(),
         _ => default_permission_checks(),
     };
@@ -122,7 +130,10 @@ fn permission_diagnostics(
     diagnostics
 }
 
-fn macos_permission_checks(accessibility_granted: bool) -> Vec<CapturePermissionCheck> {
+fn macos_permission_checks(
+    accessibility_granted: bool,
+    browser_automation_check: Option<CapturePermissionCheck>,
+) -> Vec<CapturePermissionCheck> {
     vec![
         CapturePermissionCheck {
             id: "accessibility".to_string(),
@@ -142,16 +153,7 @@ fn macos_permission_checks(accessibility_granted: bool) -> Vec<CapturePermission
             settings_url: Some(ACCESSIBILITY_URL.to_string()),
             action_label: Some("Open Accessibility Settings".to_string()),
         },
-        CapturePermissionCheck {
-            id: "browser-automation".to_string(),
-            label: "Browser automation".to_string(),
-            required: false,
-            status: "user_prompt".to_string(),
-            detail: "Lets DayTrail read your active browser tab URL. Click \"Grant now\" to approve for each open browser in one step — or macOS will ask the first time DayTrail captures a tab.".to_string(),
-            settings_label: Some("Privacy & Security > Automation".to_string()),
-            settings_url: Some(AUTOMATION_URL.to_string()),
-            action_label: Some("Grant now".to_string()),
-        },
+        browser_automation_check.unwrap_or_else(default_browser_automation_check),
         CapturePermissionCheck {
             id: "screen-recording".to_string(),
             label: "Screen Recording".to_string(),
@@ -163,6 +165,151 @@ fn macos_permission_checks(accessibility_granted: bool) -> Vec<CapturePermission
             action_label: None,
         },
     ]
+}
+
+fn default_browser_automation_check() -> CapturePermissionCheck {
+    CapturePermissionCheck {
+        id: "browser-automation".to_string(),
+        label: "Browser automation".to_string(),
+        required: false,
+        status: "user_prompt".to_string(),
+        detail: "Lets DayTrail read active tab URLs from supported browsers. Click \"Grant now\" while the browser is open, or macOS will ask the first time DayTrail captures a tab.".to_string(),
+        settings_label: Some("Privacy & Security > Automation".to_string()),
+        settings_url: Some(AUTOMATION_URL.to_string()),
+        action_label: Some("Grant now".to_string()),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BrowserAutomationTarget {
+    app_name: &'static str,
+    script_kind: BrowserAutomationScriptKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BrowserAutomationScriptKind {
+    Safari,
+    Chromium,
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_AUTOMATION_BROWSERS: &[BrowserAutomationTarget] = &[
+    BrowserAutomationTarget {
+        app_name: "Safari",
+        script_kind: BrowserAutomationScriptKind::Safari,
+    },
+    BrowserAutomationTarget {
+        app_name: "Google Chrome",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Google Chrome Canary",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Microsoft Edge",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Brave Browser",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "ChatGPT Atlas",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Arc",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Chromium",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Opera",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+    BrowserAutomationTarget {
+        app_name: "Vivaldi",
+        script_kind: BrowserAutomationScriptKind::Chromium,
+    },
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BrowserAutomationProbeStatus {
+    Granted,
+    Denied,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserAutomationProbeResult {
+    browser: String,
+    status: BrowserAutomationProbeStatus,
+}
+
+fn browser_automation_check_from_probe_results(
+    results: &[BrowserAutomationProbeResult],
+) -> CapturePermissionCheck {
+    let mut granted = Vec::new();
+    let mut blocked = Vec::new();
+
+    for result in results {
+        match result.status {
+            BrowserAutomationProbeStatus::Granted => granted.push(result.browser.as_str()),
+            BrowserAutomationProbeStatus::Denied | BrowserAutomationProbeStatus::Failed => {
+                blocked.push(result.browser.as_str())
+            }
+        }
+    }
+
+    let (status, detail, action_label) = if results.is_empty() {
+        (
+            "not_running",
+            "Open Safari, Chrome, Brave, Edge, Arc, Chromium, Opera, Vivaldi, or ChatGPT Atlas, then click \"Grant now\" to verify browser automation.".to_string(),
+            "Grant now",
+        )
+    } else if blocked.is_empty() {
+        (
+            "granted",
+            format!(
+                "Automation verified for running browsers: {}. DayTrail can read active tab URLs when those browsers are frontmost.",
+                granted.join(", ")
+            ),
+            "Recheck",
+        )
+    } else if granted.is_empty() {
+        (
+            "missing",
+            format!(
+                "macOS did not allow DayTrail to automate {}. Open Automation Settings and enable DayTrail for the browser, then click \"Grant now\" again.",
+                blocked.join(", ")
+            ),
+            "Grant now",
+        )
+    } else {
+        (
+            "limited",
+            format!(
+                "Automation verified for {}. Still needs access for {}.",
+                granted.join(", "),
+                blocked.join(", ")
+            ),
+            "Grant now",
+        )
+    };
+
+    CapturePermissionCheck {
+        id: "browser-automation".to_string(),
+        label: "Browser automation".to_string(),
+        required: false,
+        status: status.to_string(),
+        detail: detail.to_string(),
+        settings_label: Some("Privacy & Security > Automation".to_string()),
+        settings_url: Some(AUTOMATION_URL.to_string()),
+        action_label: Some(action_label.to_string()),
+    }
 }
 
 fn windows_permission_checks() -> Vec<CapturePermissionCheck> {
@@ -266,39 +413,78 @@ pub fn request_capture_permission(permission_id: &str) -> Result<CapturePermissi
 pub fn trigger_browser_automation_prompt() -> Result<CapturePermissionSummary> {
     #[cfg(target_os = "macos")]
     {
-        const BROWSERS: &[&str] = &[
-            "Safari",
-            "Google Chrome",
-            "Firefox",
-            "Arc",
-            "Brave Browser",
-            "Microsoft Edge",
-            "Opera",
-            "Vivaldi",
-        ];
+        let mut results = Vec::new();
 
-        for browser in BROWSERS {
-            // Only script browsers that are already running.
-            let running = std::process::Command::new("pgrep")
-                .args(["-xq", browser])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
+        for browser in MACOS_AUTOMATION_BROWSERS {
+            let running = browser_is_running(browser.app_name);
 
             if running {
-                let script = format!("tell application \"{}\" to get name", browser);
-                let _ = std::process::Command::new("osascript")
+                let script = browser_automation_probe_script(*browser);
+                let result = std::process::Command::new("osascript")
                     .args(["-e", &script])
                     .output();
+                let status = match result {
+                    Ok(output) if output.status.success() => BrowserAutomationProbeStatus::Granted,
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                        if stderr.contains("-1743")
+                            || stderr.contains("not authorized")
+                            || stderr.contains("not authorised")
+                            || stderr.contains("not allowed")
+                        {
+                            BrowserAutomationProbeStatus::Denied
+                        } else {
+                            BrowserAutomationProbeStatus::Failed
+                        }
+                    }
+                    Err(_) => BrowserAutomationProbeStatus::Failed,
+                };
+                results.push(BrowserAutomationProbeResult {
+                    browser: browser.app_name.to_string(),
+                    status,
+                });
             }
         }
 
-        Ok(capture_permission_summary())
+        Ok(capture_permission_summary_for_platform_with_browser_check(
+            "macos",
+            macos_accessibility_trusted(false),
+            Some(browser_automation_check_from_probe_results(&results)),
+        ))
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(capture_permission_summary())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn browser_is_running(app_name: &str) -> bool {
+    let script = format!("application \"{}\" is running", app_name.replace('"', "\\\""));
+    std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .ok()
+        .and_then(|output| {
+            output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).trim().eq_ignore_ascii_case("true"))
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn browser_automation_probe_script(target: BrowserAutomationTarget) -> String {
+    let app_name = target.app_name.replace('"', "\\\"");
+    match target.script_kind {
+        BrowserAutomationScriptKind::Safari => format!(
+            "tell application \"{app_name}\" to if (count of windows) > 0 then get URL of current tab of front window"
+        ),
+        BrowserAutomationScriptKind::Chromium => format!(
+            "tell application \"{app_name}\" to if (count of windows) > 0 then get URL of active tab of front window"
+        ),
     }
 }
 
@@ -359,7 +545,11 @@ fn macos_accessibility_trusted(prompt: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_bundle_path_from_executable, capture_permission_summary_for_platform};
+    use super::{
+        app_bundle_path_from_executable, browser_automation_check_from_probe_results,
+        capture_permission_summary_for_platform, BrowserAutomationProbeResult,
+        BrowserAutomationProbeStatus,
+    };
 
     #[test]
     fn macos_accessibility_missing_requires_setup() {
@@ -389,6 +579,56 @@ mod tests {
         assert_eq!(summary.checks[0].status, "granted");
         assert_eq!(summary.checks[1].status, "user_prompt");
         assert_eq!(summary.checks[2].status, "not_required");
+    }
+
+    #[test]
+    fn browser_automation_probe_reports_no_running_browser() {
+        let check = browser_automation_check_from_probe_results(&[]);
+
+        assert_eq!(check.id, "browser-automation");
+        assert_eq!(check.status, "not_running");
+        assert_eq!(check.action_label.as_deref(), Some("Grant now"));
+    }
+
+    #[test]
+    fn browser_automation_probe_reports_granted_browsers() {
+        let check = browser_automation_check_from_probe_results(&[BrowserAutomationProbeResult {
+            browser: "Brave Browser".to_string(),
+            status: BrowserAutomationProbeStatus::Granted,
+        }]);
+
+        assert_eq!(check.status, "granted");
+        assert!(check.detail.contains("Brave Browser"));
+        assert_eq!(check.action_label.as_deref(), Some("Recheck"));
+    }
+
+    #[test]
+    fn browser_automation_probe_reports_partial_access() {
+        let check = browser_automation_check_from_probe_results(&[
+            BrowserAutomationProbeResult {
+                browser: "Brave Browser".to_string(),
+                status: BrowserAutomationProbeStatus::Granted,
+            },
+            BrowserAutomationProbeResult {
+                browser: "Google Chrome".to_string(),
+                status: BrowserAutomationProbeStatus::Denied,
+            },
+        ]);
+
+        assert_eq!(check.status, "limited");
+        assert!(check.detail.contains("Brave Browser"));
+        assert!(check.detail.contains("Google Chrome"));
+    }
+
+    #[test]
+    fn browser_automation_probe_reports_missing_access() {
+        let check = browser_automation_check_from_probe_results(&[BrowserAutomationProbeResult {
+            browser: "Google Chrome".to_string(),
+            status: BrowserAutomationProbeStatus::Denied,
+        }]);
+
+        assert_eq!(check.status, "missing");
+        assert_eq!(check.action_label.as_deref(), Some("Grant now"));
     }
 
     #[test]

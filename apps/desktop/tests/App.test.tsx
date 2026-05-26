@@ -28,14 +28,14 @@ describe("WorkTrace command center", () => {
     );
     expect(screen.getByLabelText(/today stats/i)).toBeInTheDocument();
     expect(screen.getByText(/desktop bridge not connected/i)).toBeInTheDocument();
-    expect(screen.getByText(/no work captured yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no work app yet/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^activity$/i }));
 
     expect(
       screen.getByRole("heading", { level: 2, name: /activity/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/no activity yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no sessions yet/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^activity$/i })).toHaveAttribute(
       "aria-current",
       "page",
@@ -83,7 +83,7 @@ describe("WorkTrace command center", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: /^settings$/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/what daytrail captures/i)).toBeInTheDocument();
+    expect(screen.getByText(/choose how much detail daytrail shows/i)).toBeInTheDocument();
     expect(screen.queryByText(/^unknown$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/default capture policy/i)).not.toBeInTheDocument();
 
@@ -91,6 +91,7 @@ describe("WorkTrace command center", () => {
 
     await user.selectOptions(screen.getByLabelText(/provider/i), "Gemini");
     expect(screen.getByLabelText(/model/i)).toHaveValue("gemini-flash-latest");
+    await user.click(screen.getByText(/advanced endpoint/i));
     expect(screen.getByLabelText(/endpoint/i)).toHaveValue(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
     );
@@ -113,10 +114,7 @@ describe("WorkTrace command center", () => {
 
     await user.click(screen.getByRole("button", { name: /^reports$/i }));
 
-    expect(screen.getByRole("button", { name: /^summary$/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByText(/what will be summarized/i)).toBeInTheDocument();
     await user.click(screen.getAllByRole("button", { name: /^generate$/i })[0]);
     expect(screen.getByLabelText(/generated report markdown/i).textContent).toMatch(
       /daily work report/i,
@@ -335,12 +333,12 @@ describe("WorkTrace command center", () => {
     render(<App />);
 
     expect((await screen.findAllByText(/sqlite capture block/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/follow-ups/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/needs review/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/ship backend wiring/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /capture paused/i })).toBeInTheDocument();
-    expect(screen.getByText(/ai-active today/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/ai detected/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/chatgpt/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/usage by app/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/top apps today/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/google chrome/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getAllByRole("button", { name: /sqlite capture block/i })[0]);
@@ -355,11 +353,14 @@ describe("WorkTrace command center", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: /activity/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/select project \/ workspace/i)).toBeInTheDocument();
-    expect(screen.getByText(/activity details/i)).toBeInTheDocument();
-    await user.click(screen.getAllByRole("button", { name: /google chrome/i })[0]);
+    expect(screen.getByRole("tab", { name: /^sessions$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /open session/i }).length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: /open session/i })[0]);
+    expect(screen.getByText(/main apps/i)).toBeInTheDocument();
+    expect(screen.getByText(/activity items/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /^apps$/i }));
+    expect(screen.getByText(/top apps today/i)).toBeInTheDocument();
     expect(screen.getAllByText(/chatgpt\.com/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/https:\/\/chatgpt\.com\/c\/thread/i).length).toBeGreaterThan(0);
     expect(invoke).toHaveBeenCalledWith("today", undefined);
   });
 
@@ -503,10 +504,9 @@ describe("WorkTrace command center", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("generate_daily_report", undefined));
 
     await user.click(screen.getByRole("button", { name: /^reports$/i }));
-    await user.click(screen.getByRole("button", { name: /^timeline$/i }));
 
     expect(screen.getByLabelText(/generated report markdown/i).textContent).toMatch(
-      /no source inputs captured yet/i,
+      /daily work execution report/i,
     );
     expect(screen.queryByRole("button", { name: /weekly review/i })).not.toBeInTheDocument();
   });

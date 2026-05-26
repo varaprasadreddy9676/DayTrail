@@ -9,7 +9,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "check": "tsc -b --pretty false",
-    "test": "vitest --run",
+    "test": "vitest",
     "test:watch": "vitest",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "cargo tauri"

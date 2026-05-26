@@ -1,6 +1,14 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildActivityView } from "./lib/viewModels/activityViewModel";
+import { buildAiImpactView } from "./lib/viewModels/aiImpactViewModel";
+import { isSimpleVisibleApp } from "./lib/viewModels/appClassification";
+import { buildHourTimelineView, normalizeExperienceSettings, type ExperienceSettingsLike } from "./lib/viewModels/hourTimelineViewModel";
+import { buildDeterministicReportMarkdown, buildReportView } from "./lib/viewModels/reportViewModel";
+import { buildReviewView } from "./lib/viewModels/reviewViewModel";
+import { buildSettingsView } from "./lib/viewModels/settingsViewModel";
+import { buildTodayView } from "./lib/viewModels/todayViewModel";
 
 // ── Toast system ────────────────────────────────────────────────────────────
 type ToastKind = "success" | "error" | "info" | "warning";
@@ -105,6 +113,11 @@ type BackendSettings = {
   aiEndpoint?: string;
   aiRedactSecrets?: boolean;
   fullClipboardHistory?: boolean;
+  experienceMode?: "simple" | "pro";
+  showSystemApps?: boolean;
+  showRawEvents?: boolean;
+  showCaptureConfidence?: boolean;
+  showAiDetails?: "summary" | "detailed";
 };
 
 type BackendStorageLocationInfo = {
@@ -281,6 +294,7 @@ type BackendAppUsageSummary = {
   totalDurationMs: number;
   apps: Array<{
     app: string;
+    category?: string | null;
     durationMs: number;
     events: number;
     projects: Array<{
@@ -552,7 +566,8 @@ type WorkspaceFolder = {
 const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "today", label: "Today", icon: "layout" },
   { id: "apps", label: "Activity", icon: "apps" },
-  { id: "review", label: "Review", icon: "archive" },
+  { id: "ai", label: "AI Impact", icon: "ritual" },
+  { id: "review", label: "Needs Review", icon: "archive" },
   { id: "rituals", label: "Reports", icon: "ritual" },
   { id: "settings", label: "Settings", icon: "sliders" },
 ];
@@ -564,6 +579,7 @@ const streams: Stream[] = [];
 const commandSuggestions = [
   "/today",
   "/activity",
+  "/ai-usage",
   "/report",
   "/export",
 ];
@@ -573,7 +589,7 @@ const commandLabels: Record<string, string> = {
   "/activity": "Open Activity",
   "/report": "Generate daily report",
   "/what-did-i-do": "What did I work on today?",
-  "/ai-usage": "Open Activity",
+  "/ai-usage": "Open AI Impact",
   "/export": "Export data",
   "/eod": "Generate daily report",
 };
@@ -698,7 +714,7 @@ const emptyStream: Stream = {
   events: [],
 };
 
-function buildLocalReportMarkdown(_reportType: RitualKey, snapshot: BackendTodaySnapshot | null) {
+function buildLocalReportMarkdown(_reportType: RitualKey, snapshot: BackendTodaySnapshot | null, settings?: ExperienceSettingsLike) {
   const title = "Daily Work Report";
 
   if (!snapshot) {
@@ -709,53 +725,7 @@ No captured local data is available yet.
 Start capture from the desktop watcher, browser bridge, editor bridge, or terminal bridge, then regenerate this report.`;
   }
 
-  const sessions = snapshot.workSessions.slice(0, 8);
-  const apps = snapshot.appUsageSummary?.apps.slice(0, 8) ?? [];
-  const aiTools = snapshot.aiUsageSummary?.tools.slice(0, 8) ?? [];
-  const notes = snapshot.quickNotes.slice(0, 5);
-
-  const lines = [
-    `# ${title}`,
-    "",
-    "## Overview",
-    `- Captured ${sessions.length} work session${sessions.length === 1 ? "" : "s"} and ${snapshot.sourceEvents?.length ?? 0} source event${(snapshot.sourceEvents?.length ?? 0) === 1 ? "" : "s"}.`,
-    `- Tracked ${formatDuration(snapshot.appUsageSummary?.totalDurationMs ?? 0)} of app activity.`,
-    `- Detected ${formatDuration(snapshot.aiUsageSummary?.totalDurationMs ?? 0)} of AI usage across ${aiTools.length} tool${aiTools.length === 1 ? "" : "s"}.`,
-    "",
-    "## Work activity",
-    ...(sessions.length
-      ? sessions.map(
-          (session) =>
-            `- ${session.title} - ${formatDuration(session.durationMs)} (${session.status}, ${session.evidenceEventIds?.length ?? 0} evidence event${(session.evidenceEventIds?.length ?? 0) === 1 ? "" : "s"})`,
-        )
-      : ["- No work sessions captured yet."]),
-    "",
-    "## App usage",
-    ...(apps.length
-      ? apps.map(
-          (app) =>
-            `- ${app.app} - ${formatDuration(app.durationMs)} across ${app.projects.length} context${app.projects.length === 1 ? "" : "s"}${app.aiTools.length ? `, AI: ${app.aiTools.map((tool) => tool.tool).join(", ")}` : ""}`,
-        )
-      : ["- No app usage captured yet."]),
-    "",
-    "## AI usage",
-    ...(aiTools.length
-      ? aiTools.map(
-          (tool) =>
-            `- ${tool.tool} - ${formatDuration(tool.durationMs)} (${tool.events} event${tool.events === 1 ? "" : "s"})`,
-        )
-      : ["- No AI tool usage detected yet."]),
-    "",
-    "## Follow-ups",
-    `- Reply risks: ${snapshot.pendingReplies.length}`,
-    `- Open commitments: ${snapshot.commitments.length}`,
-    `- Unclosed loops: ${snapshot.unclosedLoopInbox?.length ?? 0}`,
-    "",
-    "## Manual notes",
-    ...(notes.length ? notes.map((note) => `- ${note.body}`) : ["- No manual notes saved."]),
-  ];
-
-  return lines.join("\n");
+  return buildDeterministicReportMarkdown(snapshot, settings);
 }
 
 async function invokeTauri<T>(
@@ -1102,14 +1072,17 @@ function AppIcon({ appName, className = "sidebar-app-icon" }: { appName: string;
     return cached !== undefined ? cached : null;
   });
   const [loading, setLoading] = useState(() => !appIconCache.has(appName));
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (appIconCache.has(appName)) return;
     let cancelled = false;
     invokeTauri<string | null>("get_app_icon", { appName }).then((src) => {
       if (!cancelled) {
-        appIconCache.set(appName, src ?? null);
-        setIconSrc(src ?? null);
+        const validatedSrc = src && src.startsWith("data:image/") ? src : null;
+        appIconCache.set(appName, validatedSrc);
+        setIconSrc(validatedSrc);
+        setFailed(false);
         setLoading(false);
       }
     }).catch(() => {
@@ -1121,8 +1094,18 @@ function AppIcon({ appName, className = "sidebar-app-icon" }: { appName: string;
     return () => { cancelled = true; };
   }, [appName]);
 
-  if (!loading && iconSrc) {
-    return <img alt={appName} className={`${className} app-icon-img`} src={iconSrc} />;
+  if (!loading && iconSrc && !failed) {
+    return (
+      <img
+        alt={appName}
+        className={`${className} app-icon-img`}
+        onError={() => {
+          appIconCache.set(appName, null);
+          setFailed(true);
+        }}
+        src={iconSrc}
+      />
+    );
   }
   return (
     <span className={className} style={{ background: appColor(appName) }}>
@@ -1526,9 +1509,9 @@ function mapStreams(snapshot: BackendTodaySnapshot | null): Stream[] {
   return snapshot.parallelStreams.map((stream) => ({
     id: stream.id,
     title: compactDisplayLabel(stream.title),
-    summary: stream.summary ?? "Captured from local activity records.",
+    summary: stream.summary ?? "Captured from local activity details.",
     status: stream.status,
-    sessions: `${stream.eventIds.length} activity record(s)`,
+    sessions: `${stream.eventIds.length} activity item${stream.eventIds.length === 1 ? "" : "s"}`,
     eventIds: stream.eventIds,
     events: mapStreamEvents(stream.eventIds, snapshot.sourceEvents),
   }));
@@ -2068,9 +2051,20 @@ export default function App() {
 
   const displayStreams = useMemo(() => mapStreams(todaySnapshot), [todaySnapshot]);
   const displaySessions = useMemo(() => mapSessions(todaySnapshot), [todaySnapshot]);
+  const experienceSettings = useMemo(
+    () => normalizeExperienceSettings(todaySnapshot?.settings),
+    [todaySnapshot?.settings],
+  );
+  const isSimpleMode = experienceSettings.experienceMode === "simple";
   const displayApps = useMemo(
-    () => todaySnapshot?.appUsageSummary?.apps ?? [],
-    [todaySnapshot],
+    () => {
+      const apps = todaySnapshot?.appUsageSummary?.apps ?? [];
+      if (!isSimpleMode || experienceSettings.showSystemApps) {
+        return apps;
+      }
+      return apps.filter((app) => isSimpleVisibleApp(app.app, app.category));
+    },
+    [experienceSettings.showSystemApps, isSimpleMode, todaySnapshot],
   );
 
   // Most recently captured app — always visible in sidebar even if outside top-8
@@ -2619,6 +2613,36 @@ export default function App() {
     addToast("success", "Settings saved");
   }
 
+  async function saveExperienceSettings(patch: Partial<BackendSettings>) {
+    const nextSettings = {
+      ...(todaySnapshot?.settings ?? ({} as BackendSettings)),
+      ...patch,
+    };
+
+    if (!hasTauriRuntime()) {
+      setTodaySnapshot((previous) =>
+        previous ? { ...previous, settings: nextSettings } : previous,
+      );
+      addToast("success", "Display mode updated");
+      return;
+    }
+
+    setSaveState("Saving settings...");
+    const savedSettings = await invokeTauri<BackendSettings>("update_settings", { patch });
+
+    if (!savedSettings) {
+      setSaveState("Save failed");
+      addToast("error", "Settings not saved", "Could not update display mode.");
+      return;
+    }
+
+    setTodaySnapshot((previous) =>
+      previous ? { ...previous, settings: { ...previous.settings, ...savedSettings } } : previous,
+    );
+    setSaveState("Settings saved");
+    addToast("success", "Display mode updated");
+  }
+
   async function submitOfflineBlock(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const now = new Date();
@@ -2727,7 +2751,7 @@ export default function App() {
     });
     setExportingTimesheet(false);
     if (md) {
-      await copyToClipboard(md);
+      await writeClipboardText(md);
       addToast("success", "Timesheet copied", "Markdown timesheet copied to clipboard.");
     } else {
       addToast("error", "Export failed", "Could not generate timesheet.");
@@ -2779,7 +2803,7 @@ export default function App() {
 
     setExportPreview(JSON.stringify(payload, null, 2));
     setExportStatus(
-      `${payload.timesheetRows.length} observed activity row(s), ${payload.aiContributionRows.length} AI contribution(s), ${payload.sourceEvents.length} raw event(s)`,
+      `${payload.timesheetRows.length} activity row(s), ${payload.aiContributionRows.length} AI contribution(s), ${payload.sourceEvents.length} technical item(s)`,
     );
   }
 
@@ -2907,7 +2931,7 @@ export default function App() {
 
     const report = await invokeTauri<BackendReport>("generate_daily_report");
 
-    setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, todaySnapshot));
+    setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, todaySnapshot, experienceSettings));
   }
 
   async function regenerateContextData() {
@@ -2924,8 +2948,10 @@ export default function App() {
   async function runCommand(command: string) {
     if (command === "/today" || command === "/what-did-i-do") {
       setActiveView("today");
-    } else if (command === "/activity" || command === "/ai-usage") {
+    } else if (command === "/activity") {
       setActiveView("apps");
+    } else if (command === "/ai-usage") {
+      setActiveView("ai");
     } else if (command === "/export") {
       setActiveView("automation");
     } else if (command === "/report" || command === "/eod") {
@@ -2989,7 +3015,7 @@ export default function App() {
           ))}
         </nav>
 
-        {sidebarApps.length > 0 && (
+        {!isSimpleMode && sidebarApps.length > 0 && (
           <section className="sidebar-section sidebar-apps" aria-label="Apps today">
             <span className="sidebar-label">Apps Today</span>
             {sidebarApps.map((app) => (
@@ -3099,6 +3125,8 @@ export default function App() {
               selectedStream={latestStream}
               sourceEvents={todaySnapshot?.sourceEvents ?? []}
               sessions={displaySessions}
+              settings={todaySnapshot?.settings}
+              snapshot={todaySnapshot}
               appCount={displayApps.length}
               bridgeStatus={bridgeStatus}
               backendReady={backendReady}
@@ -3113,26 +3141,35 @@ export default function App() {
               }
               onBack={() => setActiveView("today")}
               onOpenActivity={() => setActiveView("apps")}
+              settings={todaySnapshot?.settings}
             />
           )}
           {activeView === "apps" && (
-            <AppsView
-              activeAppName={activeAppName}
-              setActiveAppName={setActiveAppName}
-              summary={todaySnapshot?.appUsageSummary}
-              sourceEvents={todaySnapshot?.sourceEvents ?? []}
-            />
+            isSimpleMode ? (
+              <SimpleActivityView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
+            ) : (
+              <AppsView
+                activeAppName={activeAppName}
+                setActiveAppName={setActiveAppName}
+                summary={todaySnapshot?.appUsageSummary}
+                sourceEvents={todaySnapshot?.sourceEvents ?? []}
+              />
+            )
           )}
           {activeView === "loops" && (
             <LoopsView items={displayLoopItems} onLoopAction={handleLoopAction} />
           )}
           {activeView === "ai" && (
-            <AiLedgerView
-              ledger={todaySnapshot?.aiOutputLedger ?? []}
-              summary={todaySnapshot?.aiUsageSummary}
-              appSummary={todaySnapshot?.appUsageSummary}
-              sourceEvents={todaySnapshot?.sourceEvents ?? []}
-            />
+            isSimpleMode ? (
+              <SimpleAiImpactView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
+            ) : (
+              <AiLedgerView
+                ledger={todaySnapshot?.aiOutputLedger ?? []}
+                summary={todaySnapshot?.aiUsageSummary}
+                appSummary={todaySnapshot?.appUsageSummary}
+                sourceEvents={todaySnapshot?.sourceEvents ?? []}
+              />
+            )
           )}
           {activeView === "automation" && (
             <AutomationView
@@ -3161,18 +3198,22 @@ export default function App() {
             />
           )}
           {activeView === "review" && (
-            <ReviewView
-              sessions={reviewSessions}
-              loading={reviewLoading}
-              fromDate={reviewFromDate}
-              toDate={reviewToDate}
-              onFromDate={setReviewFromDate}
-              onToDate={setReviewToDate}
-              onLoad={loadReviewSessions}
-              onUpdate={updateSessionBilling}
-              onExport={exportTimesheetMarkdown}
-              exporting={exportingTimesheet}
-            />
+            isSimpleMode ? (
+              <NeedsReviewSimpleView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
+            ) : (
+              <ReviewView
+                sessions={reviewSessions}
+                loading={reviewLoading}
+                fromDate={reviewFromDate}
+                toDate={reviewToDate}
+                onFromDate={setReviewFromDate}
+                onToDate={setReviewToDate}
+                onLoad={loadReviewSessions}
+                onUpdate={updateSessionBilling}
+                onExport={exportTimesheetMarkdown}
+                exporting={exportingTimesheet}
+              />
+            )
           )}
           {activeView === "rituals" && (
             <RitualsView
@@ -3180,7 +3221,9 @@ export default function App() {
               onGenerateReport={() => generateRitual(activeRitual)}
               onRegenerateContext={regenerateContextData}
               reportMarkdown={reportMarkdown}
+              settings={todaySnapshot?.settings}
               sourceFeed={displaySourceFeed}
+              snapshot={todaySnapshot}
             />
           )}
           {activeView === "memory" && (
@@ -3211,6 +3254,7 @@ export default function App() {
               onRestartApp={restartDayTrail}
               onTriggerBrowserAutomation={triggerBrowserAutomation}
               onRestoreDatabase={restoreDatabase}
+              onSaveExperienceSettings={saveExperienceSettings}
               permissionStatus={permissionStatus}
               permissionSummary={permissionSummary}
               saveAiConfig={saveAiConfig}
@@ -3221,6 +3265,7 @@ export default function App() {
               setSettingsConfigJson={setSettingsConfigJson}
               setSaveState={setSaveState}
               setLaunchAtLogin={setDraftLaunchAtLogin}
+              settings={todaySnapshot?.settings}
               settingsConfigJson={settingsConfigJson}
               storageInfo={storageInfo}
               storageStatus={storageStatus}
@@ -3466,7 +3511,7 @@ function PermissionStatusList({
             {check.settingsLabel && <small>{check.settingsLabel}</small>}
           </div>
           <strong>{permissionStatusLabel(check.status)}</strong>
-          {check.id === "browser-automation" && check.status === "user_prompt" ? (
+          {check.id === "browser-automation" && check.actionLabel ? (
             <div className="permission-row-actions">
               <button
                 className="button compact primary"
@@ -3474,7 +3519,7 @@ function PermissionStatusList({
                 type="button"
               >
                 <Icon name="check" />
-                <span>Grant now</span>
+                <span>{check.actionLabel}</span>
               </button>
               <button
                 className="button compact"
@@ -3570,6 +3615,12 @@ function permissionStatusLabel(status: string) {
   if (status === "user_prompt") {
     return "Prompts when needed";
   }
+  if (status === "limited") {
+    return "Partial access";
+  }
+  if (status === "not_running") {
+    return "No browser open";
+  }
   if (status === "not_required") {
     return "Not required";
   }
@@ -3590,6 +3641,8 @@ function TodayView({
   selectedStream,
   sourceEvents,
   sessions,
+  settings,
+  snapshot,
   appCount,
   bridgeStatus,
   backendReady,
@@ -3606,26 +3659,48 @@ function TodayView({
   selectedStream: Stream;
   sourceEvents: BackendSourceEvent[];
   sessions: WorkSession[];
+  settings?: BackendSettings;
+  snapshot: BackendTodaySnapshot | null;
   appCount: number;
   bridgeStatus: string;
   backendReady: boolean;
 }) {
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const todaySettings = normalizeExperienceSettings(settings);
+  const visibleSourceEvents = useMemo(() => {
+    if (todaySettings.experienceMode === "pro" || todaySettings.showSystemApps) {
+      return sourceEvents;
+    }
+    return sourceEvents.filter((event) => isSimpleVisibleApp(eventAppLabel(event)));
+  }, [sourceEvents, todaySettings.experienceMode, todaySettings.showSystemApps]);
+  const visibleAppUsageSummary = useMemo(() => {
+    if (!appUsageSummary || todaySettings.experienceMode === "pro" || todaySettings.showSystemApps) {
+      return appUsageSummary;
+    }
+    return {
+      ...appUsageSummary,
+      apps: appUsageSummary.apps.filter((app) => isSimpleVisibleApp(app.app, app.category)),
+    };
+  }, [appUsageSummary, todaySettings.experienceMode, todaySettings.showSystemApps]);
   const openActions = actions.filter((action) => action.state === "open");
   const latestSession = sessions[0] ?? null;
   const latestEvent = [...sourceEvents].sort((left, right) => right.endedAt - left.endedAt)[0] ?? null;
-  const hourBuckets = useMemo(() => buildHourBuckets(sourceEvents), [sourceEvents]);
-  const projectUsage = useMemo(() => buildProjectUsageBreakdown(sourceEvents), [sourceEvents]);
+  const hourBuckets = useMemo(() => buildHourBuckets(visibleSourceEvents), [visibleSourceEvents]);
+  const simpleToday = useMemo(
+    () => buildTodayView(snapshot, settings),
+    [settings, snapshot],
+  );
+  const projectUsage = useMemo(() => buildProjectUsageBreakdown(visibleSourceEvents), [visibleSourceEvents]);
   const activeHour = selectedHour ?? (latestEvent ? new Date(latestEvent.endedAt).getHours() : new Date().getHours());
   const handleSelectHour = (hour: number) => {
     setSelectedHour(hour);
-    onOpenHour(hour);
   };
+  const selectedHourBucket = hourBuckets[activeHour] ?? hourBuckets[new Date().getHours()];
   const inspectedSession =
     sessions.find((session) => session.id === inspectedSessionId) ?? null;
   const inspectedEvents = inspectedSession
-    ? sourceEventsForIds(sourceEvents, inspectedSession.evidenceEventIds)
+    ? sourceEventsForIds(visibleSourceEvents, inspectedSession.evidenceEventIds)
     : [];
   const hasStream = selectedStream.id !== "empty";
   const latestEventApp = latestEvent ? eventAppLabel(latestEvent) : null;
@@ -3659,23 +3734,22 @@ function TodayView({
   const aiActiveDuration = sourceEvents
     .filter((event) => aiToolLabelsForEvent(event).length > 0)
     .reduce((sum, event) => sum + event.durationMs, 0);
-  const topApp = appUsageSummary?.apps[0] ?? null;
   const totalTrackedDuration = hourBuckets.reduce((sum, bucket) => sum + bucket.durationMs, 0);
   const stats = [
-    { label: "Time tracked", value: formatDuration(totalTrackedDuration), detail: "captured today" },
+    { label: "Time tracked", value: simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration), detail: "captured today" },
     { label: "Work sessions", value: sessions.length, detail: "captured today" },
-    { label: "Apps used", value: appCount, detail: "with activity" },
+    { label: "Work apps", value: simpleToday.appCount || appCount, detail: "with activity" },
     {
-      label: "AI time",
+      label: "AI detected",
       value: aiActiveDuration > 0 ? formatDuration(aiActiveDuration) : "0m",
       detail: aiToolCount ? `${aiToolCount} tool${aiToolCount === 1 ? "" : "s"}` : "not detected yet",
     },
     {
-      label: "Top app",
-      value: topApp?.app ?? "-",
-      detail: topApp ? formatDuration(topApp.durationMs) : "waiting",
+      label: "Top work app",
+      value: simpleToday.topWorkApp?.name ?? "No work app yet",
+      detail: simpleToday.topWorkApp?.durationLabel ?? "waiting",
     },
-    { label: "Follow-ups", value: attentionCount, detail: "needs attention" },
+    { label: "Needs review", value: attentionCount, detail: "items" },
   ];
 
   return (
@@ -3696,6 +3770,16 @@ function TodayView({
         </div>
       </section>
 
+      {simpleToday.lowData && (
+        <section className="panel-block early-capture-panel">
+          <PanelHeader eyebrow="Getting started" title="DayTrail is capturing your workday" value={simpleToday.totalTrackedLabel} />
+          <p>
+            Captured so far: {simpleToday.totalTrackedLabel} across {simpleToday.appCount} work app{simpleToday.appCount === 1 ? "" : "s"}.
+            Keep working. Your timeline becomes useful after a few minutes.
+          </p>
+        </section>
+      )}
+
       <section className="today-stat-strip" aria-label="Today stats">
         {stats.map((stat) => (
           <div className="stat-card" key={stat.label}>
@@ -3712,11 +3796,15 @@ function TodayView({
           onSelectHour={handleSelectHour}
           selectedHour={activeHour}
         />
+        <SelectedHourPanel
+          bucket={selectedHourBucket}
+          onOpenFullBreakdown={() => onOpenHour(activeHour)}
+        />
       </section>
 
       <section className="today-highlights-grid" aria-label="Today highlights">
         <ProjectUsagePanel projects={projectUsage} />
-        <AppUsagePanel summary={appUsageSummary} />
+        <AppUsagePanel summary={visibleAppUsageSummary} />
         <AiUsagePanel activeDurationMs={aiActiveDuration} summary={aiUsageSummary} />
         <section className="panel-block recent-panel">
           <PanelHeader
@@ -3759,7 +3847,7 @@ function TodayView({
             {openActions.length === 0 && (
               <div className="empty-state compact-empty">
                 <strong>No open actions</strong>
-                <span>Follow-ups, promises, idle gaps, and AI drafts appear here when captured.</span>
+                <span>Unclear sessions, idle gaps, AI activity without context, and unfinished report inputs appear here when detected.</span>
               </div>
             )}
             {openActions.slice(0, 6).map((action) => (
@@ -3907,15 +3995,95 @@ function HourlyTimelinePanel({
   );
 }
 
+function SelectedHourPanel({
+  bucket,
+  onOpenFullBreakdown,
+}: {
+  bucket?: HourBucket;
+  onOpenFullBreakdown: () => void;
+}) {
+  const hour = bucket?.hour ?? new Date().getHours();
+  const label = bucket
+    ? `${bucket.label} - ${localHourLabel((bucket.hour + 1) % 24)}`
+    : `${localHourLabel(hour)} - ${localHourLabel((hour + 1) % 24)}`;
+  const aiByTool = bucket
+    ? [...bucket.events.reduce((tools, event) => {
+        aiToolLabelsForEvent(event).forEach((tool) => {
+          tools.set(tool, (tools.get(tool) ?? 0) + event.durationMs);
+        });
+        return tools;
+      }, new Map<string, number>())].sort((left, right) => right[1] - left[1])
+    : [];
+
+  return (
+    <aside className="panel-block selected-hour-panel">
+      <PanelHeader
+        eyebrow="Selected hour"
+        title={label}
+        value={bucket?.durationMs ? formatDuration(bucket.durationMs) : "No activity"}
+      />
+      <div className="selected-hour-metrics">
+        <div>
+          <span>Total tracked</span>
+          <strong>{formatDuration(bucket?.durationMs ?? 0)}</strong>
+        </div>
+        <div>
+          <span>Apps</span>
+          <strong>{bucket?.apps.length ?? 0}</strong>
+        </div>
+        <div>
+          <span>AI detected</span>
+          <strong>{bucket?.aiTools.length ?? 0}</strong>
+        </div>
+      </div>
+      <div className="selected-hour-list">
+        {(bucket?.apps ?? []).slice(0, 7).map((app) => (
+          <article className="selected-hour-row" key={app.app}>
+            <AppIcon appName={app.app} className="app-color-dot" />
+            <div>
+              <strong>{app.app}</strong>
+              <em>{app.contexts.slice(0, 2).join(" · ") || "Activity details available"}</em>
+            </div>
+            <span>{formatDuration(app.durationMs)}</span>
+          </article>
+        ))}
+        {bucket && bucket.apps.length === 0 && (
+          <div className="empty-state compact-empty">
+            <strong>No activity in this hour</strong>
+            <span>Apps, sites, folders, and AI tools appear here when captured.</span>
+          </div>
+        )}
+      </div>
+      {aiByTool.length > 0 && (
+        <div className="tool-chip-row" aria-label="AI tools detected in selected hour">
+          {aiByTool.slice(0, 5).map(([tool, duration]) => (
+            <span className="tool-chip" key={tool}>
+              {tool} · {formatDuration(duration)}
+            </span>
+          ))}
+        </div>
+      )}
+      <button className="button compact" onClick={onOpenFullBreakdown} type="button">
+        View full hour breakdown
+        <Icon name="arrow" />
+      </button>
+    </aside>
+  );
+}
+
 function HourDetailView({
   bucket,
   onBack,
   onOpenActivity,
+  settings,
 }: {
   bucket: HourBucket;
   onBack: () => void;
   onOpenActivity: () => void;
+  settings?: BackendSettings;
 }) {
+  const detailSettings = normalizeExperienceSettings(settings);
+  const showTechnicalDetails = detailSettings.experienceMode === "pro" && detailSettings.showRawEvents;
   const aiDuration = bucket.apps
     .filter((app) => app.aiTools.length > 0)
     .reduce((sum, app) => sum + app.durationMs, 0);
@@ -3958,7 +4126,7 @@ function HourDetailView({
         <div className="stat-card">
           <span>Time spent</span>
           <strong>{formatDuration(bucket.durationMs)}</strong>
-          <em>{bucket.events.length} record{bucket.events.length === 1 ? "" : "s"}</em>
+          <em>{bucket.events.length} item{bucket.events.length === 1 ? "" : "s"}</em>
         </div>
         <div className="stat-card">
           <span>Apps used</span>
@@ -3966,7 +4134,7 @@ function HourDetailView({
           <em>{topApp?.app ?? "No app"}</em>
         </div>
         <div className="stat-card">
-          <span>AI-active</span>
+          <span>AI detected</span>
           <strong>{formatDuration(aiDuration)}</strong>
           <em>{bucket.aiTools.length ? bucket.aiTools.join(", ") : "No AI detected"}</em>
         </div>
@@ -4017,7 +4185,7 @@ function HourDetailView({
                     <div className="hour-app-row-body">
                       <div className="hour-app-row-header">
                         <strong>{app.app}</strong>
-                        <span className="hour-app-row-meta">{formatDuration(app.durationMs)} · {app.events} record{app.events === 1 ? "" : "s"}</span>
+                        <span className="hour-app-row-meta">{formatDuration(app.durationMs)} · {app.events} item{app.events === 1 ? "" : "s"}</span>
                       </div>
                       {hasFiles ? (
                         <ul className="hour-file-list" aria-label={`Files in ${app.app}`}>
@@ -4065,13 +4233,14 @@ function HourDetailView({
             </div>
           </section>
 
+          {showTechnicalDetails && (
           <section className="panel-block hour-events-panel">
-            <PanelHeader eyebrow="Activity feed" title="Source events" value={`${bucket.events.length} captured`} />
+            <PanelHeader eyebrow="Technical details" title="Activity details" value={`${bucket.events.length} item${bucket.events.length === 1 ? "" : "s"}`} />
             <div className="hour-event-list">
               {bucket.events.length === 0 && (
                 <div className="empty-state compact-empty">
-                  <strong>No event records</strong>
-                  <span>DayTrail did not capture source events for this hour.</span>
+                  <strong>No activity details</strong>
+                  <span>DayTrail did not capture technical details for this hour.</span>
                 </div>
               )}
               {bucket.events.slice(0, 40).map((event) => {
@@ -4089,6 +4258,7 @@ function HourDetailView({
               })}
             </div>
           </section>
+          )}
         </main>
 
         <aside className="hour-detail-sidebar">
@@ -4234,7 +4404,7 @@ function AiUsagePanel({
   return (
     <section className="panel-block ai-usage-panel">
       <PanelHeader
-        eyebrow={activeDurationMs === undefined ? "AI tool time" : "AI-active today"}
+        eyebrow="AI tools detected"
         title={total > 0 ? formatDuration(total) : "No AI captured"}
         value={
           activeDurationMs === undefined
@@ -4245,7 +4415,7 @@ function AiUsagePanel({
       <div className="insight-list">
         {tools.length === 0 && (
           <div className="empty-state compact-empty">
-            <strong>No AI tool usage detected</strong>
+            <strong>No AI tools detected</strong>
             <span>ChatGPT, Claude, Copilot, Cursor, Codex, Gemini, Aider, and Cline will appear here when captured.</span>
           </div>
         )}
@@ -4267,7 +4437,7 @@ function ProjectUsagePanel({ projects }: { projects: ProjectUsageBreakdown[] }) 
   return (
     <section className="panel-block project-usage-panel">
       <PanelHeader
-        eyebrow="Usage by project"
+        eyebrow="Projects today"
         title={projects.length ? "Where your time went" : "No projects captured"}
         value={`${projects.length} place${projects.length === 1 ? "" : "s"}`}
       />
@@ -4320,8 +4490,8 @@ function AppUsagePanel({ summary }: { summary?: BackendAppUsageSummary }) {
   return (
     <section className="panel-block app-usage-panel">
       <PanelHeader
-        eyebrow="Usage by app"
-        title={apps.length ? "Top activity today" : "No activity captured"}
+        eyebrow="Top apps today"
+        title={apps.length ? "Top apps today" : "No work apps yet"}
         value={formatDuration(summary?.totalDurationMs ?? 0)}
       />
       <div className="app-usage-summary-list">
@@ -4645,9 +4815,9 @@ function AppsView({
                       const eventAiTools = aiToolLabelsForEvent(event);
                       const domainCat = classifyDomain(event.domain);
                       const gitCtx = (() => {
-                        if (!event.metadata_json) return null;
+                        if (!event.metadataJson) return null;
                         try {
-                          const meta = JSON.parse(event.metadata_json) as { gitContext?: { branch?: string; ticketId?: string } };
+                          const meta = JSON.parse(event.metadataJson) as { gitContext?: { branch?: string; ticketId?: string } };
                           return meta.gitContext ?? null;
                         } catch { return null; }
                       })();
@@ -4752,6 +4922,233 @@ function AppsView({
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+function SimpleActivityView({
+  settings,
+  snapshot,
+}: {
+  settings?: BackendSettings;
+  snapshot: BackendTodaySnapshot | null;
+}) {
+  const view = useMemo(() => buildActivityView(snapshot, settings), [settings, snapshot]);
+  const [activeTab, setActiveTab] = useState<"Sessions" | "Apps" | "Projects" | "Raw Activity">("Sessions");
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null);
+  const projects = useMemo(() => {
+    const buckets = new Map<string, { label: string; durationMs: number; apps: Set<string>; aiTools: Set<string> }>();
+    view.apps.forEach((app) => {
+      (app.projects ?? []).forEach((project) => {
+        const bucket = buckets.get(project.label) ?? {
+          label: project.label,
+          durationMs: 0,
+          apps: new Set<string>(),
+          aiTools: new Set<string>(),
+        };
+        bucket.durationMs += project.durationMs ?? 0;
+        bucket.apps.add(app.app);
+        (project.aiTools ?? []).forEach((tool) => bucket.aiTools.add(tool.tool));
+        buckets.set(project.label, bucket);
+      });
+    });
+    return [...buckets.values()].sort((left, right) => right.durationMs - left.durationMs);
+  }, [view.apps]);
+
+  return (
+    <div className="view-frame apps-view">
+      <div className="screen-titlebar">
+        <div>
+          <h2>Activity</h2>
+          <p>Sessions first, with app and project breakdowns when enough activity is captured.</p>
+        </div>
+        <div className="screen-actions">
+          <span className="mini-meter">{view.lowDataMessage ? "Getting started" : `${view.sessions.length} session${view.sessions.length === 1 ? "" : "s"}`}</span>
+        </div>
+      </div>
+
+      {view.lowDataMessage && (
+        <section className="panel-block early-capture-panel">
+          <PanelHeader eyebrow="Activity" title="More work needed for a useful breakdown" value="Simple Mode" />
+          <p>{view.lowDataMessage}</p>
+        </section>
+      )}
+
+      <div className="activity-tabs" role="tablist" aria-label="Activity sections">
+        {view.tabs.map((tab) => (
+          <button
+            aria-selected={activeTab === tab}
+            key={tab}
+            onClick={() => setActiveTab(tab as typeof activeTab)}
+            role="tab"
+            type="button"
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "Sessions" && (
+        <section className="panel-block">
+          <PanelHeader eyebrow="Sessions" title="Work sessions today" value={`${view.sessions.length}`} />
+          <div className="session-list">
+            {view.sessions.length === 0 && (
+              <div className="empty-state compact-empty">
+                <strong>No sessions yet</strong>
+                <span>Work sessions appear after DayTrail captures enough app and window activity.</span>
+              </div>
+            )}
+            {view.sessions.map((session) => {
+              const sessionKey = session.id ?? `${session.timeRangeLabel}-${session.title ?? session.startedAt ?? ""}`;
+              return (
+              <article className="session-card" key={sessionKey}>
+                <div className="session-card-main">
+                  <span className="session-card-time">{session.timeRangeLabel}</span>
+                  <strong>{session.title ?? "Work session"}</strong>
+                  <p>
+                    {session.projects.length > 0
+                      ? session.projects.map((project) => project.label).join(" · ")
+                      : session.summary ?? "Activity details available"}
+                  </p>
+                  <div className="session-card-chips" aria-label="Session details">
+                    {session.mainApps.map((app) => (
+                      <span key={app.label}>{app.label} · {app.durationLabel}</span>
+                    ))}
+                    {session.aiTools.map((tool) => (
+                      <span key={tool}>AI: {tool}</span>
+                    ))}
+                    {session.qualityWarnings.slice(0, 2).map((warning) => (
+                      <span className="warning-chip" key={warning}>{warning}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="session-card-meta">
+                  <span>{session.durationLabel}</span>
+                  <em>{session.qualityLabel}</em>
+                  <button
+                    className="session-open-button"
+                    onClick={() => setOpenSessionId((current) => (current === sessionKey ? null : sessionKey))}
+                    type="button"
+                  >
+                    {openSessionId === sessionKey ? "Close details" : "Open session"}
+                  </button>
+                </div>
+                {openSessionId === sessionKey && (
+                  <div className="session-inline-detail">
+                    <div>
+                      <span>When</span>
+                      <strong>{session.timeRangeLabel}</strong>
+                    </div>
+                    <div>
+                      <span>Main apps</span>
+                      <strong>
+                        {session.mainApps.length
+                          ? session.mainApps.map((app) => `${app.label} ${app.durationLabel}`).join(" · ")
+                          : "App breakdown unavailable"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Context</span>
+                      <strong>
+                        {session.projects.length
+                          ? session.projects.map((project) => project.label).join(" · ")
+                          : session.summary ?? "No project context yet"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>AI tools detected</span>
+                      <strong>{session.aiTools.length ? session.aiTools.join(", ") : "None detected"}</strong>
+                    </div>
+                    <div>
+                      <span>Review status</span>
+                      <strong>
+                        {session.qualityWarnings.length ? session.qualityWarnings.join(" · ") : "Enough context for Simple Mode"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Activity items</span>
+                      <strong>{session.eventCount}</strong>
+                    </div>
+                  </div>
+                )}
+              </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "Apps" && (
+        <section className="panel-block">
+          <PanelHeader eyebrow="Apps" title="Top apps today" value={`${view.apps.length}`} />
+          <div className="ai-app-list">
+            {view.apps.length === 0 && (
+              <div className="empty-state compact-empty">
+                <strong>No work apps yet</strong>
+                <span>System and utility apps stay hidden in Simple Mode.</span>
+              </div>
+            )}
+            {view.apps.map((app) => (
+              <article className="ai-app-row" key={app.app}>
+                <strong>{app.app}</strong>
+                <span>{app.durationLabel}</span>
+                <em>{app.projects?.map((project) => project.label).slice(0, 2).join(", ") || "Activity details"}</em>
+                {(app.aiTools?.length ?? 0) > 0 && (
+                  <div className="tool-chip-row">
+                    {app.aiTools?.slice(0, 4).map((tool) => (
+                      <span className="tool-chip" key={`${app.app}-${tool.tool}`}>{tool.tool}</span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "Projects" && (
+        <section className="panel-block">
+          <PanelHeader eyebrow="Projects" title="Folders, sites, and work areas" value={`${projects.length}`} />
+          <div className="project-usage-list">
+            {projects.length === 0 && (
+              <div className="empty-state compact-empty">
+                <strong>No project detail yet</strong>
+                <span>Projects appear when DayTrail sees folder, site, or workspace context.</span>
+              </div>
+            )}
+            {projects.map((project) => (
+              <article className="project-usage-row" key={project.label}>
+                <strong>{project.label}</strong>
+                <span>{formatDuration(project.durationMs)}</span>
+                <em>{[...project.apps].slice(0, 3).join(", ")}</em>
+                {[...project.aiTools].length > 0 && (
+                  <div className="tool-chip-row">
+                    {[...project.aiTools].slice(0, 4).map((tool) => (
+                      <span className="tool-chip" key={tool}>{tool}</span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "Raw Activity" && view.showTechnicalDetails && (
+        <section className="panel-block">
+          <PanelHeader eyebrow="Technical details" title="Activity details" value={`${view.technicalItems.length}`} />
+          <div className="hour-event-list">
+            {view.technicalItems.map((event) => (
+              <article className="hour-event-row" key={event.id}>
+                <span>{event.app ?? event.source}</span>
+                <strong>{event.title ?? "Activity detail"}</strong>
+                <em>{event.workspaceKey ?? event.domain ?? ""}</em>
+                <b>{formatDuration(event.durationMs ?? 0)}</b>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -5235,6 +5632,92 @@ function AiLedgerView({
   );
 }
 
+function SimpleAiImpactView({
+  settings,
+  snapshot,
+}: {
+  settings?: BackendSettings;
+  snapshot: BackendTodaySnapshot | null;
+}) {
+  const view = useMemo(() => buildAiImpactView(snapshot, settings), [settings, snapshot]);
+  const tools = view.toolSummaries;
+
+  return (
+    <div className="view-frame ai-ledger-view">
+      <div className="screen-titlebar">
+        <div>
+          <h2>AI Impact</h2>
+          <p>Lightweight AI context from detected tools, sessions, apps, and active hours.</p>
+        </div>
+        <div className="screen-actions">
+          <span className="mini-meter">{view.confidenceLabel}</span>
+        </div>
+      </div>
+
+      {view.lowDataMessage && (
+        <section className="panel-block early-capture-panel">
+          <PanelHeader eyebrow="AI tools detected" title="Not enough activity for a useful breakdown" value="Simple Mode" />
+          <p>{view.lowDataMessage}</p>
+        </section>
+      )}
+
+      {tools.length === 0 ? (
+        <section className="panel-block">
+          <div className="empty-state empty-panel">
+            <strong>No AI activity detected yet</strong>
+            <span>DayTrail will show AI tools here when it detects ChatGPT, Codex, Copilot, Gemini, Claude, Cursor, or other AI-assisted work.</span>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="ai-kpi-grid" aria-label="AI impact summary">
+            <div className="ai-kpi-card">
+              <span>AI tools detected</span>
+              <strong>{tools.length}</strong>
+              <em>{tools.map((tool) => tool.tool).slice(0, 4).join(", ")}</em>
+            </div>
+            <div className="ai-kpi-card">
+              <span>Used mostly with</span>
+              <strong>{view.usedMostlyWith}</strong>
+              <em>Session or app context</em>
+            </div>
+            <div className="ai-kpi-card">
+              <span>Most active tool</span>
+              <strong>{view.mostActiveTool ?? "AI"}</strong>
+              <em>{view.confidenceLabel}</em>
+            </div>
+            <div className="ai-kpi-card">
+              <span>Evidence status</span>
+              <strong>{view.evidenceStatus}</strong>
+              <em>
+                {view.evidenceCounts.linkedOutputs > 0
+                  ? `${view.evidenceCounts.linkedOutputs} linked output${view.evidenceCounts.linkedOutputs === 1 ? "" : "s"}`
+                  : "No accepted/generated claim without evidence"}
+              </em>
+            </div>
+          </section>
+
+          <section className="panel-block ai-tools-panel">
+            <PanelHeader eyebrow="Tool summary" title="AI tools detected today" value={`${tools.length}`} />
+            <div className="ai-tool-bars">
+              {tools.map((tool) => (
+                <article className="ai-tool-bar-row" key={tool.tool}>
+                  <strong>{tool.tool}</strong>
+                  <div>
+                    <i style={{ width: `${Math.max(4, Math.min(100, Math.round((tool.durationMs / Math.max(snapshot?.aiUsageSummary?.totalDurationMs ?? 1, 1)) * 100)))}%` }} />
+                  </div>
+                  <span>{tool.durationLabel}</span>
+                  <em>{tool.label}</em>
+                </article>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 const AI_THINKING_MESSAGES = [
   "Reading your chaos…",
   "Judging your 47 open tabs…",
@@ -5562,6 +6045,56 @@ function ReviewView({
   );
 }
 
+function NeedsReviewSimpleView({
+  settings,
+  snapshot,
+}: {
+  settings?: BackendSettings;
+  snapshot: BackendTodaySnapshot | null;
+}) {
+  const view = useMemo(() => buildReviewView(snapshot, settings), [settings, snapshot]);
+
+  return (
+    <div className="view-frame loops-view">
+      <div className="screen-titlebar">
+        <div>
+          <h2>Needs Review</h2>
+          <p>Review unclear sessions, idle gaps, draft timesheet sessions, and unfinished report inputs.</p>
+        </div>
+        <div className="screen-actions">
+          <span className="mini-meter">{view.items.length} item{view.items.length === 1 ? "" : "s"}</span>
+        </div>
+      </div>
+
+      {view.lowDataMessage && (
+        <section className="panel-block early-capture-panel">
+          <PanelHeader eyebrow="Needs Review" title="Review queue will grow with more activity" value="Simple Mode" />
+          <p>{view.lowDataMessage}</p>
+        </section>
+      )}
+
+      <section className="panel-block review-list">
+        {view.items.length === 0 ? (
+          <div className="empty-state empty-panel">
+            <strong>{view.emptyTitle}</strong>
+            <span>{view.emptyCopy}</span>
+          </div>
+        ) : (
+          <div className="review-row-list">
+            {view.items.map((item) => (
+              <article className="review-row" data-risk={item.priority} key={item.id}>
+                <span className="review-source">{item.priority}</span>
+                <strong>{item.title}</strong>
+                <em>{item.detail}</em>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // ─── AI Loading ──────────────────────────────────────────────────────────────
 
 function AiThinkingLoader() {
@@ -5835,16 +6368,105 @@ function RitualsView({
   onOpenExports,
   onRegenerateContext,
   reportMarkdown,
+  settings,
   sourceFeed,
+  snapshot,
 }: {
   onGenerateReport: () => void;
   onOpenExports: () => void;
   onRegenerateContext: () => void;
   reportMarkdown: string;
+  settings?: BackendSettings;
   sourceFeed: SourceFeedItem[];
+  snapshot: BackendTodaySnapshot | null;
 }) {
   const [copyStatus, setCopyStatus] = useState("Copy markdown");
   const [reportSection, setReportSection] = useState<"summary" | "timeline" | "ai" | "raw">("summary");
+  const reportView = useMemo(
+    () => buildReportView(snapshot, settings, reportMarkdown),
+    [reportMarkdown, settings, snapshot],
+  );
+  const reportSettings = normalizeExperienceSettings(settings);
+  if (reportSettings.experienceMode === "simple") {
+    const simpleReportMarkdown = reportView.markdown;
+
+    return (
+      <div className="view-frame rituals-view">
+        <div className="screen-titlebar">
+          <div>
+            <h2>Reports</h2>
+            <p>Generate a readable daily summary from sessions, apps, AI tools, and review items.</p>
+          </div>
+          <div className="screen-actions">
+            <button className="button compact primary" onClick={onGenerateReport} type="button">
+              <Icon name="plus" />
+              Generate
+            </button>
+          </div>
+        </div>
+
+        {reportView.lowDataMessage && (
+          <section className="panel-block early-capture-panel">
+            <PanelHeader eyebrow="Reports" title="Reports need at least one work session" value="Simple Mode" />
+            <p>{reportView.lowDataMessage}</p>
+          </section>
+        )}
+
+        <div className="reports-workspace">
+          <section className="panel-block report-input-panel">
+            <PanelHeader eyebrow="1. Included work" title="What will be summarized" value={`${reportView.includedWork.sessions} session${reportView.includedWork.sessions === 1 ? "" : "s"}`} />
+            <div className="report-settings-list">
+              <div><span>Work sessions</span><strong>{reportView.includedWork.sessions}</strong></div>
+              <div><span>Apps used</span><strong>{reportView.includedWork.apps}</strong></div>
+              <div><span>AI tools detected</span><strong>{reportView.includedWork.aiTools}</strong></div>
+              <div><span>Needs review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
+            </div>
+            <div className="report-input-actions">
+              <button className="button compact" onClick={onRegenerateContext} type="button">
+                <Icon name="sync" />
+                Refresh included work
+              </button>
+            </div>
+          </section>
+
+          <section className="panel-block report-output-panel">
+            <PanelHeader eyebrow="2. Daily report" title="Daily Work Report" value="Markdown" />
+            <pre className="report-preview" aria-label="Generated report markdown">
+              {simpleReportMarkdown || "Generate today’s report after DayTrail captures a work session."}
+            </pre>
+            <div className="output-actions">
+              <button className="button compact primary" onClick={onGenerateReport} type="button">
+                <Icon name="ritual" />
+                Generate
+              </button>
+              <button
+                className="button compact"
+                disabled={!simpleReportMarkdown}
+                onClick={async () => {
+                  await writeClipboardText(simpleReportMarkdown);
+                  setCopyStatus("Copied");
+                  window.setTimeout(() => setCopyStatus("Copy markdown"), 1600);
+                }}
+                type="button"
+              >
+                <Icon name="copy" />
+                {copyStatus}
+              </button>
+              <button
+                className="button compact"
+                disabled={!simpleReportMarkdown}
+                onClick={() => downloadTextFile("daytrail-daily-report.md", simpleReportMarkdown, "text/markdown")}
+                type="button"
+              >
+                <Icon name="archive" />
+                Export Markdown
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
   const markdownTitle = "Daily Work Report";
   const sourceSummary = sourceFeed.length
     ? sourceFeed.map((item) => `- ${item.label}`).join("\n")
@@ -6134,6 +6756,7 @@ function SettingsView({
   onRefreshCapturePermissions,
   onRestartApp,
   onRestoreDatabase,
+  onSaveExperienceSettings,
   onTriggerBrowserAutomation,
   permissionStatus,
   permissionSummary,
@@ -6145,6 +6768,7 @@ function SettingsView({
   setSettingsConfigJson,
   setSaveState,
   setLaunchAtLogin,
+  settings,
   settingsConfigJson,
   storageInfo,
   storageStatus,
@@ -6168,6 +6792,7 @@ function SettingsView({
   onRefreshCapturePermissions: () => void;
   onRestartApp: () => void;
   onRestoreDatabase: () => void;
+  onSaveExperienceSettings: (patch: Partial<BackendSettings>) => Promise<void>;
   onTriggerBrowserAutomation: () => void;
   permissionStatus: string;
   permissionSummary: BackendCapturePermissionSummary | null;
@@ -6179,6 +6804,7 @@ function SettingsView({
   setSettingsConfigJson: (value: string) => void;
   setSaveState: (value: string) => void;
   setLaunchAtLogin: (value: boolean) => void;
+  settings?: BackendSettings;
   settingsConfigJson: string;
   storageInfo: BackendStorageLocationInfo | null;
   storageStatus: string;
@@ -6186,27 +6812,45 @@ function SettingsView({
   toggleFolder: (folderId: string) => void;
 }) {
   const [activeSettings, setActiveSettings] = useState<
-    "capture" | "ai" | "privacy" | "integrations" | "storage" | "shortcuts" | "about"
-  >("capture");
+    "mode" | "capture" | "ai" | "privacy" | "integrations" | "storage" | "shortcuts" | "advanced" | "about"
+  >("mode");
+  const settingsView = useMemo(() => buildSettingsView(settings), [settings]);
   const settingSections: Array<{
     id: typeof activeSettings;
     label: string;
     detail: string;
     icon: IconName;
   }> = [
-    { id: "capture", label: "Capture", detail: "Data sources and capture health", icon: "sync" },
-    { id: "ai", label: "AI Provider", detail: "Analysis model and routing", icon: "ritual" },
+    { id: "mode", label: "Mode", detail: "Simple or Pro experience", icon: "layout" },
+    { id: "capture", label: "Capture Health", detail: "Permissions and capture status", icon: "sync" },
     { id: "privacy", label: "Privacy", detail: "What is stored and analyzed", icon: "warning" },
-    { id: "integrations", label: "Integrations", detail: "Browser, editor, and terminal bridges", icon: "apps" },
+    { id: "ai", label: "AI Provider", detail: "Analysis model and routing", icon: "ritual" },
     { id: "storage", label: "Data Storage", detail: "Local data and exports", icon: "archive" },
-    { id: "shortcuts", label: "Shortcuts", detail: "Keyboard shortcuts and commands", icon: "layout" },
-    { id: "about", label: "About", detail: "App information", icon: "copy" },
+    { id: "advanced", label: "Advanced", detail: "Storage, exports, bridges, and endpoint", icon: "sliders" },
   ];
-  const checkStatus = (idPart: string) => {
-    const check = captureHealth?.checks.find((item) =>
-      `${item.id} ${item.label}`.toLowerCase().includes(idPart),
-    );
+  const checkForSource = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
+    const checks = captureHealth?.checks ?? [];
+    if (source === "desktop") {
+      const permissions = checks.find((item) => item.id === "os-permissions");
+      if (permissions && permissions.status !== "ok") {
+        return permissions;
+      }
+      return checks.find((item) => item.id === "active-window") ?? permissions;
+    }
+    const idBySource = {
+      browser: "browser-bridge",
+      editor: "editor-bridge",
+      terminal: "terminal-bridge",
+      ai: "ai-tools",
+    } satisfies Record<Exclude<typeof source, "desktop">, string>;
+    return checks.find((item) => item.id === idBySource[source]);
+  };
+  const checkStatus = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
+    const check = checkForSource(source);
     return check ? check.status.replace("_", " ") : "waiting";
+  };
+  const checkState = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
+    return checkForSource(source)?.status ?? "waiting";
   };
 
   return (
@@ -6214,13 +6858,13 @@ function SettingsView({
       <div className="screen-titlebar">
         <div>
           <h2>Settings</h2>
-          <p>Configure capture, AI analysis, privacy, integrations, data storage, and shortcuts.</p>
+          <p>Configure mode, capture health, privacy, AI provider, and advanced data controls.</p>
         </div>
         <div className="screen-actions">
           <span className="capture-pill">{captureHealth?.status?.replace("_", " ") ?? "Waiting"}</span>
           <button className="button compact" onClick={onOpenExports} type="button">
             <Icon name="archive" />
-            Open raw export
+            Open exports
           </button>
         </div>
       </div>
@@ -6254,6 +6898,96 @@ function SettingsView({
         </aside>
 
         <section className="settings-pro-content">
+          {activeSettings === "mode" && (
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div>
+                  <span>Experience mode</span>
+                  <h2>Choose how much detail DayTrail shows</h2>
+                </div>
+                <strong>{settingsView.mode === "pro" ? "Pro Mode" : "Simple Mode"}</strong>
+              </div>
+              <div className="settings-card-grid">
+                <button
+                  aria-pressed={settingsView.mode === "simple"}
+                  className="settings-action-row"
+                  onClick={() =>
+                    onSaveExperienceSettings({
+                      experienceMode: "simple",
+                      showSystemApps: false,
+                      showRawEvents: false,
+                      showCaptureConfidence: false,
+                      showAiDetails: "summary",
+                    })
+                  }
+                  type="button"
+                >
+                  <Icon name="layout" />
+                  <span>
+                    <strong>Simple Mode</strong>
+                    <em>Timeline, sessions, reports, and review items without technical detail.</em>
+                  </span>
+                  <Icon name="check" />
+                </button>
+                <button
+                  aria-pressed={settingsView.mode === "pro"}
+                  className="settings-action-row"
+                  onClick={() =>
+                    onSaveExperienceSettings({
+                      experienceMode: "pro",
+                      showRawEvents: true,
+                      showCaptureConfidence: true,
+                      showAiDetails: "detailed",
+                    })
+                  }
+                  type="button"
+                >
+                  <Icon name="sliders" />
+                  <span>
+                    <strong>Pro Mode</strong>
+                    <em>Detailed activity rows, confidence, technical exports, and evidence inspection.</em>
+                  </span>
+                  <Icon name="arrow" />
+                </button>
+              </div>
+              <div className="status-matrix">
+                <label className="settings-toggle-row">
+                  <span>
+                    <strong>Show system apps</strong>
+                    <em>Include Finder, System Settings, and utility apps in summaries.</em>
+                  </span>
+                  <input
+                    checked={settingsView.showSystemApps}
+                    onChange={(event) => onSaveExperienceSettings({ showSystemApps: event.target.checked })}
+                    type="checkbox"
+                  />
+                </label>
+                <label className="settings-toggle-row">
+                  <span>
+                    <strong>Show technical details</strong>
+                    <em>Expose technical activity details in Pro Mode.</em>
+                  </span>
+                  <input
+                    checked={settingsView.showRawEvents}
+                    onChange={(event) => onSaveExperienceSettings({ showRawEvents: event.target.checked })}
+                    type="checkbox"
+                  />
+                </label>
+                <label className="settings-toggle-row">
+                  <span>
+                    <strong>Show capture confidence</strong>
+                    <em>Display confidence labels for inferred details.</em>
+                  </span>
+                  <input
+                    checked={settingsView.showCaptureConfidence}
+                    onChange={(event) => onSaveExperienceSettings({ showCaptureConfidence: event.target.checked })}
+                    type="checkbox"
+                  />
+                </label>
+              </div>
+            </section>
+          )}
+
           {activeSettings === "capture" && (
             <>
               <section className="settings-section">
@@ -6296,11 +7030,11 @@ function SettingsView({
                     </div>
                   </div>
                   <div className="status-matrix">
-                    <div className="status-row" data-state="ok"><span>Apps and windows</span><strong>{checkStatus("desktop")}</strong></div>
-                    <div className="status-row" data-state="ok"><span>Browsers</span><strong>{checkStatus("browser")}</strong></div>
-                    <div className="status-row" data-state="ok"><span>Editor projects</span><strong>{checkStatus("editor")}</strong></div>
-                    <div className="status-row" data-state="ok"><span>Terminal folders</span><strong>{checkStatus("terminal")}</strong></div>
-                    <div className="status-row" data-state="ok"><span>AI tools</span><strong>{checkStatus("ai")}</strong></div>
+                    <div className="status-row" data-state={checkState("desktop")}><span>Apps and windows</span><strong>{checkStatus("desktop")}</strong></div>
+                    <div className="status-row" data-state={checkState("browser")}><span>Browsers</span><strong>{checkStatus("browser")}</strong></div>
+                    <div className="status-row" data-state={checkState("editor")}><span>Editor projects</span><strong>{checkStatus("editor")}</strong></div>
+                    <div className="status-row" data-state={checkState("terminal")}><span>Terminal folders</span><strong>{checkStatus("terminal")}</strong></div>
+                    <div className="status-row" data-state={checkState("ai")}><span>AI tools</span><strong>{checkStatus("ai")}</strong></div>
                   </div>
                 </section>
                 <section className="settings-section">
@@ -6313,7 +7047,7 @@ function SettingsView({
                   <div className="settings-action-list">
                     <button className="settings-action-row" onClick={onOpenExports} type="button">
                       <Icon name="archive" />
-                      <span><strong>Export raw data</strong><em>Export captured data as JSON for any date range.</em></span>
+                      <span><strong>Export activity data</strong><em>Export captured data as JSON for any date range.</em></span>
                       <Icon name="arrow" />
                     </button>
                     <button className="settings-action-row" onClick={onOpenSavedNotes} type="button">
@@ -6395,14 +7129,17 @@ function SettingsView({
                     value={aiConfig.model}
                   />
                 </label>
-                <label className="settings-field" htmlFor="endpoint">
-                  <span>Endpoint</span>
-                  <input
-                    id="endpoint"
-                    onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })}
-                    value={aiConfig.endpoint}
-                  />
-                </label>
+                <details className="context-pack-details">
+                  <summary>Advanced endpoint</summary>
+                  <label className="settings-field" htmlFor="endpoint">
+                    <span>Endpoint</span>
+                    <input
+                      id="endpoint"
+                      onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })}
+                      value={aiConfig.endpoint}
+                    />
+                  </label>
+                </details>
                 <label className="settings-field" htmlFor="api-key">
                   <span>API key</span>
                   <input
@@ -6437,6 +7174,54 @@ function SettingsView({
             </section>
           )}
 
+          {activeSettings === "advanced" && (
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div>
+                  <span>Advanced</span>
+                  <h2>Storage, exports, bridges, and technical settings</h2>
+                </div>
+                <strong>{storageStatus}</strong>
+              </div>
+              <div className="settings-action-list">
+                <button className="settings-action-row" onClick={onOpenExports} type="button">
+                  <Icon name="archive" />
+                  <span><strong>Export activity data</strong><em>Open date-range JSON export and AI routine analysis.</em></span>
+                  <Icon name="arrow" />
+                </button>
+                <button className="settings-action-row" onClick={onOpenSavedNotes} type="button">
+                  <Icon name="copy" />
+                  <span><strong>Manage saved notes</strong><em>Review and delete saved scratchpad notes.</em></span>
+                  <Icon name="arrow" />
+                </button>
+                <button className="settings-action-row" onClick={onLoadStorageInfo} type="button">
+                  <Icon name="sync" />
+                  <span><strong>Load storage locations</strong><em>Show database and backup paths.</em></span>
+                  <Icon name="arrow" />
+                </button>
+                <button className="settings-action-row" onClick={onInstallTerminalBridge} type="button">
+                  <Icon name="apps" />
+                  <span><strong>Install terminal bridge</strong><em>Improve terminal folder detection.</em></span>
+                  <Icon name="arrow" />
+                </button>
+              </div>
+              <div className="status-matrix storage-location-list">
+                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
+                  <span>Current database</span>
+                  <strong>{storageInfo?.databasePath ?? "Load storage locations"}</strong>
+                </div>
+                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
+                  <span>Backup folder</span>
+                  <strong>{storageInfo?.backupDir ?? "Load storage locations"}</strong>
+                </div>
+                <div className="status-row" data-state="ok">
+                  <span>AI endpoint</span>
+                  <strong>{aiConfig.endpoint}</strong>
+                </div>
+              </div>
+            </section>
+          )}
+
           {activeSettings === "privacy" && (
             <section className="settings-section">
               <div className="settings-section-header">
@@ -6445,6 +7230,11 @@ function SettingsView({
                   <h2>Metadata-first capture policy</h2>
                 </div>
                 <strong>Metadata only</strong>
+              </div>
+              <div className="tool-chip-row privacy-badge-row">
+                {settingsView.privacyBadges.map((badge) => (
+                  <span className="tool-chip" key={badge}>{badge}</span>
+                ))}
               </div>
               <div className="status-matrix privacy-matrix">
                 <div className="status-row" data-state="ok"><span>Apps and windows</span><strong>Active metadata only</strong></div>
@@ -6509,7 +7299,7 @@ function SettingsView({
               <div className="settings-action-list">
                 <button className="settings-action-row" onClick={onOpenExports} type="button">
                   <Icon name="archive" />
-                  <span><strong>Export raw data</strong><em>Open date-range JSON export and AI routine analysis.</em></span>
+                  <span><strong>Export activity data</strong><em>Open date-range JSON export and AI routine analysis.</em></span>
                   <Icon name="arrow" />
                 </button>
                 <button className="settings-action-row" onClick={onExportSettingsConfig} type="button">
@@ -6708,7 +7498,7 @@ function CommandOverlay({
     "/today":
       "Open Today to review the hour-by-hour timeline and recent work.",
     "/activity":
-      "Open Activity to inspect apps, sites, folders, and source events.",
+      "Open Activity to inspect apps, sites, folders, and activity details.",
     "/report":
       "Generate the daily report from captured activity.",
     "/what-did-i-do":

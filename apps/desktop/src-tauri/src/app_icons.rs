@@ -24,7 +24,7 @@ fn icon_cache() -> &'static Mutex<HashMap<String, String>> {
 /// from their bundle file name.
 fn canonical_bundle_folder(app_name: &str) -> &str {
     match app_name {
-        "Visual Studio Code" | "Code" => "Visual Studio Code",
+        "Visual Studio Code" | "VS Code" | "Code" => "Visual Studio Code",
         "VS Code Insiders" | "Code - Insiders" => "Visual Studio Code - Insiders",
         "Cursor" => "Cursor",
         "Google Chrome" => "Google Chrome",
@@ -96,7 +96,10 @@ fn extract_icon_via_jxa(bundle_path: &str) -> Option<String> {
         .collect::<String>()
         .trim_matches('_')
         .to_string();
-    let out_png = std::env::temp_dir().join(format!("daytrail_icon_{}.png", &safe_name[safe_name.len().saturating_sub(40)..safe_name.len()]));
+    let out_png = std::env::temp_dir().join(format!(
+        "daytrail_icon_v3_{}.png",
+        &safe_name[safe_name.len().saturating_sub(40)..safe_name.len()]
+    ));
 
     // If a cached PNG already exists (and is non-empty), skip extraction.
     if out_png.exists() && out_png.metadata().map(|m| m.len() > 100).unwrap_or(false) {
@@ -105,17 +108,19 @@ fn extract_icon_via_jxa(bundle_path: &str) -> Option<String> {
         return Some(format!("data:image/png;base64,{}", encoded));
     }
 
+    // Prefer the bundle's declared `.icns` file. It produces the real app
+    // icon reliably for Electron, SwiftUI, and native apps. JXA is kept as a
+    // fallback for unusual bundles that do not expose an icon resource.
+    if let Some(icon) = extract_icon_via_sips(bundle_path, &out_png) {
+        return Some(icon);
+    }
+
     let jxa = format!(
         r#"ObjC.import('AppKit');ObjC.import('Foundation');
-var ws=$.NSWorkspace.sharedWorkspace;
-var icon=ws.iconForFile($("{p}"));
-var rep=$.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(null,64,64,8,4,true,false,$.NSCalibratedRGBColorSpace,0,0);
-var ctx=$.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
-$.NSGraphicsContext.saveGraphicsState();
-$.NSGraphicsContext.setCurrentContext(ctx);
-icon.drawInRectFromRectOperationFraction($.NSMakeRect(0,0,64,64),$.NSZeroRect,$.NSCompositingOperationCopy,1.0);
-$.NSGraphicsContext.restoreGraphicsState();
-var png=rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG,null);
+var icon=$.NSWorkspace.sharedWorkspace.iconForFile($("{p}"));
+icon.setSize($.NSMakeSize(64,64));
+var rep=$.NSBitmapImageRep.imageRepWithData(icon.TIFFRepresentation);
+var png=rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG,$.NSDictionary.dictionary);
 var b64=ObjC.unwrap(png.base64EncodedStringWithOptions(0));
 b64"#,
         p = safe_path
@@ -148,10 +153,11 @@ b64"#,
 /// Fallback: use `sips` to convert the bundle's `.icns` to a 64×64 PNG.
 #[cfg(target_os = "macos")]
 fn extract_icon_via_sips(bundle_path: &str, out_png: &std::path::Path) -> Option<String> {
-    // Read CFBundleIconFile from Info.plist.
+    // Read CFBundleIconFile from Info.plist. `defaults read` is unreliable for
+    // some modern bundles; PlistBuddy reads the file directly.
     let plist = format!("{}/Contents/Info.plist", bundle_path);
-    let defaults_out = Command::new("/usr/bin/defaults")
-        .args(["read", &plist, "CFBundleIconFile"])
+    let defaults_out = Command::new("/usr/libexec/PlistBuddy")
+        .args(["-c", "Print :CFBundleIconFile", &plist])
         .output()
         .ok()?;
 
@@ -161,7 +167,13 @@ fn extract_icon_via_sips(bundle_path: &str, out_png: &std::path::Path) -> Option
     if icon_name.is_empty() {
         // CFBundleIconFile not set — try common names.
         let resources = format!("{}/Contents/Resources", bundle_path);
-        for name in &["AppIcon.icns", "electron.icns", "icon.icns", "application.icns"] {
+        for name in &[
+            "AppIcon.icns",
+            "Code.icns",
+            "electron.icns",
+            "icon.icns",
+            "application.icns",
+        ] {
             let candidate = format!("{}/{}", resources, name);
             if std::path::Path::new(&candidate).exists() {
                 icon_name = (*name).to_string();
@@ -230,4 +242,36 @@ pub fn app_icon_data_url(app_name: &str) -> Option<String> {
 #[cfg(not(target_os = "macos"))]
 pub fn app_icon_data_url(_app_name: &str) -> Option<String> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{app_icon_data_url, canonical_bundle_folder};
+
+    #[test]
+    fn maps_common_display_names_to_bundle_folders() {
+        assert_eq!(canonical_bundle_folder("VS Code"), "Visual Studio Code");
+        assert_eq!(canonical_bundle_folder("Visual Studio Code"), "Visual Studio Code");
+        assert_eq!(canonical_bundle_folder("ChatGPT"), "ChatGPT");
+        assert_eq!(canonical_bundle_folder("Warp"), "Warp");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn extracts_icons_for_installed_common_apps() {
+        for (app_name, bundle_path) in [
+            ("VS Code", "/Applications/Visual Studio Code.app"),
+            ("ChatGPT", "/Applications/ChatGPT.app"),
+            ("Warp", "/Applications/Warp.app"),
+        ] {
+            if Path::new(bundle_path).exists() {
+                let icon = app_icon_data_url(app_name)
+                    .unwrap_or_else(|| panic!("expected icon for {app_name}"));
+                assert!(icon.starts_with("data:image/png;base64,"));
+                assert!(icon.len() > 1_000);
+            }
+        }
+    }
 }

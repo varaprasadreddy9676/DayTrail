@@ -564,7 +564,9 @@ button {
 /* When the real icon PNG is shown, drop the colored bg and show the image neatly */
 .sidebar-app-icon.app-icon-img,
 .app-color-dot.app-icon-img {
-  background: none !important;
+  box-sizing: border-box;
+  padding: 2px;
+  background: color-mix(in srgb, var(--text-main) 10%, transparent) !important;
   object-fit: contain;
   border-radius: 5px;
 }
@@ -1185,8 +1187,97 @@ kbd {
 .today-hero-grid {
   display: grid;
   align-items: stretch;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.36fr);
   gap: 10px;
+}
+
+.early-capture-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.early-capture-panel p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.selected-hour-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 360px;
+}
+
+.selected-hour-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.selected-hour-metrics div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
+}
+
+.selected-hour-metrics span,
+.selected-hour-metrics strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-hour-metrics span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.selected-hour-metrics strong {
+  margin-top: 2px;
+  color: var(--text-main);
+  font-size: 18px;
+}
+
+.selected-hour-list {
+  display: grid;
+  gap: 8px;
+}
+
+.selected-hour-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.selected-hour-row strong,
+.selected-hour-row em,
+.selected-hour-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-hour-row strong {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.selected-hour-row em {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .today-highlights-grid {
@@ -1664,9 +1755,16 @@ kbd {
 }
 
 .app-color-dot {
+  display: inline-flex;
   width: 20px;
   height: 20px;
+  align-items: center;
+  justify-content: center;
   border-radius: 5px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -2034,6 +2132,175 @@ kbd {
   color: var(--text-soft);
 }
 
+.session-list {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+
+.session-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  align-items: center;
+  min-width: 0;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.session-card-main,
+.session-card-meta {
+  min-width: 0;
+}
+
+.session-card-main {
+  display: grid;
+  gap: 5px;
+}
+
+.session-card-main strong,
+.session-card-main p,
+.session-card-time,
+.session-card-meta span,
+.session-card-meta em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-card-main strong {
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 18px;
+}
+
+.session-card-time {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.session-card-main p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.session-card-chips {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.session-card-chips span {
+  max-width: 220px;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-chips .warning-chip {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.session-card-meta {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.session-card-meta span {
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.session-card-meta em {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--accent-main);
+  background: var(--accent-soft);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 14px;
+  text-transform: capitalize;
+}
+
+.session-open-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 104px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.session-open-button:hover {
+  border-color: color-mix(in srgb, var(--accent-main) 44%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-main) 14%, var(--bg-elevated));
+}
+
+.session-inline-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+}
+
+.session-inline-detail div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.session-inline-detail span {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.session-inline-detail strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 670;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .alert-action {
   max-width: 220px;
 }
@@ -2320,6 +2587,11 @@ kbd {
 }
 
 .status-row[data-state="warning"] strong {
+  color: var(--warning);
+}
+
+.status-row[data-state="waiting"] strong,
+.status-row[data-state="needs_setup"] strong {
   color: var(--warning);
 }
 
@@ -5200,6 +5472,19 @@ textarea {
 
   .today-live-card {
     grid-template-columns: 1fr;
+  }
+
+  .session-card,
+  .session-inline-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .session-card-meta {
+    justify-items: stretch;
+  }
+
+  .session-open-button {
+    width: 100%;
   }
 
   .focus-actions {
