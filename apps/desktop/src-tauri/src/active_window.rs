@@ -3,9 +3,16 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
     thread,
     time::{Duration, SystemTime},
 };
+
+/// Cache: pid → (enriched_title_or_None, captured_at)
+/// Populated by `ax_content_title_cached`. Prevents running a slow AppleScript
+/// on every 2-second poll tick — result is reused for 10 seconds.
+static CONTENT_TITLE_CACHE: Mutex<Option<HashMap<u32, (Option<String>, SystemTime)>>> =
+    Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;
@@ -142,6 +149,10 @@ fn native_frontmost_application() -> Option<ActiveWindowInfo> {
     if workspace_candidates.is_empty() {
         workspace_candidates = editor_workspace_candidates_from_storage(&app_name);
     }
+    // Enrich title: strip "App — Context" patterns or AX heading search when
+    // the raw title is just the app name (Claude, Codex, Notion, etc.)
+    let title = enrich_window_title(title.as_deref(), &app_name, process_id).or(title);
+
     let bridge_hint = terminal_bridge_hint_for_app(&app_name);
     let workspace_key = workspace_from_title(title.as_deref())
         .or_else(|| workspace_from_candidates(title.as_deref(), &workspace_candidates))
@@ -216,6 +227,9 @@ fn applescript_frontmost_application() -> Option<ActiveWindowInfo> {
     if workspace_candidates.is_empty() {
         workspace_candidates = editor_workspace_candidates_from_storage(&app_name);
     }
+    // Enrich title for apps whose window title is just their name
+    let title = enrich_window_title(title.as_deref(), &app_name, process_id).or(title);
+
     let bridge_hint = terminal_bridge_hint_for_app(&app_name);
     let workspace_key = workspace_from_title(title.as_deref())
         .or_else(|| workspace_from_candidates(title.as_deref(), &workspace_candidates))
@@ -1332,6 +1346,163 @@ fn is_self_app(app_name: &str) -> bool {
 /// Map raw OS process/bundle names to the user-visible display name.
 /// macOS `localizedName` returns the CFBundleName, which is often shorter than
 /// the product name users recognise (e.g. "Code" vs "Visual Studio Code").
+// ── Title enrichment ─────────────────────────────────────────────────────────
+
+/// **Strategy 1 (0 ms)**: Extract context from window titles that encode it as
+/// `"Context — AppName"` or `"AppName – Context"` etc.
+///
+/// Handles common separators used by browsers, Notion, Linear, Figma, Slack, …
+fn enrich_title_from_pattern(title: &str, app_name: &str) -> Option<String> {
+    // Ordered from most specific (longest) to shortest so `" — "` beats `"-"`
+    let separators = [" — ", " – ", " - ", " | ", " · ", " > ", " / "];
+    for sep in &separators {
+        // "Context <sep> AppName" → "Context"
+        if let Some(ctx) = title.strip_suffix(&format!("{sep}{app_name}")) {
+            let ctx = ctx.trim();
+            if ctx.len() > 2 && !ctx.eq_ignore_ascii_case(app_name) {
+                return Some(ctx.to_string());
+            }
+        }
+        // "AppName <sep> Context" → "Context"
+        if let Some(ctx) = title.strip_prefix(&format!("{app_name}{sep}")) {
+            let ctx = ctx.trim();
+            if ctx.len() > 2 && !ctx.eq_ignore_ascii_case(app_name) {
+                return Some(ctx.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// **Strategy 2 (~80 ms, cached 10 s per PID)**: AppleScript AX heading search.
+///
+/// Searches the window UI tree up to 4 levels deep for `AXHeading` or prominent
+/// `AXStaticText` elements. Works for Electron apps (Claude, Codex, Notion,
+/// Linear, etc.) where the conversation / document title is rendered as an HTML
+/// heading but NOT reflected in the macOS window title bar.
+#[cfg(target_os = "macos")]
+fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
+    const CACHE_TTL_SECS: u64 = 10;
+
+    // --- check cache ---
+    {
+        let mut guard = CONTENT_TITLE_CACHE.lock().ok()?;
+        let cache = guard.get_or_insert_with(HashMap::new);
+        if let Some((cached, captured_at)) = cache.get(&pid) {
+            if captured_at.elapsed().ok()?.as_secs() < CACHE_TTL_SECS {
+                return cached.clone();
+            }
+        }
+    }
+
+    // --- run AppleScript ---
+    let safe = app_name.replace('"', "");
+    let script = format!(
+        r#"tell application "System Events"
+  try
+    tell process "{safe}"
+      set win to window 1
+      -- Check AXDocument (document-based apps: Keynote, Pages, TextEdit…)
+      try
+        set doc to value of attribute "AXDocument" of win
+        if doc is not missing value and doc is not "" then
+          return doc
+        end if
+      end try
+      -- BFS up to 4 levels deep looking for AXHeading
+      set L1 to UI elements of win
+      repeat with e1 in L1
+        try
+          if role of e1 is "AXHeading" then
+            set t to value of e1
+            if t is not missing value and t is not "" and t is not "{safe}" then return t
+          end if
+          set L2 to UI elements of e1
+          repeat with e2 in L2
+            try
+              if role of e2 is "AXHeading" then
+                set t to value of e2
+                if t is not missing value and t is not "" and t is not "{safe}" then return t
+              end if
+              set L3 to UI elements of e2
+              repeat with e3 in L3
+                try
+                  if role of e3 is "AXHeading" then
+                    set t to value of e3
+                    if t is not missing value and t is not "" and t is not "{safe}" then return t
+                  end if
+                  set L4 to UI elements of e3
+                  repeat with e4 in L4
+                    try
+                      if role of e4 is "AXHeading" then
+                        set t to value of e4
+                        if t is not missing value and t is not "" and t is not "{safe}" then return t
+                      end if
+                    end try
+                  end repeat
+                end try
+              end repeat
+            end try
+          end repeat
+        end try
+      end repeat
+      return ""
+    end tell
+  end try
+  return ""
+end tell"#,
+        safe = safe
+    );
+
+    let result = run_osascript(&[&script]);
+    let enriched = result.and_then(|r| {
+        let t = r.trim().to_string();
+        if t.is_empty() || t.eq_ignore_ascii_case(app_name) {
+            None
+        } else {
+            Some(t)
+        }
+    });
+
+    // --- update cache ---
+    if let Ok(mut guard) = CONTENT_TITLE_CACHE.lock() {
+        let cache = guard.get_or_insert_with(HashMap::new);
+        cache.insert(pid, (enriched.clone(), SystemTime::now()));
+    }
+
+    enriched
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ax_content_title_cached(_pid: u32, _app_name: &str) -> Option<String> {
+    None
+}
+
+/// Enrich a raw `window_title` when it carries no more information than the
+/// app name itself. Returns `Some(better_title)` or `None` if nothing was found.
+fn enrich_window_title(
+    raw_title: Option<&str>,
+    app_name: &str,
+    pid: Option<u32>,
+) -> Option<String> {
+    let title = raw_title.unwrap_or("").trim();
+
+    // If the title is already informative (not just the app name), keep it
+    if !title.is_empty() && !title.eq_ignore_ascii_case(app_name) {
+        // Still try pattern extraction in case it embeds "Context — App"
+        return enrich_title_from_pattern(title, app_name).or_else(|| Some(title.to_string()));
+    }
+
+    // Title is uninformative — try the two enrichment strategies
+    if let Some(pid) = pid {
+        if let Some(enriched) = ax_content_title_cached(pid, app_name) {
+            return Some(enriched);
+        }
+    }
+
+    None
+}
+
 pub fn normalize_app_display_name(name: &str) -> &str {
     match name {
         // VS Code family
