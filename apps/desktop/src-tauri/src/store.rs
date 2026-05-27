@@ -1263,6 +1263,34 @@ impl WorktraceStore {
         Ok(settings)
     }
 
+    pub fn ensure_default_launch_at_login(&self) -> Result<()> {
+        let default_enabled = Settings::default().launch_at_login;
+        if !default_enabled {
+            return Ok(());
+        }
+
+        let has_explicit_setting = {
+            let conn = self.lock()?;
+            conn.query_row(
+                "SELECT 1 FROM settings WHERE key = 'launch_at_login' LIMIT 1",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+        };
+
+        if has_explicit_setting {
+            return Ok(());
+        }
+
+        set_launch_at_login(true)?;
+        let conn = self.lock()?;
+        let now = now_utc();
+        Self::upsert_setting_locked(&conn, "launch_at_login", "true", &now)?;
+        Ok(())
+    }
+
     pub fn update_settings(&self, patch: SettingsPatch) -> Result<Settings> {
         let conn = self.lock()?;
         let now = now_utc();

@@ -2180,7 +2180,7 @@ export default function App() {
   const [folders, setFolders] = useState<WorkspaceFolder[]>(initialFolders);
   const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig);
   const [draftAiConfig, setDraftAiConfig] = useState<AiConfig>(defaultAiConfig);
-  const [draftLaunchAtLogin, setDraftLaunchAtLogin] = useState(false);
+  const [draftLaunchAtLogin, setDraftLaunchAtLogin] = useState(true);
   const [saveState, setSaveState] = useState("Local ready");
   const [todaySnapshot, setTodaySnapshot] = useState<BackendTodaySnapshot | null>(null);
   const [dismissedLoopIds, setDismissedLoopIds] = useState<Set<string>>(() => new Set());
@@ -2294,7 +2294,7 @@ export default function App() {
     const loadedAiConfig = mapAiConfig(snapshot.settings);
     setAiConfig(loadedAiConfig);
     setDraftAiConfig(loadedAiConfig);
-    setDraftLaunchAtLogin(snapshot.settings.launchAtLogin ?? false);
+    setDraftLaunchAtLogin(snapshot.settings.launchAtLogin ?? true);
     setSaveState(`${loadedAiConfig.provider} ready`);
     setActiveStream((currentStream) =>
       mappedStreams.some((stream) => stream.id === currentStream)
@@ -3079,7 +3079,7 @@ export default function App() {
     const importedConfig = mapAiConfig(imported);
     setAiConfig(importedConfig);
     setDraftAiConfig(importedConfig);
-    setDraftLaunchAtLogin(imported.launchAtLogin ?? false);
+    setDraftLaunchAtLogin(imported.launchAtLogin ?? true);
     setSaveState(`${importedConfig.provider} imported`);
     setStorageStatus("Configuration imported");
     await refreshTodaySnapshot();
@@ -7726,7 +7726,7 @@ function SettingsView({
                 <label className="settings-toggle-row">
                   <span>
                     <strong>Launch at login</strong>
-                    <em>Start DayTrail automatically when you sign in.</em>
+                    <em>Start DayTrail automatically when you sign in so capture is ready after restart.</em>
                   </span>
                   <input
                     checked={launchAtLogin}

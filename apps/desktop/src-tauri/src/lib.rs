@@ -25,6 +25,9 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let store = WorktraceStore::open_default(app.handle())?;
+            if let Err(error) = store.ensure_default_launch_at_login() {
+                eprintln!("failed to enable launch at login by default: {error:#}");
+            }
             app.manage(store.clone());
             setup_tray(app, store.clone())?;
             spawn_active_window_watcher(store, Duration::from_secs(2));

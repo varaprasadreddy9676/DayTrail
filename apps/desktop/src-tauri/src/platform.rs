@@ -56,7 +56,21 @@ pub fn keychain_key_from_ref(value: &str) -> Option<&str> {
 }
 
 pub fn set_launch_at_login(enabled: bool) -> Result<()> {
+    if should_skip_launch_at_login_mutation() {
+        return Ok(());
+    }
     set_launch_at_login_platform(enabled)
+}
+
+fn should_skip_launch_at_login_mutation() -> bool {
+    if std::env::var_os("DAYTRAIL_DISABLE_AUTOSTART_MUTATION").is_some() {
+        return true;
+    }
+
+    std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().contains("/target/debug/deps/"))
+        .unwrap_or(false)
 }
 
 #[cfg(target_os = "macos")]
@@ -362,5 +376,10 @@ mod tests {
             "ai-provider-lm-studio-local"
         );
         assert_eq!(keychain_key_for_ai_provider(""), "ai-provider-default");
+    }
+
+    #[test]
+    fn test_binaries_do_not_mutate_login_items() {
+        assert!(should_skip_launch_at_login_mutation());
     }
 }

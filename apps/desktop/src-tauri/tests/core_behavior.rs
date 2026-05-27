@@ -141,6 +141,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     let store = WorktraceStore::open(&db_path).expect("open store");
 
     let defaults = store.get_settings().expect("default settings");
+    assert!(defaults.launch_at_login);
     assert_eq!(defaults.experience_mode, "simple");
     assert!(!defaults.show_system_apps);
     assert!(!defaults.show_raw_events);

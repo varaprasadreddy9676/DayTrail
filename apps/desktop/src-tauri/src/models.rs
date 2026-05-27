@@ -103,7 +103,7 @@ impl Default for Settings {
         Self {
             idle_timeout_minutes: 10,
             export_format: "json".into(),
-            launch_at_login: false,
+            launch_at_login: true,
             browser_bridge_enabled: true,
             terminal_bridge_path: None,
             excluded_apps: Vec::new(),
