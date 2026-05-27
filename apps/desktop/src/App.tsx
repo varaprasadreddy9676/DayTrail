@@ -172,7 +172,7 @@ type BackendTodaySnapshot = {
   aiOutputs: Array<{ id: string; title: string; outputType: string; status: string; aiAssisted: boolean }>;
   meetings: Array<{ id: string; title: string; summary?: string | null }>;
   fieldVisits: Array<{ id: string; clientLabel?: string | null; locationLabel?: string | null; status: string }>;
-  idleBlocks: Array<{ id: string; durationMs: number; classified: boolean }>;
+  idleBlocks: BackendIdleBlock[];
   sourceEvents?: BackendSourceEvent[];
   aiUsageSummary?: BackendAiUsageSummary;
   appUsageSummary?: BackendAppUsageSummary;
@@ -231,6 +231,18 @@ type BackendActiveWorkContext = {
   ticketId: string | null;
   billable: boolean;
   updatedAt: number;
+};
+
+type BackendIdleBlock = {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  category?: string | null;
+  classified: boolean;
+  evidenceJson?: string | null;
+  createdAt?: number;
+  updatedAt?: number;
 };
 
 type BackendWorkSessionSummary = {
@@ -338,6 +350,25 @@ type HourAppBreakdown = {
   files: HourFileEntry[];
 };
 
+type ManualTimeBlockContext = {
+  client?: string | null;
+  project?: string | null;
+  task?: string | null;
+  ticketId?: string | null;
+  billable?: boolean | null;
+  source?: string | null;
+};
+
+type ManualTimeBlock = {
+  id: string;
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  category: string;
+  classified: boolean;
+  context: ManualTimeBlockContext;
+};
+
 type IdleGap = {
   startMs: number;
   endMs: number;
@@ -348,10 +379,12 @@ type HourBucket = {
   hour: number;
   label: string;
   durationMs: number;
+  manualDurationMs: number;
   events: BackendSourceEvent[];
   apps: HourAppBreakdown[];
   aiTools: string[];
   idleGaps: IdleGap[];
+  manualBlocks: ManualTimeBlock[];
 };
 
 type ProjectUsageBreakdown = {
@@ -805,6 +838,98 @@ function formatDuration(durationMs = 0) {
   if (minutes === 0 && seconds === 0) return `${hours}h`;
   if (seconds === 0) return `${hours}h ${minutes}m`;
   return `${hours}h ${minutes}m`;
+}
+
+function dayStartMsFor(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function hourRangeForToday(hour: number) {
+  const start = dayStartMsFor() + hour * 60 * 60 * 1000;
+  return { startMs: start, endMs: start + 60 * 60 * 1000 };
+}
+
+function hoursToRange(hours: number[]) {
+  const sorted = [...new Set(hours)].sort((left, right) => left - right);
+  const first = sorted[0] ?? new Date().getHours();
+  const last = sorted[sorted.length - 1] ?? first;
+  const start = hourRangeForToday(first).startMs;
+  const end = hourRangeForToday(last).endMs;
+  return { startMs: start, endMs: end };
+}
+
+function parseManualBlockContext(evidenceJson?: string | null): ManualTimeBlockContext {
+  if (!evidenceJson) return {};
+  try {
+    const parsed = JSON.parse(evidenceJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const value = parsed as Record<string, unknown>;
+    return {
+      client: typeof value.client === "string" ? value.client : null,
+      project: typeof value.project === "string" ? value.project : null,
+      task: typeof value.task === "string" ? value.task : null,
+      ticketId: typeof value.ticketId === "string" ? value.ticketId : null,
+      billable: typeof value.billable === "boolean" ? value.billable : null,
+      source: typeof value.source === "string" ? value.source : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function manualBlocksFromIdleBlocks(idleBlocks?: BackendIdleBlock[] | null): ManualTimeBlock[] {
+  return (idleBlocks ?? [])
+    .filter((block) => Number.isFinite(block.startedAt) && Number.isFinite(block.endedAt) && block.endedAt > block.startedAt)
+    .map((block) => ({
+      id: block.id,
+      startMs: block.startedAt,
+      endMs: block.endedAt,
+      durationMs: block.durationMs || Math.max(0, block.endedAt - block.startedAt),
+      category: block.category?.trim() || (block.classified ? "Marked time" : "Away"),
+      classified: block.classified,
+      context: parseManualBlockContext(block.evidenceJson),
+    }));
+}
+
+function manualBlockTitle(block: ManualTimeBlock) {
+  return block.context.task || block.context.project || block.context.client || block.category;
+}
+
+function manualBlockSubtitle(block: ManualTimeBlock) {
+  return [block.context.client, block.context.project, block.context.ticketId]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
+}
+
+function manualBlockEvidenceJson(form: WorkContextForm, source: string) {
+  return JSON.stringify({
+    source,
+    client: form.client.trim() || null,
+    project: form.project.trim() || null,
+    task: form.task.trim() || null,
+    ticketId: form.ticketId.trim() || null,
+    billable: form.billable,
+  });
+}
+
+function rangesOverlap(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) {
+  return Math.max(leftStart, rightStart) < Math.min(leftEnd, rightEnd);
+}
+
+function manualBlockToEditorState(block: ManualTimeBlock): WorkContextEditorState {
+  return {
+    mode: "time-block",
+    blockType: block.category,
+    client: block.context.client ?? "",
+    project: block.context.project ?? "",
+    task: block.context.task ?? "",
+    ticketId: block.context.ticketId ?? "",
+    billable: block.context.billable ?? true,
+    startMs: block.startMs,
+    endMs: block.endMs,
+    idleBlockId: block.id,
+    source: block.context.source ?? "manual-edit",
+  };
 }
 
 function compactDisplayLabel(value?: string | null) {
@@ -1265,17 +1390,17 @@ function parseBrowserTab(event: BackendSourceEvent): HourFileEntry | null {
 
 // ── End file-breakdown helpers ─────────────────────────────────────────────
 
-function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
+function buildHourBuckets(sourceEvents: BackendSourceEvent[], manualBlocks: ManualTimeBlock[] = []) {
   const hourMs = 60 * 60 * 1000;
-  const dayStartDate = new Date();
-  dayStartDate.setHours(0, 0, 0, 0);
-  const dayStart = dayStartDate.getTime();
+  const dayStart = dayStartMsFor();
   const dayEnd = dayStart + 24 * hourMs;
   const working = Array.from({ length: 24 }, (_, hour) => ({
     hour,
     label: localHourLabel(hour),
     durationMs: 0,
+    manualDurationMs: 0,
     events: [] as BackendSourceEvent[],
+    manualBlocks: [] as ManualTimeBlock[],
     apps: new Map<
       string,
       {
@@ -1361,6 +1486,29 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
     }
   });
 
+  manualBlocks.forEach((block) => {
+    const start = Math.max(block.startMs, dayStart);
+    const end = Math.min(block.endMs, dayEnd);
+
+    if (end <= dayStart || start >= dayEnd || end <= start) {
+      return;
+    }
+
+    const firstHour = Math.max(0, Math.min(23, Math.floor((start - dayStart) / hourMs)));
+    const lastHour = Math.max(0, Math.min(23, Math.floor((end - 1 - dayStart) / hourMs)));
+
+    for (let hour = firstHour; hour <= lastHour; hour += 1) {
+      const bucket = working[hour];
+      const hourStart = dayStart + hour * hourMs;
+      const overlap = Math.max(0, Math.min(end, hourStart + hourMs) - Math.max(start, hourStart));
+      if (overlap <= 0) continue;
+      bucket.manualDurationMs += overlap;
+      if (!bucket.manualBlocks.some((existing) => existing.id === block.id)) {
+        bucket.manualBlocks.push(block);
+      }
+    }
+  });
+
   const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5-minute gap = "away"
 
   return working.map((bucket): HourBucket => {
@@ -1382,6 +1530,7 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
       hour: bucket.hour,
       label: bucket.label,
       durationMs: bucket.durationMs,
+      manualDurationMs: bucket.manualDurationMs,
       events: sortedEvents,
       apps: [...bucket.apps.values()]
         .map((app) => ({
@@ -1398,6 +1547,7 @@ function buildHourBuckets(sourceEvents: BackendSourceEvent[]) {
         .sort((left, right) => right.durationMs - left.durationMs),
       aiTools: [...bucket.aiTools],
       idleGaps,
+      manualBlocks: bucket.manualBlocks.sort((left, right) => left.startMs - right.startMs),
     };
   });
 }
@@ -1843,35 +1993,56 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
 // ── Work Context Editor ───────────────────────────────────────────────────────
 
 interface WorkContextForm {
+  blockType: string;
   client: string;
   project: string;
   task: string;
   ticketId: string;
   billable: boolean;
+  startMs?: number;
+  endMs?: number;
+  idleBlockId?: string | null;
+  source?: string;
 }
+
+type WorkContextEditorState = Partial<WorkContextForm> & {
+  mode?: "active" | "time-block";
+};
 
 function WorkContextEditorModal({
   context,
   initialForm,
+  mode = "active",
   onClose,
   onSave,
   onClear,
 }: {
   context: BackendActiveWorkContext | null | undefined;
   initialForm?: Partial<WorkContextForm>;
+  mode?: "active" | "time-block";
   onClose: () => void;
   onSave: (form: WorkContextForm) => void;
   onClear: () => void;
 }) {
   const [form, setForm] = useState<WorkContextForm>({
+    blockType: initialForm?.blockType ?? "Work",
     client: initialForm?.client ?? context?.client ?? "",
     project: initialForm?.project ?? context?.project ?? "",
     task: initialForm?.task ?? context?.task ?? "",
     ticketId: initialForm?.ticketId ?? context?.ticketId ?? "",
     billable: initialForm?.billable ?? context?.billable ?? true,
+    startMs: initialForm?.startMs,
+    endMs: initialForm?.endMs,
+    idleBlockId: initialForm?.idleBlockId ?? null,
+    source: initialForm?.source,
   });
 
   const hasContext = Boolean(context?.client || context?.project || context?.task);
+  const isTimeBlock = mode === "time-block";
+  const rangeLabel =
+    isTimeBlock && form.startMs !== undefined && form.endMs !== undefined
+      ? formatTimeRange(form.startMs, form.endMs)
+      : null;
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1886,8 +2057,28 @@ function WorkContextEditorModal({
             onClick={(e) => e.stopPropagation()}
             onSubmit={handleSubmit}
           >
-            <h3>Set current task</h3>
-            <p>Use this when you want future activity tagged to a client, project, or ticket.</p>
+            <h3>{isTimeBlock ? "Mark time" : "Set current task"}</h3>
+            <p>
+              {isTimeBlock
+                ? `Explain what this time was for${rangeLabel ? `: ${rangeLabel}` : ""}.`
+                : "Use this when you want future activity tagged to a client, project, or ticket."}
+            </p>
+            {isTimeBlock && (
+              <label className="offline-modal-full">
+                Type
+                <select
+                  value={form.blockType}
+                  onChange={(e) => setForm((prev) => ({ ...prev, blockType: e.target.value }))}
+                >
+                  <option>Work</option>
+                  <option>Meeting</option>
+                  <option>Break</option>
+                  <option>Personal</option>
+                  <option>Offline work</option>
+                  <option>Ignore</option>
+                </select>
+              </label>
+            )}
             <label className="offline-modal-full">
               Client / Organisation
               <input
@@ -1937,8 +2128,8 @@ function WorkContextEditorModal({
               </label>
             </div>
             <div className="offline-modal-actions">
-              <button className="button" type="submit">Save context</button>
-              {hasContext && (
+              <button className="button" type="submit">{isTimeBlock ? "Save time" : "Save context"}</button>
+              {!isTimeBlock && hasContext && (
                 <button
                   className="button ghost"
                   onClick={() => { onClear(); onClose(); }}
@@ -2012,7 +2203,7 @@ export default function App() {
   const [permissionSetupDismissed, setPermissionSetupDismissed] = useState(false);
   const [logOfflineOpen, setLogOfflineOpen] = useState(false);
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
-  const [workContextEditor, setWorkContextEditor] = useState<Partial<WorkContextForm> | null>(null);
+  const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
 
   // Review / timesheet state
   const [reviewFromDate, setReviewFromDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -2650,6 +2841,11 @@ export default function App() {
   }
 
   async function saveWorkContext(form: WorkContextForm) {
+    if (form.startMs !== undefined && form.endMs !== undefined) {
+      await saveManualTimeBlock(form);
+      return;
+    }
+
     const result = await invokeTauri<BackendActiveWorkContext>("set_active_work_context", {
       input: {
         client: form.client.trim() || null,
@@ -2663,6 +2859,44 @@ export default function App() {
       setTodaySnapshot((prev) => prev ? { ...prev, activeWorkContext: result } : prev);
       const label = form.project || form.client || form.task || "context";
       addToast("success", "Work context set", `Tracking as: ${label}`);
+    }
+  }
+
+  async function saveManualTimeBlock(form: WorkContextForm) {
+    const startedAt = form.startMs;
+    const endedAt = form.endMs;
+    if (startedAt === undefined || endedAt === undefined || endedAt <= startedAt) {
+      addToast("error", "Invalid time range", "End time must be after start time.");
+      return;
+    }
+
+    const result = await invokeTauri<BackendIdleBlock>("upsert_idle_block", {
+      input: {
+        id: form.idleBlockId ?? null,
+        startedAt,
+        endedAt,
+        category: form.blockType || "Work",
+        classified: true,
+        evidenceJson: manualBlockEvidenceJson(form, form.source ?? "manual"),
+      },
+    });
+
+    if (result) {
+      const label = form.task || form.project || form.client || form.blockType || "time";
+      addToast("success", "Time marked", `${label} saved for ${formatTimeRange(startedAt, endedAt)}.`);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Could not mark time", "Backend unavailable.");
+    }
+  }
+
+  async function deleteManualTimeBlock(id: string) {
+    const deleted = await invokeTauri<boolean>("delete_idle_block", { id });
+    if (deleted) {
+      addToast("success", "Marked time cleared");
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Could not clear marked time", "The block may already have been removed.");
     }
   }
 
@@ -3107,10 +3341,12 @@ export default function App() {
           {activeView === "hour" && (
             <HourDetailView
               bucket={
-                buildHourBuckets(workSourceEvents)[
+                buildHourBuckets(workSourceEvents, manualBlocksFromIdleBlocks(todaySnapshot?.idleBlocks))[
                   activeHourDetail ?? new Date().getHours()
                 ]
               }
+              onDeleteManualBlock={deleteManualTimeBlock}
+              onEditManualBlock={(block) => setWorkContextEditor(manualBlockToEditorState(block))}
               onBack={() => setActiveView("today")}
               onOpenActivity={() => setActiveView("apps")}
               settings={todaySnapshot?.settings}
@@ -3315,6 +3551,7 @@ export default function App() {
         <WorkContextEditorModal
           context={todaySnapshot?.activeWorkContext}
           initialForm={workContextEditor}
+          mode={workContextEditor.mode ?? "active"}
           onClear={clearWorkContext}
           onClose={() => setWorkContextEditor(null)}
           onSave={saveWorkContext}
@@ -3638,7 +3875,7 @@ function TodayView({
   isPaused: boolean;
   onGenerateReport: () => void;
   onOpenHour: (hour: number) => void;
-  onOpenWorkContextEditor: (initialForm: Partial<WorkContextForm>) => void;
+  onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
   onClearWorkContext: () => void;
   onUpdateAction: (actionId: string, state: ActionItem["state"]) => void;
   pendingReplyCount: number;
@@ -3653,6 +3890,9 @@ function TodayView({
 }) {
   const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const [selectedHours, setSelectedHours] = useState<number[]>([]);
+  const [lastSelectedHour, setLastSelectedHour] = useState<number | null>(null);
+  const [dismissedIdlePromptIds, setDismissedIdlePromptIds] = useState<Set<string>>(() => new Set());
   const todaySettings = normalizeExperienceSettings(settings);
   const visibleSourceEvents = useMemo(() => {
     if (todaySettings.experienceMode === "pro" || todaySettings.showSystemApps) {
@@ -3672,17 +3912,66 @@ function TodayView({
   const openActions = actions.filter((action) => action.state === "open");
   const latestSession = sessions[0] ?? null;
   const latestEvent = [...sourceEvents].sort((left, right) => right.endedAt - left.endedAt)[0] ?? null;
-  const hourBuckets = useMemo(() => buildHourBuckets(visibleSourceEvents), [visibleSourceEvents]);
+  const manualBlocks = useMemo(
+    () => manualBlocksFromIdleBlocks(snapshot?.idleBlocks),
+    [snapshot?.idleBlocks],
+  );
+  const hourBuckets = useMemo(
+    () => buildHourBuckets(visibleSourceEvents, manualBlocks),
+    [manualBlocks, visibleSourceEvents],
+  );
   const simpleToday = useMemo(
     () => buildTodayView(snapshot, settings),
     [settings, snapshot],
   );
   const projectUsage = useMemo(() => buildProjectUsageBreakdown(visibleSourceEvents), [visibleSourceEvents]);
   const activeHour = selectedHour ?? (latestEvent ? new Date(latestEvent.endedAt).getHours() : new Date().getHours());
-  const handleSelectHour = (hour: number) => {
+  const handleSelectHour = (hour: number, options?: { toggle?: boolean; range?: boolean }) => {
     setSelectedHour(hour);
+    if (options?.range && lastSelectedHour !== null) {
+      const start = Math.min(lastSelectedHour, hour);
+      const end = Math.max(lastSelectedHour, hour);
+      setSelectedHours(Array.from({ length: end - start + 1 }, (_, index) => start + index));
+      return;
+    }
+    setLastSelectedHour(hour);
+    if (options?.toggle) {
+      setSelectedHours((previous) => {
+        const next = new Set(previous.length ? previous : [selectedHour ?? hour]);
+        if (next.has(hour)) {
+          next.delete(hour);
+        } else {
+          next.add(hour);
+        }
+        const values = [...next].sort((left, right) => left - right);
+        return values.length ? values : [hour];
+      });
+      return;
+    }
+    setSelectedHours([hour]);
   };
   const selectedHourBucket = hourBuckets[activeHour] ?? hourBuckets[new Date().getHours()];
+  const idlePrompt = useMemo(() => {
+    const minimumPromptMs = 10 * 60 * 1000;
+    const now = Date.now();
+    for (const bucket of hourBuckets) {
+      for (const gap of bucket.idleGaps) {
+        const id = `${gap.startMs}-${gap.endMs}`;
+        const alreadyCovered = manualBlocks.some((block) =>
+          block.classified && rangesOverlap(gap.startMs, gap.endMs, block.startMs, block.endMs),
+        );
+        if (
+          gap.durationMs >= minimumPromptMs &&
+          gap.endMs < now - 60_000 &&
+          !alreadyCovered &&
+          !dismissedIdlePromptIds.has(id)
+        ) {
+          return { ...gap, id };
+        }
+      }
+    }
+    return null;
+  }, [dismissedIdlePromptIds, hourBuckets, manualBlocks]);
   const inspectedSession =
     sessions.find((session) => session.id === inspectedSessionId) ?? null;
   const inspectedEvents = inspectedSession
@@ -3783,6 +4072,7 @@ function TodayView({
           onOpenWorkContextEditor={onOpenWorkContextEditor}
           onSelectHour={handleSelectHour}
           selectedHour={activeHour}
+          selectedHours={selectedHours.length ? selectedHours : [activeHour]}
         />
         <SelectedHourPanel
           bucket={selectedHourBucket}
@@ -3880,6 +4170,24 @@ function TodayView({
           session={inspectedSession}
         />
       )}
+      {idlePrompt && (
+        <IdleRecoveryPrompt
+          gap={idlePrompt}
+          onDismiss={() => setDismissedIdlePromptIds((previous) => new Set(previous).add(idlePrompt.id))}
+          onMark={(blockType) => {
+            setDismissedIdlePromptIds((previous) => new Set(previous).add(idlePrompt.id));
+            onOpenWorkContextEditor({
+              mode: "time-block",
+              blockType,
+              task: blockType === "Meeting" ? "Meeting" : blockType,
+              billable: blockType === "Meeting" || blockType === "Offline work",
+              startMs: idlePrompt.startMs,
+              endMs: idlePrompt.endMs,
+              source: "idle-recovery",
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -3890,12 +4198,14 @@ function HourlyTimelinePanel({
   onOpenWorkContextEditor,
   onSelectHour,
   selectedHour,
+  selectedHours,
 }: {
   buckets: HourBucket[];
   onClearWorkContext: () => void;
-  onOpenWorkContextEditor: (initialForm: Partial<WorkContextForm>) => void;
-  onSelectHour: (hour: number) => void;
+  onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
+  onSelectHour: (hour: number, options?: { toggle?: boolean; range?: boolean }) => void;
   selectedHour: number;
+  selectedHours: number[];
 }) {
   const [showFullDay, setShowFullDay] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -3903,8 +4213,9 @@ function HourlyTimelinePanel({
     x: number;
     y: number;
   } | null>(null);
-  const totalDuration = buckets.reduce((sum, bucket) => sum + bucket.durationMs, 0);
-  const activeBuckets = buckets.filter((bucket) => bucket.durationMs > 0);
+  const selectedHourSet = useMemo(() => new Set(selectedHours), [selectedHours]);
+  const totalDuration = buckets.reduce((sum, bucket) => sum + Math.max(bucket.durationMs, bucket.manualDurationMs), 0);
+  const activeBuckets = buckets.filter((bucket) => bucket.durationMs > 0 || bucket.manualDurationMs > 0);
   const visibleBuckets = showFullDay || activeBuckets.length === 0 ? buckets : activeBuckets;
   const topApps = [...buckets.reduce((apps, bucket) => {
     bucket.apps.forEach((app) => {
@@ -3914,13 +4225,20 @@ function HourlyTimelinePanel({
   }, new Map<string, number>())]
     .sort((left, right) => right[1] - left[1])
     .slice(0, 6);
-  const suggestedContextForBucket = (bucket: HourBucket): Partial<WorkContextForm> => {
+  const suggestedContextForBucket = (bucket: HourBucket): WorkContextEditorState => {
     const topApp = bucket.apps[0] ?? null;
     const rawContext = topApp?.contexts.find((context) => context && context !== topApp.app);
+    const hours = selectedHourSet.has(bucket.hour) ? selectedHours : [bucket.hour];
+    const range = hoursToRange(hours);
     return {
+      mode: "time-block",
+      blockType: "Work",
       project: rawContext ? compactDisplayLabel(rawContext) : "",
       task: topApp ? `${topApp.app} activity` : "",
       billable: true,
+      startMs: range.startMs,
+      endMs: range.endMs,
+      source: "timeline",
     };
   };
   const openContextMenu = (event: MouseEvent, bucket: HourBucket) => {
@@ -3968,16 +4286,18 @@ function HourlyTimelinePanel({
       </div>
       <div className="hour-timeline-list" aria-label="Day activity by hour">
         {visibleBuckets.map((bucket) => {
-          const hourFillPercent = Math.min(100, Math.round((bucket.durationMs / (60 * 60 * 1000)) * 100));
+          const effectiveDuration = Math.max(bucket.durationMs, bucket.manualDurationMs);
+          const hourFillPercent = Math.min(100, Math.round((effectiveDuration / (60 * 60 * 1000)) * 100));
+          const isSelected = selectedHourSet.has(bucket.hour);
 
           return (
             <button
-              aria-pressed={selectedHour === bucket.hour}
+              aria-pressed={isSelected || selectedHour === bucket.hour}
               className="hour-row"
               key={bucket.hour}
-              onClick={() => onSelectHour(bucket.hour)}
+              onClick={(event) => onSelectHour(bucket.hour, { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey })}
               onContextMenu={(event) => openContextMenu(event, bucket)}
-              title={`${bucket.label}: ${bucket.apps.map((app) => `${app.app} ${formatDuration(app.durationMs)}`).join(", ") || "No activity"}`}
+              title={`${bucket.label}: ${bucket.apps.map((app) => `${app.app} ${formatDuration(app.durationMs)}`).join(", ") || bucket.manualBlocks.map(manualBlockTitle).join(", ") || "No activity"}`}
               type="button"
             >
               <span className="hour-label">{bucket.label}</span>
@@ -3998,9 +4318,11 @@ function HourlyTimelinePanel({
                   })}
                 </span>
               </span>
-              <strong>{bucket.durationMs > 0 ? formatDuration(bucket.durationMs) : "-"}</strong>
-              {bucket.aiTools.length > 0 && (
-                <em className="hour-ai-badges">{bucket.aiTools.slice(0, 3).join(", ")}</em>
+              <strong>{effectiveDuration > 0 ? formatDuration(effectiveDuration) : "-"}</strong>
+              {(bucket.aiTools.length > 0 || bucket.manualBlocks.length > 0) && (
+                <em className="hour-ai-badges">
+                  {[...bucket.manualBlocks.map(manualBlockTitle), ...bucket.aiTools].slice(0, 3).join(", ")}
+                </em>
               )}
             </button>
           );
@@ -4020,7 +4342,7 @@ function HourlyTimelinePanel({
               }}
               type="button"
             >
-              Set current task from this hour
+              Mark selected time
             </button>
             <button
               onClick={() => {
@@ -4034,6 +4356,31 @@ function HourlyTimelinePanel({
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+function IdleRecoveryPrompt({
+  gap,
+  onDismiss,
+  onMark,
+}: {
+  gap: IdleGap & { id: string };
+  onDismiss: () => void;
+  onMark: (blockType: string) => void;
+}) {
+  return (
+    <section className="idle-recovery-prompt" role="dialog" aria-label="Classify away time">
+      <div>
+        <strong>Were you away?</strong>
+        <span>{formatTimeRange(gap.startMs, gap.endMs)} · {formatDuration(gap.durationMs)}</span>
+      </div>
+      <div className="idle-recovery-actions">
+        <button className="button compact" onClick={() => onMark("Meeting")} type="button">Meeting</button>
+        <button className="button compact" onClick={() => onMark("Break")} type="button">Break</button>
+        <button className="button compact" onClick={() => onMark("Offline work")} type="button">Offline work</button>
+        <button className="button compact ghost" onClick={onDismiss} type="button">Ignore</button>
+      </div>
     </section>
   );
 }
@@ -4063,12 +4410,12 @@ function SelectedHourPanel({
       <PanelHeader
         eyebrow="Selected hour"
         title={label}
-        value={bucket?.durationMs ? formatDuration(bucket.durationMs) : "No activity"}
+        value={bucket && Math.max(bucket.durationMs, bucket.manualDurationMs) > 0 ? formatDuration(Math.max(bucket.durationMs, bucket.manualDurationMs)) : "No activity"}
       />
       <div className="selected-hour-metrics">
         <div>
           <span>Total tracked</span>
-          <strong>{formatDuration(bucket?.durationMs ?? 0)}</strong>
+          <strong>{formatDuration(bucket ? Math.max(bucket.durationMs, bucket.manualDurationMs) : 0)}</strong>
         </div>
         <div>
           <span>Apps</span>
@@ -4079,6 +4426,20 @@ function SelectedHourPanel({
           <strong>{bucket?.aiTools.length ?? 0}</strong>
         </div>
       </div>
+      {bucket && bucket.manualBlocks.length > 0 && (
+        <div className="selected-hour-list manual-context-list">
+          {bucket.manualBlocks.map((block) => (
+            <article className="selected-hour-row manual-context-row" key={block.id}>
+              <span className="manual-context-dot" />
+              <div>
+                <strong>{block.category}: {manualBlockTitle(block)}</strong>
+                <em>{manualBlockSubtitle(block) || formatTimeRange(block.startMs, block.endMs)}</em>
+              </div>
+              <span>{formatDuration(block.durationMs)}</span>
+            </article>
+          ))}
+        </div>
+      )}
       <div className="selected-hour-list">
         {(bucket?.apps ?? []).slice(0, 7).map((app) => (
           <article className="selected-hour-row" key={app.app}>
@@ -4117,11 +4478,15 @@ function SelectedHourPanel({
 function HourDetailView({
   bucket,
   onBack,
+  onDeleteManualBlock,
+  onEditManualBlock,
   onOpenActivity,
   settings,
 }: {
   bucket: HourBucket;
   onBack: () => void;
+  onDeleteManualBlock: (id: string) => void;
+  onEditManualBlock: (block: ManualTimeBlock) => void;
   onOpenActivity: () => void;
   settings?: BackendSettings;
 }) {
@@ -4134,6 +4499,7 @@ function HourDetailView({
   const hourStart = bucket.label;
   const hourEnd = localHourLabel((bucket.hour + 1) % 24);
   const topApp = bucket.apps[0] ?? null;
+  const effectiveDuration = Math.max(bucket.durationMs, bucket.manualDurationMs);
   const contexts = uniqueValues(bucket.apps.flatMap((app) => app.contexts));
   const aiByTool = [...bucket.events.reduce((tools, event) => {
     aiToolLabelsForEvent(event).forEach((tool) => {
@@ -4170,7 +4536,7 @@ function HourDetailView({
         <div className="hour-detail-title">
           <span>Hour breakdown</span>
           <h2>{hourLabel}</h2>
-          <p>{bucket.durationMs > 0 ? `${formatDuration(bucket.durationMs)} tracked` : "No captured activity in this hour"}</p>
+          <p>{effectiveDuration > 0 ? `${formatDuration(effectiveDuration)} tracked` : "No captured activity in this hour"}</p>
         </div>
         <button className="button compact" onClick={onOpenActivity} type="button">
           Open Activity
@@ -4181,7 +4547,7 @@ function HourDetailView({
       <section className="hour-metric-strip" aria-label="Hour metrics">
         <div className="stat-card">
           <span>Time spent</span>
-          <strong>{formatDuration(bucket.durationMs)}</strong>
+          <strong>{formatDuration(effectiveDuration)}</strong>
           <em>{bucket.events.length} item{bucket.events.length === 1 ? "" : "s"}</em>
         </div>
         <div className="stat-card">
@@ -4206,7 +4572,17 @@ function HourDetailView({
           <section className="panel-block hour-distribution-panel">
             <PanelHeader eyebrow="Time distribution" title="Within this hour" value={hourLabel} />
             <div className="within-hour-track" aria-label="App distribution in selected hour">
-              {bucket.apps.length === 0 && <span className="within-hour-empty" />}
+              {bucket.apps.length === 0 && bucket.manualBlocks.length === 0 && <span className="within-hour-empty" />}
+              {bucket.manualBlocks.length > 0 && bucket.apps.length === 0 && bucket.manualBlocks.map((block) => (
+                <span
+                  className="within-hour-segment manual-time-segment"
+                  key={block.id}
+                  style={{
+                    width: `${Math.max(4, Math.round((bucket.manualDurationMs / Math.max(effectiveDuration, 1)) * 100))}%`,
+                  }}
+                  title={`${block.category}: ${manualBlockTitle(block)}`}
+                />
+              ))}
               {bucket.apps.map((app) => (
                 <span
                   className="within-hour-segment"
@@ -4220,6 +4596,29 @@ function HourDetailView({
               ))}
             </div>
           </section>
+
+          {bucket.manualBlocks.length > 0 && (
+            <section className="panel-block hour-manual-panel">
+              <PanelHeader eyebrow="Manual context" title="What you marked" value={`${bucket.manualBlocks.length} block${bucket.manualBlocks.length === 1 ? "" : "s"}`} />
+              <div className="manual-block-list">
+                {bucket.manualBlocks.map((block) => (
+                  <article className="manual-block-row" key={block.id}>
+                    <span>{block.category}</span>
+                    <div>
+                      <strong>{manualBlockTitle(block)}</strong>
+                      <em>{manualBlockSubtitle(block) || "No extra context added"}</em>
+                    </div>
+                    <small>{formatTimeRange(block.startMs, block.endMs)}</small>
+                    <b>{formatDuration(block.durationMs)}</b>
+                    <div className="manual-block-actions">
+                      <button className="text-button" onClick={() => onEditManualBlock(block)} type="button">Edit</button>
+                      <button className="text-button danger" onClick={() => onDeleteManualBlock(block.id)} type="button">Clear</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="panel-block hour-app-panel">
             <PanelHeader eyebrow="Apps and context" title="What happened in this hour" value={`${bucket.apps.length} app${bucket.apps.length === 1 ? "" : "s"}`} />
@@ -4364,6 +4763,9 @@ function HourDetailView({
           app={selectedApp}
           events={selectedAppEvents}
           hourLabel={hourLabel}
+          manualBlocks={bucket.manualBlocks}
+          onDeleteManualBlock={onDeleteManualBlock}
+          onEditManualBlock={onEditManualBlock}
           onClose={() => setSelectedAppName(null)}
         />
       )}
@@ -4375,11 +4777,17 @@ function AppBreakdownPanel({
   app,
   events,
   hourLabel,
+  manualBlocks,
+  onDeleteManualBlock,
+  onEditManualBlock,
   onClose,
 }: {
   app: HourAppBreakdown;
   events: BackendSourceEvent[];
   hourLabel: string;
+  manualBlocks: ManualTimeBlock[];
+  onDeleteManualBlock: (id: string) => void;
+  onEditManualBlock: (block: ManualTimeBlock) => void;
   onClose: () => void;
 }) {
   const eventTimeLabel = (event: BackendSourceEvent) =>
@@ -4436,6 +4844,30 @@ function AppBreakdownPanel({
         </header>
 
         <div className="app-breakdown-body">
+          {manualBlocks.length > 0 && (
+            <div className="app-breakdown-manual">
+              <div className="app-breakdown-section-title">
+                <span>Manual context</span>
+                <strong>{manualBlocks.length}</strong>
+              </div>
+              <div className="manual-block-list compact-manual-block-list">
+                {manualBlocks.map((block) => (
+                  <article className="manual-block-row" key={block.id}>
+                    <span>{block.category}</span>
+                    <div>
+                      <strong>{manualBlockTitle(block)}</strong>
+                      <em>{manualBlockSubtitle(block) || formatTimeRange(block.startMs, block.endMs)}</em>
+                    </div>
+                    <small>{formatDuration(block.durationMs)}</small>
+                    <div className="manual-block-actions">
+                      <button className="text-button" onClick={() => onEditManualBlock(block)} type="button">Edit</button>
+                      <button className="text-button danger" onClick={() => onDeleteManualBlock(block.id)} type="button">Clear</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="app-breakdown-grid">
             <div className="app-breakdown-column">
               <div className="app-breakdown-section-title">

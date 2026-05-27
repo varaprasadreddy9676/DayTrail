@@ -59,3 +59,11 @@ pub fn list_idle_blocks(
         .list_idle_blocks(limit.unwrap_or(100))
         .map_err(Into::into)
 }
+
+#[tauri::command]
+pub fn delete_idle_block(
+    store: State<'_, WorktraceStore>,
+    id: String,
+) -> Result<bool, CommandError> {
+    store.delete_idle_block(&id).map_err(Into::into)
+}

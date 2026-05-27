@@ -49,6 +49,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         offline::list_field_visits,
         offline::upsert_idle_block,
         offline::list_idle_blocks,
+        offline::delete_idle_block,
         privacy::clear_clipboard_history,
         privacy::delete_context_data,
         privacy::purge_captured_data,

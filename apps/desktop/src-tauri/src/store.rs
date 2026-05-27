@@ -3396,6 +3396,14 @@ impl WorktraceStore {
         Ok(blocks)
     }
 
+    pub fn delete_idle_block(&self, id: &str) -> Result<bool> {
+        let id = id.trim();
+        anyhow::ensure!(!id.is_empty(), "idle block id is required");
+        let conn = self.lock()?;
+        let changed = conn.execute("DELETE FROM idle_blocks WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
     // ── Active work context ───────────────────────────────────────────────────
 
     pub fn get_active_work_context(&self) -> Result<Option<ActiveWorkContext>> {

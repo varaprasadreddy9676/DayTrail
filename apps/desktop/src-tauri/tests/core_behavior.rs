@@ -1700,6 +1700,20 @@ fn tracks_meetings_field_visits_and_idle_recovery_in_today_and_reports() {
     assert_eq!(today.meetings.len(), 1);
     assert_eq!(today.field_visits.len(), 1);
     assert_eq!(today.idle_blocks.len(), 1);
+    assert!(store
+        .delete_idle_block("idle-1")
+        .expect("delete idle block"));
+    assert_eq!(store.today_snapshot().expect("today after delete").idle_blocks.len(), 0);
+    store
+        .upsert_idle_block(IdleBlockInput {
+            id: Some("idle-1".into()),
+            started_at: now - 187_000,
+            ended_at: now - 7_000,
+            category: None,
+            classified: Some(false),
+            evidence_json: Some(r#"["away from laptop"]"#.into()),
+        })
+        .expect("restore idle block");
     assert_eq!(
         today
             .next_best_action

@@ -350,8 +350,8 @@ describe("WorkTrace command center", () => {
       throw new Error("Expected active day tracker row");
     }
     fireEvent.contextMenu(dayTrackerRow);
-    await user.click(screen.getByRole("button", { name: /set current task from this hour/i }));
-    expect(screen.getByRole("heading", { level: 3, name: /set current task/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /mark selected time/i }));
+    expect(screen.getByRole("heading", { level: 3, name: /mark time/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /cancel/i }));
 
     await user.click(screen.getAllByRole("button", { name: /sqlite capture block/i })[0]);
