@@ -145,15 +145,24 @@ fn native_frontmost_application() -> Option<ActiveWindowInfo> {
     if workspace_candidates.is_empty() {
         workspace_candidates = editor_workspace_candidates_from_storage(&app_name);
     }
+    let app_context = app_context_hint_for_process(&app_name, process_id);
+    if let Some(cwd) = app_context.as_ref().and_then(|hint| hint.cwd.as_ref()) {
+        push_workspace_candidate(&mut workspace_candidates, cwd);
+    }
     // Enrich title: strip "App — Context" patterns or AX heading search when
     // the raw title is just the app name (Claude, Codex, Notion, etc.)
-    let title = enrich_window_title(title.as_deref(), &app_name, process_id).or(title);
+    let title = app_context
+        .as_ref()
+        .and_then(|hint| hint.title.clone())
+        .or_else(|| enrich_window_title(title.as_deref(), &app_name, process_id))
+        .or(title);
 
     let bridge_hint = terminal_bridge_hint_for_app(&app_name);
     let workspace_key = workspace_from_title(title.as_deref())
         .or_else(|| workspace_from_candidates(title.as_deref(), &workspace_candidates))
         .or_else(|| single_workspace_candidate(&workspace_candidates))
         .or_else(|| workspace_from_editor_storage(&app_name, title.as_deref()))
+        .or_else(|| app_context.and_then(|hint| hint.cwd))
         .or_else(|| bridge_hint.as_ref().map(|hint| hint.cwd.clone()));
     let mut ai_tools = ai_tools_from_processes(&app_name, process_id);
     if let Some(hint) = bridge_hint {
@@ -223,14 +232,23 @@ fn applescript_frontmost_application() -> Option<ActiveWindowInfo> {
     if workspace_candidates.is_empty() {
         workspace_candidates = editor_workspace_candidates_from_storage(&app_name);
     }
+    let app_context = app_context_hint_for_process(&app_name, process_id);
+    if let Some(cwd) = app_context.as_ref().and_then(|hint| hint.cwd.as_ref()) {
+        push_workspace_candidate(&mut workspace_candidates, cwd);
+    }
     // Enrich title for apps whose window title is just their name
-    let title = enrich_window_title(title.as_deref(), &app_name, process_id).or(title);
+    let title = app_context
+        .as_ref()
+        .and_then(|hint| hint.title.clone())
+        .or_else(|| enrich_window_title(title.as_deref(), &app_name, process_id))
+        .or(title);
 
     let bridge_hint = terminal_bridge_hint_for_app(&app_name);
     let workspace_key = workspace_from_title(title.as_deref())
         .or_else(|| workspace_from_candidates(title.as_deref(), &workspace_candidates))
         .or_else(|| single_workspace_candidate(&workspace_candidates))
         .or_else(|| workspace_from_editor_storage(&app_name, title.as_deref()))
+        .or_else(|| app_context.and_then(|hint| hint.cwd))
         .or_else(|| bridge_hint.as_ref().map(|hint| hint.cwd.clone()));
     let mut ai_tools = ai_tools_from_processes(&app_name, process_id);
     if let Some(hint) = bridge_hint {
@@ -341,6 +359,14 @@ fn workspace_candidates_from_process(pid: u32) -> Vec<String> {
             .then_with(|| left.cmp(right))
     });
     candidates
+}
+
+fn push_workspace_candidate(candidates: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if value.is_empty() || candidates.iter().any(|candidate| candidate == value) {
+        return;
+    }
+    candidates.insert(0, value.to_string());
 }
 
 fn workspace_from_title(title: Option<&str>) -> Option<String> {
@@ -651,6 +677,12 @@ struct ProcessRow {
     command: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppContextHint {
+    title: Option<String>,
+    cwd: Option<String>,
+}
+
 fn parse_process_rows(output: &str) -> Vec<ProcessRow> {
     output
         .lines()
@@ -662,6 +694,124 @@ fn parse_process_rows(output: &str) -> Vec<ProcessRow> {
             (!command.is_empty()).then_some(ProcessRow { pid, ppid, command })
         })
         .collect()
+}
+
+fn descendant_process_ids(output: &str, root_pid: u32) -> HashSet<u32> {
+    let rows = parse_process_rows(output);
+    let mut children_by_parent: HashMap<u32, Vec<&ProcessRow>> = HashMap::new();
+    for row in &rows {
+        children_by_parent.entry(row.ppid).or_default().push(row);
+    }
+
+    let mut descendants = HashSet::from([root_pid]);
+    let mut stack = vec![root_pid];
+    while let Some(parent) = stack.pop() {
+        if let Some(children) = children_by_parent.get(&parent) {
+            for child in children {
+                if descendants.insert(child.pid) {
+                    stack.push(child.pid);
+                }
+            }
+        }
+    }
+    descendants
+}
+
+fn app_context_hint_for_process(app_name: &str, process_id: Option<u32>) -> Option<AppContextHint> {
+    if app_name == "Codex" {
+        return process_id.and_then(codex_context_from_process);
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn codex_context_from_process(root_pid: u32) -> Option<AppContextHint> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid,ppid,command"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let descendants = descendant_process_ids(&String::from_utf8_lossy(&output.stdout), root_pid);
+    let mut sessions = Vec::new();
+    for pid in descendants {
+        let output = Command::new("lsof")
+            .args(["-p", &pid.to_string(), "-Fn"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            continue;
+        }
+        for path in String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.strip_prefix('n'))
+            .filter(|path| path.contains("/.codex/sessions/") && path.ends_with(".jsonl"))
+        {
+            let path = PathBuf::from(path);
+            let modified = path
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            sessions.push((modified, path));
+        }
+    }
+
+    sessions.sort_by(|left, right| right.0.cmp(&left.0));
+    sessions
+        .into_iter()
+        .filter_map(|(_, path)| codex_thread_hint_from_rollout_path(&path))
+        .next()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn codex_context_from_process(_root_pid: u32) -> Option<AppContextHint> {
+    None
+}
+
+fn codex_thread_hint_from_rollout_path(rollout_path: &Path) -> Option<AppContextHint> {
+    let db_path = dirs::home_dir()?.join(".codex/state_5.sqlite");
+    codex_thread_hint_from_state_db(&db_path, rollout_path)
+}
+
+fn codex_thread_hint_from_state_db(db_path: &Path, rollout_path: &Path) -> Option<AppContextHint> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .ok()?;
+    let rollout_path = rollout_path.to_string_lossy();
+    let mut stmt = conn
+        .prepare(
+            "SELECT title, cwd
+             FROM threads
+             WHERE rollout_path = ?1
+             LIMIT 1",
+        )
+        .ok()?;
+    stmt.query_row([rollout_path.as_ref()], |row| {
+        let title: String = row.get(0)?;
+        let cwd: String = row.get(1)?;
+        Ok(AppContextHint {
+            title: clean_codex_context_title(&title),
+            cwd: (!cwd.trim().is_empty()).then(|| cwd.trim().to_string()),
+        })
+    })
+    .ok()
+}
+
+fn clean_codex_context_title(value: &str) -> Option<String> {
+    let first_line = value.lines().find(|line| !line.trim().is_empty())?;
+    let mut title = first_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_TITLE_LEN: usize = 90;
+    if title.len() > MAX_TITLE_LEN {
+        title.truncate(MAX_TITLE_LEN);
+        title = title.trim_end().to_string();
+    }
+    (!title.is_empty() && !title.eq_ignore_ascii_case("Codex")).then_some(title)
 }
 
 fn push_cli_ai_tools_from_command(tools: &mut Vec<String>, command: &str) {
@@ -2084,6 +2234,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::is_chromium_browser;
     use super::{
+        clean_codex_context_title, codex_thread_hint_from_state_db,
         display_app_name_from_executable, meaningful_ax_candidate, push_ai_tool_from_path,
         score_ax_context_candidate, single_workspace_candidate, status_prefixed_ax_candidate,
         terminal_ai_tools_from_ps_output, workspace_from_candidates,
@@ -2212,6 +2363,54 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn extracts_codex_thread_context_from_state_db() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("state_5.sqlite");
+        let rollout_path = dir.path().join("rollout.jsonl");
+        std::fs::write(&rollout_path, "{}\n").expect("rollout");
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        conn.execute(
+            "CREATE TABLE threads (
+                rollout_path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                cwd TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("schema");
+        conn.execute(
+            "INSERT INTO threads (rollout_path, title, cwd) VALUES (?1, ?2, ?3)",
+            (
+                rollout_path.to_string_lossy().as_ref(),
+                "Fix production capture labels\nwith extra detail",
+                "/Users/alice/work/daytrail",
+            ),
+        )
+        .expect("insert");
+
+        let hint = codex_thread_hint_from_state_db(&db_path, &rollout_path).expect("hint");
+
+        assert_eq!(
+            hint,
+            super::AppContextHint {
+                title: Some("Fix production capture labels".to_string()),
+                cwd: Some("/Users/alice/work/daytrail".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn trims_long_codex_titles_without_reading_full_conversation() {
+        let title = clean_codex_context_title(
+            "Please investigate the capture issue where every Codex app row is shown as only Codex instead of the active project",
+        )
+        .expect("title");
+
+        assert!(title.len() <= 90);
+        assert!(title.starts_with("Please investigate"));
     }
 
     #[test]
