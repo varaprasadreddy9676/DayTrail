@@ -1,4 +1,7 @@
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -160,8 +163,8 @@ fn shell_profile_for(shell: &str) -> anyhow::Result<(PathBuf, &'static str)> {
 }
 
 fn terminal_bridge_profile_block(
-    bridge_script_path: &PathBuf,
-    metadata_path: &PathBuf,
+    bridge_script_path: &Path,
+    metadata_path: &Path,
     hook_kind: &str,
 ) -> String {
     let hook_arg = if hook_kind == "bash" {
@@ -185,7 +188,7 @@ fn replace_marked_block(existing: &str, block: &str) -> String {
             output.push_str(existing[..start].trim_end());
             output.push_str("\n\n");
             output.push_str(block.trim_end());
-            output.push_str("\n");
+            output.push('\n');
             output.push_str(existing[end..].trim_start_matches(['\r', '\n']));
             return output;
         }

@@ -66,12 +66,10 @@ fn find_app_bundle(app_name: &str) -> Option<PathBuf> {
 
     // Spotlight fallback for non-standard install paths.
     let output = Command::new("/usr/bin/mdfind")
-        .args([
-            &format!(
-                "kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '{}'",
-                filename
-            ),
-        ])
+        .args([&format!(
+            "kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '{}'",
+            filename
+        )])
         .output()
         .ok()?;
 
@@ -92,7 +90,13 @@ fn extract_icon_via_jxa(bundle_path: &str) -> Option<String> {
     // Write to a temp PNG file to avoid large stdout payloads.
     let safe_name: String = bundle_path
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .trim_matches('_')
         .to_string();
@@ -142,7 +146,9 @@ b64"#,
     }
 
     // Decode and re-encode to validate, then cache to disk.
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&b64).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .ok()?;
     if bytes.len() < 100 {
         return None;
     }
@@ -195,10 +201,15 @@ fn extract_icon_via_sips(bundle_path: &str, out_png: &std::path::Path) -> Option
 
     let ok = Command::new("/usr/bin/sips")
         .args([
-            "-s", "format", "png",
+            "-s",
+            "format",
+            "png",
             &icns_path,
-            "--out", &out_png.to_string_lossy(),
-            "--resampleHeightWidth", "64", "64",
+            "--out",
+            &out_png.to_string_lossy(),
+            "--resampleHeightWidth",
+            "64",
+            "64",
         ])
         .output()
         .map(|o| o.status.success())
@@ -224,7 +235,11 @@ pub fn app_icon_data_url(app_name: &str) -> Option<String> {
     {
         let cache = icon_cache().lock().ok()?;
         if let Some(cached) = cache.get(app_name) {
-            return if cached.is_empty() { None } else { Some(cached.clone()) };
+            return if cached.is_empty() {
+                None
+            } else {
+                Some(cached.clone())
+            };
         }
     }
 
@@ -253,7 +268,10 @@ mod tests {
     #[test]
     fn maps_common_display_names_to_bundle_folders() {
         assert_eq!(canonical_bundle_folder("VS Code"), "Visual Studio Code");
-        assert_eq!(canonical_bundle_folder("Visual Studio Code"), "Visual Studio Code");
+        assert_eq!(
+            canonical_bundle_folder("Visual Studio Code"),
+            "Visual Studio Code"
+        );
         assert_eq!(canonical_bundle_folder("ChatGPT"), "ChatGPT");
         assert_eq!(canonical_bundle_folder("Warp"), "Warp");
     }

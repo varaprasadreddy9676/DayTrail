@@ -23,20 +23,20 @@ const DB_FILE_NAME: &str = "daytrail.sqlite3";
 
 use crate::{
     models::{
-        AgentRun, AgentRunInput, AiContextUsage, AiContributionRow, AiOutputLedgerItem,
-        AiToolUsage, AiUsage, AiUsageInput, AiUsageSummary, AppProjectUsage, AppUsage,
-        AppUsageSummary, FileUsage, AutomationCandidate, BrowserBridgeEvent, CaptureHealthCheck,
-        CaptureHealthSummary, Commitment, CommitmentInput, DatabaseTransferResult, EmailThread,
-        EmailThreadInput, ExportPayload, ExportRangeInput, FieldVisit, FieldVisitInput, IdleBlock,
-        IdleBlockInput, LoopAction, LoopActionInput, LoopRisk, Meeting, MeetingInput,
-        MenuBarSummary, NextBestAction, ParallelStreamSummary, PauseState, PlanningItem,
-        PlanningOutput, PrivacyDeleteSummary, ProjectContext, QuickNote, ReportOutput,
-        ActiveWorkContext, ActiveWorkContextInput, ReturnMarker, ReviewSessionInput,
-        ScratchpadNote, ScratchpadNoteInput, SearchResult, Settings, SettingsConfigPayload,
-        SettingsPatch, SourceEvent, SourceEventInput, StateSnapshot, StateSnapshotInput,
-        StorageLocationInfo, Task, TaskInput, TaskStatus, TerminalBridgeMetadata, TimesheetRow,
-        TodaySnapshot, UnclosedLoopItem, WorkMemorySummary, WorkOutput, WorkOutputInput,
-        WorkSessionSummary, WorkspaceContext,
+        ActiveWorkContext, ActiveWorkContextInput, AgentRun, AgentRunInput, AiContextUsage,
+        AiContributionRow, AiOutputLedgerItem, AiToolUsage, AiUsage, AiUsageInput, AiUsageSummary,
+        AppProjectUsage, AppUsage, AppUsageSummary, AutomationCandidate, BrowserBridgeEvent,
+        CaptureHealthCheck, CaptureHealthSummary, Commitment, CommitmentInput,
+        DatabaseTransferResult, EmailThread, EmailThreadInput, ExportPayload, ExportRangeInput,
+        FieldVisit, FieldVisitInput, FileUsage, IdleBlock, IdleBlockInput, LoopAction,
+        LoopActionInput, LoopRisk, Meeting, MeetingInput, MenuBarSummary, NextBestAction,
+        ParallelStreamSummary, PauseState, PlanningItem, PlanningOutput, PrivacyDeleteSummary,
+        ProjectContext, QuickNote, ReportOutput, ReturnMarker, ReviewSessionInput, ScratchpadNote,
+        ScratchpadNoteInput, SearchResult, Settings, SettingsConfigPayload, SettingsPatch,
+        SourceEvent, SourceEventInput, StateSnapshot, StateSnapshotInput, StorageLocationInfo,
+        Task, TaskInput, TaskStatus, TerminalBridgeMetadata, TimesheetRow, TodaySnapshot,
+        UnclosedLoopItem, WorkMemorySummary, WorkOutput, WorkOutputInput, WorkSessionSummary,
+        WorkspaceContext,
     },
     platform::{
         keychain_key_for_ai_provider, keychain_key_from_ref, set_launch_at_login, KeychainAdapter,
@@ -579,8 +579,18 @@ impl WorktraceStore {
         )?;
 
         Self::ensure_column(conn, "work_sessions", "context_id", "TEXT")?;
-        Self::ensure_column(conn, "work_sessions", "billing_status", "TEXT NOT NULL DEFAULT 'draft'")?;
-        Self::ensure_column(conn, "work_sessions", "billable", "INTEGER NOT NULL DEFAULT 1")?;
+        Self::ensure_column(
+            conn,
+            "work_sessions",
+            "billing_status",
+            "TEXT NOT NULL DEFAULT 'draft'",
+        )?;
+        Self::ensure_column(
+            conn,
+            "work_sessions",
+            "billable",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         Self::ensure_column(conn, "work_sessions", "client_label", "TEXT")?;
         Self::ensure_column(conn, "work_sessions", "project_label", "TEXT")?;
         Self::ensure_column(conn, "work_sessions", "ticket_id", "TEXT")?;
@@ -3410,7 +3420,10 @@ impl WorktraceStore {
         }
     }
 
-    pub fn set_active_work_context(&self, input: ActiveWorkContextInput) -> Result<ActiveWorkContext> {
+    pub fn set_active_work_context(
+        &self,
+        input: ActiveWorkContextInput,
+    ) -> Result<ActiveWorkContext> {
         let now = now_ms();
         let billable = input.billable.unwrap_or(true) as i64;
         let conn = self.lock()?;
@@ -3667,8 +3680,12 @@ impl WorktraceStore {
                 current_date = row.local_date.clone();
                 date_total_ms = 0;
                 md.push_str(&format!("## {}\n\n", current_date));
-                md.push_str("| Time | Duration | Title | Client / Project | Ticket | Billable | Apps |\n");
-                md.push_str("|------|----------|-------|-----------------|--------|----------|------|\n");
+                md.push_str(
+                    "| Time | Duration | Title | Client / Project | Ticket | Billable | Apps |\n",
+                );
+                md.push_str(
+                    "|------|----------|-------|-----------------|--------|----------|------|\n",
+                );
             }
             date_total_ms += row.duration_ms;
             grand_total_ms += row.duration_ms;
@@ -5610,7 +5627,9 @@ impl WorktraceStore {
                 .as_deref()
                 .and_then(|json| serde_json::from_str(json).ok())
                 .unwrap_or_default(),
-            billing_status: row.get::<_, Option<String>>(10)?.unwrap_or_else(|| "draft".to_string()),
+            billing_status: row
+                .get::<_, Option<String>>(10)?
+                .unwrap_or_else(|| "draft".to_string()),
             billable: row.get::<_, i64>(11)? != 0,
             client_label: row.get(12)?,
             project_label: row.get(13)?,
@@ -6582,10 +6601,7 @@ const GENERIC_TAB_TITLES: &[&str] = &[
 
 fn is_generic_tab_title(title: &str) -> bool {
     let lower = title.to_lowercase();
-    GENERIC_TAB_TITLES
-        .iter()
-        .any(|t| t.to_lowercase() == lower)
-        || lower.is_empty()
+    GENERIC_TAB_TITLES.iter().any(|t| t.to_lowercase() == lower) || lower.is_empty()
 }
 
 /// Parse an editor window title into `(filename, project)`.
@@ -6595,10 +6611,7 @@ fn is_generic_tab_title(title: &str) -> bool {
 ///   (may have a leading `●` or `•` for modified files)
 /// - Sublime Text 4          : `"filename (project) - Sublime Text"`
 /// - JetBrains               : `"filename [/path/to/project] – IDE"`
-fn parse_editor_file_from_title(
-    title: &str,
-    app_name: &str,
-) -> Option<(String, Option<String>)> {
+fn parse_editor_file_from_title(title: &str, app_name: &str) -> Option<(String, Option<String>)> {
     if !EDITOR_APPS.contains(&app_name) {
         return None;
     }
@@ -6652,16 +6665,14 @@ fn parse_editor_file_from_title(
         let filename = parts_en[0].trim().to_string();
         if looks_like_filename(&filename) {
             // Look for a bracket-enclosed project path
-            let project = parts_en[1..]
-                .iter()
-                .find_map(|part| {
-                    let part = part.trim();
-                    if part.starts_with('[') && part.ends_with(']') {
-                        Some(basename_from_path(&part[1..part.len() - 1]))
-                    } else {
-                        None
-                    }
-                });
+            let project = parts_en[1..].iter().find_map(|part| {
+                let part = part.trim();
+                if part.starts_with('[') && part.ends_with(']') {
+                    Some(basename_from_path(&part[1..part.len() - 1]))
+                } else {
+                    None
+                }
+            });
             return Some((filename, project));
         }
     }
@@ -6734,7 +6745,8 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
                         let entry = file_buckets.entry(key).or_default();
                         entry.0 += dur;
                         entry.1 += 1;
-                    } else if BROWSER_APPS.contains(&app.as_str()) && !is_generic_tab_title(&title) {
+                    } else if BROWSER_APPS.contains(&app.as_str()) && !is_generic_tab_title(&title)
+                    {
                         let context = event.domain.clone();
                         let key = (title, context);
                         let entry = file_buckets.entry(key).or_default();
@@ -7097,6 +7109,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_unclosed_loop_inbox(
     pending_replies: &[EmailThread],
     commitments: &[Commitment],
@@ -7940,7 +7953,7 @@ fn local_date_label(timestamp_ms: i64) -> String {
 }
 
 fn timestamp_in_export_range(timestamp_ms: i64, from_ms: Option<i64>, to_ms: Option<i64>) -> bool {
-    from_ms.map_or(true, |from| timestamp_ms >= from) && to_ms.map_or(true, |to| timestamp_ms < to)
+    from_ms.is_none_or(|from| timestamp_ms >= from) && to_ms.is_none_or(|to| timestamp_ms < to)
 }
 
 fn timespan_in_export_range(
@@ -7949,7 +7962,7 @@ fn timespan_in_export_range(
     from_ms: Option<i64>,
     to_ms: Option<i64>,
 ) -> bool {
-    from_ms.map_or(true, |from| ended_at >= from) && to_ms.map_or(true, |to| started_at < to)
+    from_ms.is_none_or(|from| ended_at >= from) && to_ms.is_none_or(|to| started_at < to)
 }
 
 fn text_timestamp_in_export_range(value: &str, from_ms: Option<i64>, to_ms: Option<i64>) -> bool {
@@ -8447,15 +8460,18 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
     } else {
         snapshot.app_usage_summary.total_duration_ms.max(0)
     };
-    let needs_review_count =
-        snapshot.unclosed_loop_inbox.len()
-            + snapshot.loop_risks.len()
-            + snapshot.idle_blocks.iter().filter(|block| !block.classified).count()
-            + snapshot
-                .work_sessions
-                .iter()
-                .filter(|session| session.billing_status == "draft")
-                .count();
+    let needs_review_count = snapshot.unclosed_loop_inbox.len()
+        + snapshot.loop_risks.len()
+        + snapshot
+            .idle_blocks
+            .iter()
+            .filter(|block| !block.classified)
+            .count()
+        + snapshot
+            .work_sessions
+            .iter()
+            .filter(|session| session.billing_status == "draft")
+            .count();
 
     markdown.push_str("## Summary\n");
     markdown.push_str(&format!(
@@ -8625,7 +8641,12 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
                 clean_report_text(&risk.reason)
             ));
         }
-        for block in snapshot.idle_blocks.iter().filter(|block| !block.classified).take(3) {
+        for block in snapshot
+            .idle_blocks
+            .iter()
+            .filter(|block| !block.classified)
+            .take(3)
+        {
             markdown.push_str(&format!(
                 "- Classify idle gap: {}\n",
                 format_duration_words(block.duration_ms)
@@ -9310,8 +9331,10 @@ mod tests {
 
     #[test]
     fn capture_health_does_not_overstate_empty_capture_as_healthy() {
-        let mut settings = Settings::default();
-        settings.terminal_bridge_path = Some("/tmp/daytrail-shell-integration".into());
+        let settings = Settings {
+            terminal_bridge_path: Some("/tmp/daytrail-shell-integration".into()),
+            ..Default::default()
+        };
         let summary =
             build_capture_health_with_permission_state(&[], &settings, &test_pause_state(), true);
 

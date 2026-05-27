@@ -25,7 +25,11 @@ pub fn capture_permission_summary_for_platform(
     platform: &str,
     accessibility_granted: bool,
 ) -> CapturePermissionSummary {
-    capture_permission_summary_for_platform_with_browser_check(platform, accessibility_granted, None)
+    capture_permission_summary_for_platform_with_browser_check(
+        platform,
+        accessibility_granted,
+        None,
+    )
 }
 
 fn capture_permission_summary_for_platform_with_browser_check(
@@ -461,16 +465,20 @@ pub fn trigger_browser_automation_prompt() -> Result<CapturePermissionSummary> {
 
 #[cfg(target_os = "macos")]
 fn browser_is_running(app_name: &str) -> bool {
-    let script = format!("application \"{}\" is running", app_name.replace('"', "\\\""));
+    let script = format!(
+        "application \"{}\" is running",
+        app_name.replace('"', "\\\"")
+    );
     std::process::Command::new("osascript")
         .args(["-e", &script])
         .output()
         .ok()
         .and_then(|output| {
-            output
-                .status
-                .success()
-                .then(|| String::from_utf8_lossy(&output.stdout).trim().eq_ignore_ascii_case("true"))
+            output.status.success().then(|| {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .eq_ignore_ascii_case("true")
+            })
         })
         .unwrap_or(false)
 }
@@ -485,6 +493,17 @@ fn browser_automation_probe_script(target: BrowserAutomationTarget) -> String {
         BrowserAutomationScriptKind::Chromium => format!(
             "tell application \"{app_name}\" to if (count of windows) > 0 then get URL of active tab of front window"
         ),
+    }
+}
+
+/// Called at app startup: if AX is not yet trusted, open System Settings
+/// so the user can grant it for the current binary. Safe to call on every launch.
+pub fn ensure_accessibility_permission() {
+    #[cfg(target_os = "macos")]
+    {
+        if !macos_accessibility_trusted(false) {
+            let _ = macos_accessibility_trusted(true);
+        }
     }
 }
 

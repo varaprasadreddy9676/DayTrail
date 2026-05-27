@@ -22,8 +22,6 @@ pub fn set_active_work_context(
 }
 
 #[tauri::command]
-pub fn clear_active_work_context(
-    store: State<'_, WorktraceStore>,
-) -> Result<(), CommandError> {
+pub fn clear_active_work_context(store: State<'_, WorktraceStore>) -> Result<(), CommandError> {
     store.clear_active_work_context().map_err(Into::into)
 }

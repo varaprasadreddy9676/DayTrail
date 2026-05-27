@@ -1843,8 +1843,12 @@ fn sessionizer_splits_long_back_to_back_project_contexts() {
         .iter()
         .filter_map(|session| session.summary.as_deref())
         .collect::<Vec<_>>();
-    assert!(summaries.iter().any(|summary| summary.contains("project-a")));
-    assert!(summaries.iter().any(|summary| summary.contains("project-b")));
+    assert!(summaries
+        .iter()
+        .any(|summary| summary.contains("project-a")));
+    assert!(summaries
+        .iter()
+        .any(|summary| summary.contains("project-b")));
 }
 
 #[test]

@@ -8,11 +8,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+type ContentTitleCache = HashMap<u32, (Option<String>, SystemTime)>;
+
 /// Cache: pid → (enriched_title_or_None, captured_at)
 /// Populated by `ax_content_title_cached`. Prevents running a slow AppleScript
 /// on every 2-second poll tick — result is reused for 10 seconds.
-static CONTENT_TITLE_CACHE: Mutex<Option<HashMap<u32, (Option<String>, SystemTime)>>> =
-    Mutex::new(None);
+static CONTENT_TITLE_CACHE: Mutex<Option<ContentTitleCache>> = Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;
@@ -82,12 +83,7 @@ fn system_idle_ms() -> Option<u64> {
     for line in text.lines() {
         if line.contains("HIDIdleTime") {
             // format: "HIDIdleTime" = 3456789012
-            let ns: u64 = line
-                .split('=')
-                .nth(1)?
-                .trim()
-                .parse()
-                .ok()?;
+            let ns: u64 = line.split('=').nth(1)?.trim().parse().ok()?;
             return Some(ns / 1_000_000);
         }
     }
@@ -426,7 +422,8 @@ fn editor_workspace_candidates_from_storage(app_name: &str) -> Vec<String> {
 /// Supports: Jira/Linear (PROJ-123), GitLab MR (!4209), GitHub/generic (#123).
 fn extract_ticket_id(text: &str) -> Option<String> {
     for word in text.split(|c: char| c.is_whitespace() || matches!(c, '/' | '_' | ':' | ',')) {
-        let word = word.trim_matches(|c: char| matches!(c, '"' | '\'' | '(' | ')' | '[' | ']' | '.'));
+        let word =
+            word.trim_matches(|c: char| matches!(c, '"' | '\'' | '(' | ')' | '[' | ']' | '.'));
         if word.is_empty() {
             continue;
         }
@@ -469,7 +466,11 @@ fn run_git(workspace_path: &str, args: &[&str]) -> Option<String> {
         return None;
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Run lightweight git commands to enrich an editor workspace event with
@@ -477,14 +478,16 @@ fn run_git(workspace_path: &str, args: &[&str]) -> Option<String> {
 /// All calls use a 1-second timeout via the git config flag.
 pub fn detect_git_context(workspace_path: &str) -> Option<GitContext> {
     // git is slow on cold start — skip if the dir isn't a git repo
-    if !Path::new(workspace_path).join(".git").exists() &&
-       run_git(workspace_path, &["rev-parse", "--git-dir"]).is_none() {
+    if !Path::new(workspace_path).join(".git").exists()
+        && run_git(workspace_path, &["rev-parse", "--git-dir"]).is_none()
+    {
         return None;
     }
     let branch = run_git(workspace_path, &["branch", "--show-current"]);
     let repo_root = run_git(workspace_path, &["rev-parse", "--show-toplevel"]);
     let remote_origin = run_git(workspace_path, &["remote", "get-url", "origin"]);
-    let ticket_id = branch.as_deref()
+    let ticket_id = branch
+        .as_deref()
         .and_then(extract_ticket_id)
         .or_else(|| remote_origin.as_deref().and_then(extract_ticket_id));
 
@@ -508,6 +511,7 @@ fn ai_tools_from_processes(app_name: &str, process_id: Option<u32>) -> Vec<Strin
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn editor_ai_tools_from_processes(app_name: &str) -> Vec<String> {
     // Do not count loaded editor extension/helper processes as usage. VS Code, Cursor,
     // and JetBrains keep AI extensions resident even when the user did not invoke them.
@@ -517,6 +521,7 @@ fn editor_ai_tools_from_processes(app_name: &str) -> Vec<String> {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn editor_ai_tools_from_processes_legacy_scan(app_name: &str) -> Vec<String> {
     if !is_editor_app(app_name) {
         return Vec::new();
@@ -724,6 +729,7 @@ fn executable_name(token: &str) -> String {
         .to_ascii_lowercase()
 }
 
+#[allow(dead_code)]
 fn push_recent_editor_log_tools(tools: &mut Vec<String>, app_name: &str) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -738,6 +744,7 @@ fn push_recent_editor_log_tools(tools: &mut Vec<String>, app_name: &str) {
     }
 }
 
+#[allow(dead_code)]
 fn editor_log_roots(app_name: &str, home: &Path) -> Vec<PathBuf> {
     let is_cursor = app_name.eq_ignore_ascii_case("cursor");
     #[cfg(target_os = "macos")]
@@ -770,6 +777,7 @@ fn editor_log_roots(app_name: &str, home: &Path) -> Vec<PathBuf> {
     }
 }
 
+#[allow(dead_code)]
 fn scan_recent_editor_log_tools(
     tools: &mut Vec<String>,
     path: &Path,
@@ -798,6 +806,7 @@ fn scan_recent_editor_log_tools(
     }
 }
 
+#[allow(dead_code)]
 fn push_ai_tool_from_path(tools: &mut Vec<String>, path: &Path) {
     let lower = path.display().to_string().to_ascii_lowercase();
     if lower.contains("anthropic.claude-code") || lower.contains("claude-code") {
@@ -1343,9 +1352,6 @@ fn is_self_app(app_name: &str) -> bool {
     )
 }
 
-/// Map raw OS process/bundle names to the user-visible display name.
-/// macOS `localizedName` returns the CFBundleName, which is often shorter than
-/// the product name users recognise (e.g. "Code" vs "Visual Studio Code").
 // ── Title enrichment ─────────────────────────────────────────────────────────
 
 /// **Strategy 1 (0 ms)**: Extract context from window titles that encode it as
@@ -1374,6 +1380,156 @@ fn enrich_title_from_pattern(title: &str, app_name: &str) -> Option<String> {
     None
 }
 
+fn clean_ax_candidate(value: &str) -> String {
+    value
+        .replace(
+            ['\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}'],
+            "",
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(|ch: char| matches!(ch, '-' | '|' | '·' | ':' | ' '))
+        .to_string()
+}
+
+fn meaningful_ax_candidate(value: &str, app_name: &str) -> Option<String> {
+    let cleaned = clean_ax_candidate(value);
+    if cleaned.len() < 3 || cleaned.len() > 140 {
+        return None;
+    }
+
+    let lower = cleaned.to_ascii_lowercase();
+    let app_lower = app_name.to_ascii_lowercase();
+    let generic = [
+        "activity",
+        "attach",
+        "back",
+        "calls",
+        "cancel",
+        "channels",
+        "chatgpt",
+        "claude",
+        "close",
+        "codex",
+        "compose",
+        "customize",
+        "done",
+        "edit",
+        "emoji",
+        "file",
+        "forward",
+        "gemini",
+        "help",
+        "home",
+        "inbox",
+        "minimize",
+        "more",
+        "new session",
+        "notifications",
+        "open",
+        "pro",
+        "reload",
+        "recents",
+        "save",
+        "search",
+        "send",
+        "settings",
+        "share",
+        "skip to content",
+        "threads",
+        "today",
+        "view",
+        "window",
+        "zoom",
+    ];
+    if lower == app_lower || generic.iter().any(|item| lower == *item) {
+        return None;
+    }
+
+    Some(cleaned)
+}
+
+fn status_prefixed_ax_candidate(value: &str, app_name: &str) -> Option<(i32, String)> {
+    let cleaned = clean_ax_candidate(value);
+    let lower = cleaned.to_ascii_lowercase();
+    let prefixes = [
+        ("awaiting input ", 125),
+        ("working on ", 120),
+        ("working ", 118),
+        ("running ", 116),
+        ("active ", 108),
+        ("selected ", 106),
+        ("current ", 104),
+        ("idle ", 42),
+    ];
+
+    for (prefix, score) in prefixes {
+        if lower.starts_with(prefix) {
+            let original = cleaned[prefix.len()..].trim();
+            let candidate = meaningful_ax_candidate(original, app_name)?;
+            return Some((score, candidate));
+        }
+    }
+
+    None
+}
+
+fn keep_better_candidate(best: &mut Option<(i32, String)>, candidate: Option<(i32, String)>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    if match best.as_ref() {
+        Some(current) => candidate.0 > current.0,
+        None => true,
+    } {
+        *best = Some(candidate);
+    }
+}
+
+fn score_ax_context_candidate(
+    role: &str,
+    title: &str,
+    value: &str,
+    description: &str,
+    app_name: &str,
+    selected: Option<bool>,
+    focused: Option<bool>,
+) -> Option<(i32, String)> {
+    let mut prefixed: Option<(i32, String)> = None;
+    for raw in [title, value, description] {
+        keep_better_candidate(&mut prefixed, status_prefixed_ax_candidate(raw, app_name));
+    }
+    if prefixed.is_some() {
+        return prefixed;
+    }
+
+    let candidate = [title, value, description]
+        .into_iter()
+        .find_map(|raw| meaningful_ax_candidate(raw, app_name))?;
+
+    if role == "AXHeading" {
+        return Some((140, candidate));
+    }
+
+    let can_describe_current_item = matches!(
+        role,
+        "AXButton" | "AXCell" | "AXGroup" | "AXLink" | "AXRow" | "AXStaticText"
+    );
+    if !can_describe_current_item {
+        return None;
+    }
+
+    if selected == Some(true) {
+        return Some((112, candidate));
+    }
+    if focused == Some(true) {
+        return Some((98, candidate));
+    }
+
+    None
+}
+
 /// **Strategy 2 (~2–5 ms, cached 10 s per PID)**: In-process AX API BFS.
 ///
 /// `run_osascript` spawns a subprocess that has NO accessibility permission.
@@ -1383,8 +1539,23 @@ fn enrich_title_from_pattern(title: &str, app_name: &str) -> Option<String> {
 /// Does a BFS through `AXChildren` up to depth 10, visiting at most 400 nodes,
 /// looking for any element with role `AXHeading` whose value differs from the
 /// app name.  Works for Electron apps (Claude, Codex, Notion, Linear, Obsidian…)
-/// where the conversation / document title is an HTML `<h1>`/`<h2>` rendered
-/// inside a `AXWebArea` but not reflected in the macOS window title bar.
+/// Write a debug line to /tmp/daytrail-ax.log (works from a signed .app bundle
+/// where stderr isn't visible in the terminal).
+#[cfg(target_os = "macos")]
+fn ax_log(msg: &str) {
+    if std::env::var_os("DAYTRAIL_AX_DEBUG").is_none() {
+        return;
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/daytrail-ax.log")
+    {
+        let _ = writeln!(f, "[DT-AX] {}", msg);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
     use core_foundation::{
@@ -1394,15 +1565,22 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
     use std::{collections::VecDeque, ffi::c_void, ptr};
 
     const CACHE_TTL_SECS: u64 = 10;
-    const MAX_DEPTH: u32 = 15;   // Electron trees can be 10–12 levels deep
-    const MAX_NODES: usize = 800;
+    /// Shorter TTL used when the last result was None — AX may just need init.
+    const CACHE_TTL_RETRY_SECS: u64 = 2;
+    const MAX_DEPTH: u32 = 25; // Electron trees can be 20+ levels deep from window root
+    const MAX_NODES: usize = 1200;
 
     // --- check cache first ---
     {
         let mut guard = CONTENT_TITLE_CACHE.lock().ok()?;
         let cache = guard.get_or_insert_with(HashMap::new);
         if let Some((cached, captured_at)) = cache.get(&pid) {
-            if captured_at.elapsed().ok()?.as_secs() < CACHE_TTL_SECS {
+            let ttl = if cached.is_some() {
+                CACHE_TTL_SECS
+            } else {
+                CACHE_TTL_RETRY_SECS
+            };
+            if captured_at.elapsed().ok()?.as_secs() < ttl {
                 return cached.clone();
             }
         }
@@ -1420,22 +1598,34 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
             attribute: CFStringRef,
             value: *mut CFTypeRef,
         ) -> AXError;
+        fn AXUIElementSetAttributeValue(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            value: CFTypeRef,
+        ) -> AXError;
+        fn AXIsProcessTrusted() -> u8;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFGetTypeID(cf: CFTypeRef) -> usize;
+        fn CFBooleanGetTypeID() -> usize;
+        fn CFBooleanGetValue(boolean: CFTypeRef) -> u8;
         fn CFStringGetTypeID() -> usize;
         fn CFArrayGetTypeID() -> usize;
         fn CFArrayGetCount(array: CFTypeRef) -> isize;
         fn CFArrayGetValueAtIndex(array: CFTypeRef, idx: isize) -> CFTypeRef;
         fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+        /// kCFBooleanTrue — a CFBoolean constant exported by CoreFoundation
+        static kCFBooleanTrue: CFTypeRef;
     }
 
     unsafe fn ax_str(el: AXUIElementRef, attr: &str) -> Option<String> {
         let key = CFString::new(attr);
         let mut val: CFTypeRef = ptr::null();
-        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut val) != 0 || val.is_null() {
+        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut val) != 0
+            || val.is_null()
+        {
             return None;
         }
         if CFGetTypeID(val) != CFStringGetTypeID() {
@@ -1444,14 +1634,37 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
         }
         let s = CFString::wrap_under_create_rule(val as CFStringRef).to_string();
         let s = s.trim().to_string();
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    }
+
+    unsafe fn ax_bool(el: AXUIElementRef, attr: &str) -> Option<bool> {
+        let key = CFString::new(attr);
+        let mut val: CFTypeRef = ptr::null();
+        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut val) != 0
+            || val.is_null()
+        {
+            return None;
+        }
+        if CFGetTypeID(val) != CFBooleanGetTypeID() {
+            CFRelease(val);
+            return None;
+        }
+        let out = CFBooleanGetValue(val) != 0;
+        CFRelease(val);
+        Some(out)
     }
 
     /// Returns retained children (caller must CFRelease each).
     unsafe fn ax_children(el: AXUIElementRef) -> Vec<AXUIElementRef> {
         let key = CFString::new("AXChildren");
         let mut val: CFTypeRef = ptr::null();
-        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut val) != 0 || val.is_null() {
+        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut val) != 0
+            || val.is_null()
+        {
             return Vec::new();
         }
         if CFGetTypeID(val) != CFArrayGetTypeID() {
@@ -1463,7 +1676,7 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
         for i in 0..count {
             let child = CFArrayGetValueAtIndex(val, i);
             if !child.is_null() {
-                CFRetain(child);   // take ownership
+                CFRetain(child); // take ownership
                 out.push(child as AXUIElementRef);
             }
         }
@@ -1484,31 +1697,76 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
         queue.push_back((root, 0));
         let mut visited = 0usize;
         let mut web_area_title: Option<String> = None;
+        let mut active_item_title: Option<(i32, String)> = None;
 
         while let Some((el, depth)) = queue.pop_front() {
             let role = ax_str(el, "AXRole").unwrap_or_default();
+            let title = ax_str(el, "AXTitle").unwrap_or_default();
+            let value = ax_str(el, "AXValue").unwrap_or_default();
+            let description = ax_str(el, "AXDescription").unwrap_or_default();
+            let selected = ax_bool(el, "AXSelected");
+            let focused = ax_bool(el, "AXFocused");
+
+            // Debug: log every node so we can see the tree shape
+            if !role.is_empty() {
+                ax_log(&format!(
+                    "d={} role={:?} selected={:?} focused={:?} title={:?} value={:?} description={:?}",
+                    depth, role,
+                    selected, focused,
+                    &title[..title.len().min(60)],
+                    &value[..value.len().min(60)],
+                    &description[..description.len().min(60)]
+                ));
+            }
 
             // ── Strategy 1: explicit heading ────────────────────────────────
             if role == "AXHeading" {
-                let val = ax_str(el, "AXValue").or_else(|| ax_str(el, "AXTitle"));
-                if let Some(v) = val {
-                    if v.len() > 3 && !v.eq_ignore_ascii_case(app_name) {
-                        CFRelease(el as CFTypeRef);
-                        for (e, _) in queue.drain(..) { CFRelease(e as CFTypeRef); }
-                        return Some(v);
+                if let Some((_, candidate)) = score_ax_context_candidate(
+                    &role,
+                    &title,
+                    &value,
+                    &description,
+                    app_name,
+                    selected,
+                    focused,
+                ) {
+                    CFRelease(el as CFTypeRef);
+                    for (e, _) in queue.drain(..) {
+                        CFRelease(e as CFTypeRef);
                     }
+                    return Some(candidate);
                 }
             }
 
-            // ── Strategy 2: page-title via AXWebArea ────────────────────────
-            // Electron exposes the page <title> as the AXWebArea's AXTitle.
-            // Format is usually "Conversation Name - Claude" or just the name.
+            // ── Strategy 2: selected/current item rows ──────────────────────
+            // Chat, meeting, AI, and Electron apps often expose the active
+            // conversation/document as a selected row/button/cell even when the
+            // macOS window title is only the app name.
+            keep_better_candidate(
+                &mut active_item_title,
+                score_ax_context_candidate(
+                    &role,
+                    &title,
+                    &value,
+                    &description,
+                    app_name,
+                    selected,
+                    focused,
+                ),
+            );
+
+            // ── Strategy 3: page-title via AXWebArea ────────────────────────
             if role == "AXWebArea" && web_area_title.is_none() {
-                if let Some(t) = ax_str(el, "AXTitle") {
-                    // Strip "Title - AppName" → "Title" using the pattern helper
-                    let stripped = enrich_title_from_pattern(&t, app_name)
-                        .unwrap_or_else(|| t.clone());
+                let t = if !title.is_empty() {
+                    Some(title.clone())
+                } else {
+                    None
+                };
+                if let Some(t) = t {
+                    let stripped =
+                        enrich_title_from_pattern(&t, app_name).unwrap_or_else(|| t.clone());
                     if stripped.len() > 3 && !stripped.eq_ignore_ascii_case(app_name) {
+                        ax_log(&format!("WebArea title hit: {:?}", stripped));
                         web_area_title = Some(stripped);
                     }
                 }
@@ -1525,30 +1783,228 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
             visited += 1;
         }
 
-        web_area_title // fallback: page title from the web area (if any)
+        let active_item_title = active_item_title.map(|(_, title)| title);
+        ax_log(&format!(
+            "BFS done: visited={} active_item={:?} web_area={:?}",
+            visited, active_item_title, web_area_title
+        ));
+        active_item_title.or(web_area_title)
     }
 
+    ax_log(&format!(
+        "ax_content_title_cached pid={} app={:?}",
+        pid, app_name
+    ));
+
     let enriched = unsafe {
+        // Check if this process has TCC accessibility permission
+        let trusted = AXIsProcessTrusted() != 0;
+        ax_log(&format!("AXIsProcessTrusted={}", trusted));
+
         let app_el = AXUIElementCreateApplication(pid as i32);
         if app_el.is_null() {
+            ax_log("AXUIElementCreateApplication returned null");
             None
         } else {
-            // Try focused window first, fall back to main window
+            // Trigger Chromium/Electron lazy accessibility init.
+            // For native apps this is a no-op; for Electron it wakes up the AX
+            // subsystem so that AXWindows/AXFocusedWindow become available on
+            // the NEXT poll (2 s later — see CACHE_TTL_RETRY_SECS).
+            let key_manual = CFString::new("AXManualAccessibility");
+            let r = AXUIElementSetAttributeValue(
+                app_el,
+                key_manual.as_concrete_TypeRef(),
+                kCFBooleanTrue,
+            );
+            ax_log(&format!("AXManualAccessibility set err={}", r));
+
+            // Try focused / main window first
             let key_fw = CFString::new("AXFocusedWindow");
             let key_mw = CFString::new("AXMainWindow");
             let mut win_val: CFTypeRef = ptr::null();
-            if AXUIElementCopyAttributeValue(app_el, key_fw.as_concrete_TypeRef(), &mut win_val) != 0
-                || win_val.is_null()
-            {
+            let fw_err =
+                AXUIElementCopyAttributeValue(app_el, key_fw.as_concrete_TypeRef(), &mut win_val);
+            if fw_err != 0 || win_val.is_null() {
+                ax_log(&format!("FocusedWindow err={fw_err}, trying MainWindow"));
                 win_val = ptr::null();
-                AXUIElementCopyAttributeValue(app_el, key_mw.as_concrete_TypeRef(), &mut win_val);
+                let mw_err = AXUIElementCopyAttributeValue(
+                    app_el,
+                    key_mw.as_concrete_TypeRef(),
+                    &mut win_val,
+                );
+                ax_log(&format!(
+                    "MainWindow err={mw_err} null={}",
+                    win_val.is_null()
+                ));
             }
-            CFRelease(app_el as CFTypeRef);
 
+            // Fallback: AXWindows array (first element)
             if win_val.is_null() {
-                None
+                let key_ws = CFString::new("AXWindows");
+                let mut ws_val: CFTypeRef = ptr::null();
+                let ws_err = AXUIElementCopyAttributeValue(
+                    app_el,
+                    key_ws.as_concrete_TypeRef(),
+                    &mut ws_val,
+                );
+                ax_log(&format!("AXWindows err={ws_err} null={}", ws_val.is_null()));
+                if ws_err == 0 && !ws_val.is_null() {
+                    if CFGetTypeID(ws_val) == CFArrayGetTypeID() {
+                        let count = CFArrayGetCount(ws_val);
+                        ax_log(&format!("AXWindows count={count}"));
+                        if count > 0 {
+                            let first = CFArrayGetValueAtIndex(ws_val, 0);
+                            if !first.is_null() {
+                                CFRetain(first);
+                                win_val = first;
+                            }
+                        }
+                    }
+                    CFRelease(ws_val);
+                }
+            }
+
+            // Last resort: BFS from the application element itself
+            if win_val.is_null() {
+                ax_log("No window found; BFS from app element");
+                bfs_find_title(app_el as AXUIElementRef, app_name)
             } else {
-                bfs_find_title(win_val as AXUIElementRef, app_name)
+                CFRelease(app_el as CFTypeRef);
+
+                // Strategy 3: AXFocusedUIElement walk-up
+                // For Electron/Chromium apps the BFS only sees native shell elements;
+                // the focused element IS inside the web content and its parent chain
+                // often contains an AXHeading with the page/document title.
+                let walk_result = {
+                    let key_focused = CFString::new("AXFocusedUIElement");
+                    let mut focused: CFTypeRef = ptr::null();
+                    let fe_err = AXUIElementCopyAttributeValue(
+                        win_val as AXUIElementRef,
+                        key_focused.as_concrete_TypeRef(),
+                        &mut focused,
+                    );
+                    if fe_err == 0 && !focused.is_null() {
+                        ax_log("FocusedUIElement found – walking parent chain");
+                        // Walk up to 15 parents looking for AXHeading or AXWebArea title
+                        let key_parent = CFString::new("AXParent");
+                        let key_children = CFString::new("AXChildren");
+                        let mut cur = focused;
+                        let mut found: Option<String> = None;
+                        for _ in 0..20 {
+                            // Check this element
+                            let role = ax_str(cur as AXUIElementRef, "AXRole").unwrap_or_default();
+                            let title =
+                                ax_str(cur as AXUIElementRef, "AXTitle").unwrap_or_default();
+                            let val = ax_str(cur as AXUIElementRef, "AXValue").unwrap_or_default();
+                            let description =
+                                ax_str(cur as AXUIElementRef, "AXDescription").unwrap_or_default();
+                            let selected = ax_bool(cur as AXUIElementRef, "AXSelected");
+                            let focused = ax_bool(cur as AXUIElementRef, "AXFocused");
+                            ax_log(&format!(
+                                "walk role={:?} selected={:?} focused={:?} title={:?} value={:?} description={:?}",
+                                &role,
+                                selected,
+                                focused,
+                                &title[..title.len().min(60)],
+                                &val[..val.len().min(60)],
+                                &description[..description.len().min(60)]
+                            ));
+
+                            if let Some((_, candidate)) = score_ax_context_candidate(
+                                &role,
+                                &title,
+                                &val,
+                                &description,
+                                app_name,
+                                selected,
+                                focused,
+                            ) {
+                                found = Some(candidate);
+                                CFRelease(cur);
+                                cur = ptr::null();
+                                break;
+                            }
+                            // Also scan siblings at this level for a heading
+                            let mut parent_val: CFTypeRef = ptr::null();
+                            let p_err = AXUIElementCopyAttributeValue(
+                                cur as AXUIElementRef,
+                                key_parent.as_concrete_TypeRef(),
+                                &mut parent_val,
+                            );
+                            if p_err != 0 || parent_val.is_null() {
+                                CFRelease(cur);
+                                cur = ptr::null();
+                                break;
+                            }
+                            // Check siblings (children of parent) for headings
+                            let mut children_val: CFTypeRef = ptr::null();
+                            let c_err = AXUIElementCopyAttributeValue(
+                                parent_val as AXUIElementRef,
+                                key_children.as_concrete_TypeRef(),
+                                &mut children_val,
+                            );
+                            if c_err == 0
+                                && !children_val.is_null()
+                                && CFGetTypeID(children_val) == CFArrayGetTypeID()
+                            {
+                                let count = CFArrayGetCount(children_val).min(30);
+                                for i in 0..count {
+                                    let sib = CFArrayGetValueAtIndex(children_val, i);
+                                    if sib.is_null() {
+                                        continue;
+                                    }
+                                    let srole =
+                                        ax_str(sib as AXUIElementRef, "AXRole").unwrap_or_default();
+                                    let stitle = ax_str(sib as AXUIElementRef, "AXTitle")
+                                        .unwrap_or_default();
+                                    let sval = ax_str(sib as AXUIElementRef, "AXValue")
+                                        .unwrap_or_default();
+                                    let sdescription =
+                                        ax_str(sib as AXUIElementRef, "AXDescription")
+                                            .unwrap_or_default();
+                                    let sselected = ax_bool(sib as AXUIElementRef, "AXSelected");
+                                    let sfocused = ax_bool(sib as AXUIElementRef, "AXFocused");
+                                    if let Some((_, candidate)) = score_ax_context_candidate(
+                                        &srole,
+                                        &stitle,
+                                        &sval,
+                                        &sdescription,
+                                        app_name,
+                                        sselected,
+                                        sfocused,
+                                    ) {
+                                        ax_log(&format!("sibling context found: {:?}", candidate));
+                                        found = Some(candidate);
+                                        break;
+                                    }
+                                }
+                                CFRelease(children_val);
+                            }
+                            if found.is_some() {
+                                CFRelease(cur);
+                                cur = ptr::null();
+                                CFRelease(parent_val);
+                                break;
+                            }
+                            CFRelease(cur);
+                            cur = parent_val;
+                        }
+                        if !cur.is_null() && found.is_none() {
+                            // cur still held — release
+                            CFRelease(cur);
+                        }
+                        found
+                    } else {
+                        None
+                    }
+                };
+
+                if walk_result.is_some() {
+                    ax_log(&format!("walk-up result: {:?}", walk_result));
+                    walk_result
+                } else {
+                    bfs_find_title(win_val as AXUIElementRef, app_name)
+                }
             }
         }
     };
@@ -1595,31 +2051,31 @@ fn enrich_window_title(
 pub fn normalize_app_display_name(name: &str) -> &str {
     match name {
         // VS Code family
-        "Code"                          => "Visual Studio Code",
-        "Code - Insiders"               => "VS Code Insiders",
-        "code"                          => "Visual Studio Code",
+        "Code" => "Visual Studio Code",
+        "Code - Insiders" => "VS Code Insiders",
+        "code" => "Visual Studio Code",
         // Cursor (already correct, kept for explicitness)
-        "Cursor"                        => "Cursor",
+        "Cursor" => "Cursor",
         // JetBrains IDEs — short names macOS sometimes returns
-        "idea"                          => "IntelliJ IDEA",
-        "webstorm"                      => "WebStorm",
-        "pycharm"                       => "PyCharm",
-        "goland"                        => "GoLand",
-        "rider"                         => "Rider",
-        "clion"                         => "CLion",
-        "datagrip"                      => "DataGrip",
-        "rubymine"                      => "RubyMine",
+        "idea" => "IntelliJ IDEA",
+        "webstorm" => "WebStorm",
+        "pycharm" => "PyCharm",
+        "goland" => "GoLand",
+        "rider" => "Rider",
+        "clion" => "CLion",
+        "datagrip" => "DataGrip",
+        "rubymine" => "RubyMine",
         // Browsers
-        "chrome"                        => "Google Chrome",
-        "Google Chrome Helper"          => "Google Chrome",
-        "Google Chrome Helper (GPU)"    => "Google Chrome",
-        "Chromium"                      => "Chromium",
+        "chrome" => "Google Chrome",
+        "Google Chrome Helper" => "Google Chrome",
+        "Google Chrome Helper (GPU)" => "Google Chrome",
+        "Chromium" => "Chromium",
         // Comms
-        "zoom.us"                       => "Zoom",
+        "zoom.us" => "Zoom",
         // Terminals
-        "iTerm2"                        => "iTerm2",
+        "iTerm2" => "iTerm2",
         // Everything else: return as-is
-        other                           => other,
+        other => other,
     }
 }
 
@@ -1628,7 +2084,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::is_chromium_browser;
     use super::{
-        display_app_name_from_executable, push_ai_tool_from_path, single_workspace_candidate,
+        display_app_name_from_executable, meaningful_ax_candidate, push_ai_tool_from_path,
+        score_ax_context_candidate, single_workspace_candidate, status_prefixed_ax_candidate,
         terminal_ai_tools_from_ps_output, workspace_from_candidates,
     };
     use std::path::Path;
@@ -1705,6 +2162,56 @@ mod tests {
         let tools = terminal_ai_tools_from_ps_output(output, 86535);
 
         assert_eq!(tools, vec!["Gemini".to_string()]);
+    }
+
+    #[test]
+    fn extracts_context_from_status_prefixed_accessibility_labels() {
+        assert_eq!(
+            status_prefixed_ax_candidate(
+                "Awaiting input Deep dive into project codebase",
+                "Claude",
+            ),
+            Some((125, "Deep dive into project codebase".to_string()))
+        );
+        assert_eq!(
+            status_prefixed_ax_candidate("Selected Customer escalation", "Slack"),
+            Some((106, "Customer escalation".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_generic_accessibility_controls_as_context() {
+        assert_eq!(meaningful_ax_candidate("Settings", "Slack"), None);
+        assert_eq!(meaningful_ax_candidate("ChatGPT", "ChatGPT Atlas"), None);
+        assert_eq!(meaningful_ax_candidate("Slack", "Slack"), None);
+    }
+
+    #[test]
+    fn uses_selected_rows_as_generic_chat_or_document_context() {
+        assert_eq!(
+            score_ax_context_candidate(
+                "AXRow",
+                "Engineering standup",
+                "",
+                "",
+                "Slack",
+                Some(true),
+                Some(false),
+            ),
+            Some((112, "Engineering standup".to_string()))
+        );
+        assert_eq!(
+            score_ax_context_candidate(
+                "AXButton",
+                "Open preferences",
+                "",
+                "",
+                "Teams",
+                Some(false),
+                Some(false),
+            ),
+            None
+        );
     }
 
     #[test]
