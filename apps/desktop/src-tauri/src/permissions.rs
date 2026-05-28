@@ -667,13 +667,16 @@ mod tests {
 
     #[test]
     fn derives_app_bundle_path_from_macos_executable_path() {
+        fn normalized_bundle_path(path: &str) -> Option<String> {
+            app_bundle_path_from_executable(path).map(|value| value.replace('\\', "/"))
+        }
+
         assert_eq!(
-            app_bundle_path_from_executable("/Applications/DayTrail.app/Contents/MacOS/daytrail")
-                .as_deref(),
+            normalized_bundle_path("/Applications/DayTrail.app/Contents/MacOS/daytrail").as_deref(),
             Some("/Applications/DayTrail.app")
         );
         assert_eq!(
-            app_bundle_path_from_executable("/tmp/DayTrail.app/Contents/MacOS/daytrail").as_deref(),
+            normalized_bundle_path("/tmp/DayTrail.app/Contents/MacOS/daytrail").as_deref(),
             Some("/tmp/DayTrail.app")
         );
         assert_eq!(app_bundle_path_from_executable("/usr/bin/daytrail"), None);
