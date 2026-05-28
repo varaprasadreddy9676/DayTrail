@@ -1580,11 +1580,13 @@ fn meaningful_ax_candidate(value: &str, app_name: &str) -> Option<String> {
         "calls",
         "cancel",
         "channels",
+        "chats",
         "chatgpt",
         "claude",
         "close",
         "codex",
         "compose",
+        "communities",
         "customize",
         "done",
         "edit",
@@ -1611,6 +1613,7 @@ fn meaningful_ax_candidate(value: &str, app_name: &str) -> Option<String> {
         "skip to content",
         "threads",
         "today",
+        "updates",
         "view",
         "window",
         "zoom",
@@ -2356,6 +2359,7 @@ mod tests {
     fn rejects_generic_accessibility_controls_as_context() {
         assert_eq!(meaningful_ax_candidate("Settings", "Slack"), None);
         assert_eq!(meaningful_ax_candidate("ChatGPT", "ChatGPT Atlas"), None);
+        assert_eq!(meaningful_ax_candidate("Chats", "WhatsApp"), None);
         assert_eq!(meaningful_ax_candidate("Slack", "Slack"), None);
     }
 
