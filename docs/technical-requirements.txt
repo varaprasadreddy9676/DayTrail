@@ -1,4 +1,4 @@
-Status note: this document is the product requirements backlog and architecture target for WorkTrace AI. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
+Status note: this document is the product requirements backlog and architecture target for DayTrail. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
 
 Yes — now the technical requirement must satisfy **four non-negotiables**:
 
@@ -17,7 +17,7 @@ This is also validated by the Trace reverse-engineering notes you shared: Trace 
 
 ---
 
-# WorkTrace AI — Complete Technical Requirements
+# DayTrail — Complete Technical Requirements
 
 ## 1. Final Recommended Stack
 
@@ -282,7 +282,7 @@ Background memory: 50–120 MB target
 Maximum normal memory: < 150 MB
 UI memory when open: < 200–300 MB
 No continuous LLM inference
-No screenshots/audio by default
+No audio capture by default
 Dashboard open time: < 1 second for today view
 Command search response: < 300 ms for local indexed results
 ```
@@ -292,7 +292,6 @@ Command search response: < 300 ms for local indexed results
 ```text
 Do not write every second
 Do not run AI continuously
-Do not store screenshots by default
 Do not store audio by default
 Do not render huge timelines directly
 Do not load full history into React state
@@ -942,7 +941,7 @@ pub async fn run_prompt(
     kind: PromptKind,
     context: PromptContext,
     schema: Option<serde_json::Value>,
-) -> Result<PromptResult, WorkTraceError> {
+) -> Result<PromptResult, DayTrailError> {
     // provider routing
     // local/cloud selection
     // privacy redaction
@@ -1086,7 +1085,6 @@ long idle
 By default, do not capture:
 
 ```text
-Screenshots
 Audio
 Full email body
 Full AI prompt/response
@@ -1155,7 +1153,7 @@ The Tauri internals in your uploaded binary extract show plugin IPC, shell, dial
 
 # 16. Build Hardening Requirements
 
-Trace’s reverse-engineered notes show a binary that was “not stripped” and exposed source/module structure, schema, IPC commands, license path, update URL, plugins, and dependencies.  For WorkTrace AI:
+Trace’s reverse-engineered notes show a binary that was “not stripped” and exposed source/module structure, schema, IPC commands, license path, update URL, plugins, and dependencies.  For DayTrail:
 
 ```text
 Strip release binaries
@@ -1651,7 +1649,7 @@ Rust-owned background work
 React only for UI
 SQLite as fact store
 LLM only on demand/batch
-No screenshots/audio by default
+No audio capture by default
 Metadata-first capture
 Event coalescing
 Markdown-first intelligence panels

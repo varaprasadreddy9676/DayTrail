@@ -33,7 +33,7 @@ function createExtensionController(vscode) {
       maxQueueSize: config.get("maxQueueSize", 100),
       bridgeCommand: String(config.get("bridgeCommand", "") ?? "").trim(),
       bridgeArgs: config.get("bridgeArgs", []),
-      bridgeFile: config.get("bridgeFile", "~/.worktrace/editor-bridge.jsonl"),
+      bridgeFile: config.get("bridgeFile", "~/.daytrail/editor-bridge.jsonl"),
       bridgeTimeoutMs: config.get("bridgeTimeoutMs", 2500),
     };
   }
@@ -94,7 +94,7 @@ function createExtensionController(vscode) {
   }
 
   function reportError(error) {
-    console.warn("[WorkTrace] editor tracking failed:", error?.message ?? error);
+    console.warn("[DayTrail] editor tracking failed:", error?.message ?? error);
   }
 
   function activateController(context) {

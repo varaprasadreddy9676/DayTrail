@@ -20,7 +20,7 @@ pub fn run() -> i32 {
     {
         Ok(()) => 0,
         Err(error) => {
-            eprintln!("worktrace native messaging host failed: {error:#}");
+            eprintln!("DayTrail native messaging host failed: {error:#}");
             1
         }
     }

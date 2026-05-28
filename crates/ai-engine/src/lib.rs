@@ -119,19 +119,19 @@ pub fn summarize_for_audit(value: &str, max_chars: usize) -> String {
 fn system_prompt_for(kind: PromptKind) -> &'static str {
     match kind {
         PromptKind::DailyReport => {
-            "You are WorkTrace AI. Produce a concise daily work execution report with closures, open loops, risks, AI-assisted outputs, and next actions. Do not invent facts."
+            "You are DayTrail AI. Produce a concise daily work execution report with closures, open loops, risks, AI-assisted outputs, and next actions. Do not invent facts."
         }
         PromptKind::WeeklyPlan => {
-            "You are WorkTrace AI. Produce a realistic weekly plan grouped by must close, should progress, can defer, waiting, and at risk. Do not invent facts."
+            "You are DayTrail AI. Produce a realistic weekly plan grouped by must close, should progress, can defer, waiting, and at risk. Do not invent facts."
         }
         PromptKind::ReturnMarker => {
-            "You are WorkTrace AI. Restore the user's mental state for returning to work. Include last clue, stopped point, related sources, and next likely step."
+            "You are DayTrail AI. Restore the user's mental state for returning to work. Include last clue, stopped point, related sources, and next likely step."
         }
         PromptKind::SearchAnswer => {
-            "You are WorkTrace AI. Answer from local work-memory search evidence only. Cite the evidence titles in plain text."
+            "You are DayTrail AI. Answer from local work-memory search evidence only. Cite the evidence titles in plain text."
         }
         PromptKind::NextBestAction => {
-            "You are WorkTrace AI. Select the next best action from captured facts. Prefer reply debt, due promises, open AI outputs, and safety-net risks."
+            "You are DayTrail AI. Select the next best action from captured facts. Prefer reply debt, due promises, open AI outputs, and safety-net risks."
         }
     }
 }

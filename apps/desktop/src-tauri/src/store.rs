@@ -43,6 +43,11 @@ use crate::{
         SystemKeychain,
     },
     project_detection::{default_project_sources, detect_project_from_sources},
+    store_materialization::{
+        materialization_state_locked, session_graph_edge_count_locked,
+        source_event_materialization_fingerprint_locked, upsert_materialization_state_locked,
+        work_memory_summary_locked,
+    },
 };
 
 #[derive(Clone)]
@@ -165,6 +170,17 @@ impl WorktraceStore {
                 sensitivity TEXT NOT NULL DEFAULT 'normal',
                 metadata_json TEXT,
                 created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS materialization_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                source_event_count INTEGER NOT NULL DEFAULT 0,
+                max_source_ended_at INTEGER NOT NULL DEFAULT 0,
+                max_source_created_at INTEGER NOT NULL DEFAULT 0,
+                total_source_duration_ms INTEGER NOT NULL DEFAULT 0,
+                source_content_signature INTEGER NOT NULL DEFAULT 0,
+                idle_gap_ms INTEGER NOT NULL DEFAULT 300000,
+                updated_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS workspace_contexts (
@@ -595,6 +611,25 @@ impl WorktraceStore {
         Self::ensure_column(conn, "work_sessions", "project_label", "TEXT")?;
         Self::ensure_column(conn, "work_sessions", "ticket_id", "TEXT")?;
         Self::ensure_column(conn, "work_sessions", "review_notes", "TEXT")?;
+
+        Self::ensure_column(
+            conn,
+            "materialization_state",
+            "total_source_duration_ms",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        Self::ensure_column(
+            conn,
+            "materialization_state",
+            "source_content_signature",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        Self::ensure_column(
+            conn,
+            "materialization_state",
+            "idle_gap_ms",
+            "INTEGER NOT NULL DEFAULT 300000",
+        )?;
 
         Self::ensure_column(conn, "email_threads", "latest_at", "INTEGER")?;
         Self::ensure_column(
@@ -1257,6 +1292,10 @@ impl WorktraceStore {
                         _ => "summary".to_string(),
                     };
                 }
+                "data_retention_days" => {
+                    settings.data_retention_days =
+                        value.parse().unwrap_or(settings.data_retention_days);
+                }
                 _ => {}
             }
         }
@@ -1428,6 +1467,13 @@ impl WorktraceStore {
             );
             Self::upsert_setting_locked(&conn, "show_ai_details", value, &now)?;
         }
+        if let Some(value) = patch.data_retention_days {
+            anyhow::ensure!(
+                value == 0 || (1..=3650).contains(&value),
+                "data retention must be 0 or between 1 and 3650 days"
+            );
+            Self::upsert_setting_locked(&conn, "data_retention_days", &value.to_string(), &now)?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -1464,9 +1510,24 @@ impl WorktraceStore {
     }
 
     pub fn storage_locations(&self) -> Result<StorageLocationInfo> {
+        let backup_dir = self.backup_dir()?;
+        let database_bytes = file_size(&self.db_path);
+        let wal_bytes = file_size(&self.db_path.with_extension("sqlite3-wal"));
+        let shm_bytes = file_size(&self.db_path.with_extension("sqlite3-shm"));
+        let backup_bytes = dir_size(&backup_dir);
+        let total_bytes = database_bytes
+            .saturating_add(wal_bytes)
+            .saturating_add(shm_bytes)
+            .saturating_add(backup_bytes);
         Ok(StorageLocationInfo {
             database_path: self.db_path.display().to_string(),
-            backup_dir: self.backup_dir()?.display().to_string(),
+            backup_dir: backup_dir.display().to_string(),
+            database_bytes,
+            wal_bytes,
+            shm_bytes,
+            backup_bytes,
+            total_bytes,
+            retention_days: self.get_settings()?.data_retention_days,
         })
     }
 
@@ -1511,6 +1572,7 @@ impl WorktraceStore {
             show_raw_events: Some(settings.show_raw_events),
             show_capture_confidence: Some(settings.show_capture_confidence),
             show_ai_details: Some(settings.show_ai_details),
+            data_retention_days: Some(settings.data_retention_days),
         })?;
 
         {
@@ -1749,7 +1811,6 @@ impl WorktraceStore {
         if self.auto_ingest_local_bridges {
             let _ = self.ingest_local_bridge_files();
         }
-        let _ = self.materialize_work_memory();
         let today_date = Local::now().date_naive();
         let local_date = today_date.format("%Y-%m-%d").to_string();
         let (day_start, day_end) = local_day_bounds_ms(today_date);
@@ -1865,6 +1926,14 @@ impl WorktraceStore {
     pub fn materialize_work_memory(&self) -> Result<WorkMemorySummary> {
         let settings = self.get_settings()?;
         let idle_gap_ms = settings.idle_timeout_minutes.max(1) * 60_000;
+        let fingerprint = {
+            let conn = self.lock()?;
+            let fingerprint = source_event_materialization_fingerprint_locked(&conn, idle_gap_ms)?;
+            if materialization_state_locked(&conn)?.as_ref() == Some(&fingerprint) {
+                return work_memory_summary_locked(&conn, fingerprint.source_event_count);
+            }
+            fingerprint
+        };
         let events = self.list_source_events_for_materialization()?;
 
         let sessions = build_sessions_from_source_events(&events, idle_gap_ms);
@@ -1893,6 +1962,17 @@ impl WorktraceStore {
                     summary = excluded.summary,
                     evidence_json = excluded.evidence_json,
                     updated_at = excluded.updated_at
+                WHERE work_sessions.title IS NOT excluded.title
+                   OR work_sessions.context_id IS NOT excluded.context_id
+                   OR work_sessions.category IS NOT excluded.category
+                   OR work_sessions.status IS NOT excluded.status
+                   OR work_sessions.started_at IS NOT excluded.started_at
+                   OR work_sessions.ended_at IS NOT excluded.ended_at
+                   OR work_sessions.duration_ms IS NOT excluded.duration_ms
+                   OR work_sessions.ai_used IS NOT excluded.ai_used
+                   OR work_sessions.confidence IS NOT excluded.confidence
+                   OR work_sessions.summary IS NOT excluded.summary
+                   OR work_sessions.evidence_json IS NOT excluded.evidence_json
                 "#,
                 params![
                     &session.id,
@@ -1915,9 +1995,14 @@ impl WorktraceStore {
                 let edge_id = format!("edge-{}-{}", session.id, event_id);
                 conn.execute(
                     r#"
-                    INSERT OR REPLACE INTO work_graph_edges
+                    INSERT INTO work_graph_edges
                         (id, from_type, from_id, to_type, to_id, relation, confidence, evidence_json, created_at)
                     VALUES (?1, 'work_session', ?2, 'source_event', ?3, 'session_contains_event', ?4, ?5, ?6)
+                    ON CONFLICT(id) DO UPDATE SET
+                        confidence = excluded.confidence,
+                        evidence_json = excluded.evidence_json
+                    WHERE work_graph_edges.confidence IS NOT excluded.confidence
+                       OR work_graph_edges.evidence_json IS NOT excluded.evidence_json
                     "#,
                     params![
                         edge_id,
@@ -1947,6 +2032,13 @@ impl WorktraceStore {
                     summary = excluded.summary,
                     confidence = excluded.confidence,
                     updated_at = excluded.updated_at
+                WHERE parallel_streams.title IS NOT excluded.title
+                   OR parallel_streams.stream_type IS NOT excluded.stream_type
+                   OR parallel_streams.context_id IS NOT excluded.context_id
+                   OR parallel_streams.started_at IS NOT excluded.started_at
+                   OR parallel_streams.ended_at IS NOT excluded.ended_at
+                   OR parallel_streams.summary IS NOT excluded.summary
+                   OR parallel_streams.confidence IS NOT excluded.confidence
                 "#,
                 params![
                     &stream.id,
@@ -1964,19 +2056,19 @@ impl WorktraceStore {
             for event_id in &stream.event_ids {
                 conn.execute(
                     r#"
-                    INSERT OR REPLACE INTO stream_events (stream_id, event_id, confidence)
+                    INSERT INTO stream_events (stream_id, event_id, confidence)
                     VALUES (?1, ?2, ?3)
+                    ON CONFLICT(stream_id, event_id) DO UPDATE SET
+                        confidence = excluded.confidence
+                    WHERE stream_events.confidence IS NOT excluded.confidence
                     "#,
                     params![&stream.id, event_id, stream.confidence],
                 )?;
             }
         }
 
-        let graph_edges = conn.query_row(
-            "SELECT COUNT(*) FROM work_graph_edges WHERE relation = 'session_contains_event'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )? as usize;
+        upsert_materialization_state_locked(&conn, &fingerprint, now)?;
+        let graph_edges = session_graph_edge_count_locked(&conn)?;
 
         Ok(WorkMemorySummary {
             source_events: events.len(),
@@ -2081,12 +2173,7 @@ impl WorktraceStore {
             return Ok(());
         }
 
-        let app = metadata
-            .terminal
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| metadata.shell.clone())
-            .unwrap_or_else(|| "Terminal".to_string());
+        let app = terminal_bridge_app_label(&metadata);
         if is_excluded(&app, &settings.excluded_apps) {
             return Ok(());
         }
@@ -2109,6 +2196,7 @@ impl WorktraceStore {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| cwd.to_string());
         let mut sanitized_metadata = metadata.clone();
+        sanitized_metadata.terminal = Some(app.clone());
         sanitized_metadata.last_command = metadata
             .last_command
             .as_deref()
@@ -3618,7 +3706,109 @@ impl WorktraceStore {
         ] {
             deleted_rows += conn.execute(&format!("DELETE FROM {table}"), [])?;
         }
+        conn.execute("DELETE FROM materialization_state", [])?;
+        Self::rebuild_work_memory_index_locked(&conn)?;
         Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
+    pub fn prune_captured_data_older_than_days(&self, days: i64) -> Result<PrivacyDeleteSummary> {
+        anyhow::ensure!(days > 0, "retention days must be greater than zero");
+        anyhow::ensure!(days <= 3650, "retention days cannot exceed 3650");
+        let cutoff_ms = now_ms().saturating_sub(days.saturating_mul(24 * 60 * 60 * 1000));
+        self.prune_captured_data_before(cutoff_ms)
+    }
+
+    pub fn apply_retention_policy(&self) -> Result<PrivacyDeleteSummary> {
+        let days = self.get_settings()?.data_retention_days;
+        if days <= 0 {
+            return Ok(PrivacyDeleteSummary { deleted_rows: 0 });
+        }
+        self.prune_captured_data_older_than_days(days)
+    }
+
+    fn prune_captured_data_before(&self, cutoff_ms: i64) -> Result<PrivacyDeleteSummary> {
+        let conn = self.lock()?;
+        let mut deleted_rows = 0;
+        let cutoff_iso = Utc
+            .timestamp_millis_opt(cutoff_ms)
+            .single()
+            .map(|date| date.to_rfc3339_opts(SecondsFormat::Secs, true))
+            .unwrap_or_else(now_utc);
+
+        deleted_rows += conn.execute(
+            "DELETE FROM stream_events WHERE event_id IN (SELECT id FROM source_events WHERE ended_at < ?1)",
+            params![cutoff_ms],
+        )?;
+        for (table, column) in [
+            ("activity_events", "created_at"),
+            ("tasks", "updated_at"),
+            ("quick_notes", "created_at"),
+        ] {
+            deleted_rows +=
+                Self::delete_where_text_before_locked(&conn, table, column, &cutoff_iso)?;
+        }
+        for (table, column_expr) in [
+            ("source_events", "ended_at"),
+            ("workspace_contexts", "updated_at"),
+            ("work_sessions", "ended_at"),
+            ("parallel_streams", "COALESCE(ended_at, started_at)"),
+            ("scratchpad_notes", "created_at"),
+            ("state_snapshots", "created_at"),
+            ("clipboard_events", "created_at"),
+            ("agent_runs", "COALESCE(ended_at, started_at)"),
+            ("commitments", "updated_at"),
+            ("email_threads", "updated_at"),
+            ("meetings", "COALESCE(ends_at, starts_at, created_at)"),
+            ("field_visits", "COALESCE(ends_at, starts_at, created_at)"),
+            ("idle_blocks", "ended_at"),
+            ("loop_item_actions", "updated_at"),
+            ("ai_usage", "COALESCE(ended_at, started_at, created_at)"),
+            ("outputs", "updated_at"),
+            ("decisions", "decided_at"),
+            ("reports", "generated_at"),
+            ("plans", "generated_at"),
+            ("weekly_reviews", "generated_at"),
+            ("projects", "updated_at"),
+            ("people", "updated_at"),
+            ("work_graph_edges", "created_at"),
+        ] {
+            deleted_rows += Self::delete_where_before_locked(&conn, table, column_expr, cutoff_ms)?;
+        }
+        deleted_rows += conn.execute(
+            "DELETE FROM stream_events WHERE stream_id NOT IN (SELECT id FROM parallel_streams) OR event_id NOT IN (SELECT id FROM source_events)",
+            [],
+        )?;
+        if deleted_rows > 0 {
+            conn.execute("DELETE FROM materialization_state", [])?;
+            Self::rebuild_work_memory_index_locked(&conn)?;
+        }
+        Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
+    fn delete_where_before_locked(
+        conn: &Connection,
+        table: &str,
+        column_expr: &str,
+        cutoff_ms: i64,
+    ) -> Result<usize> {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE {column_expr} < ?1"),
+            params![cutoff_ms],
+        )
+        .map_err(Into::into)
+    }
+
+    fn delete_where_text_before_locked(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        cutoff_iso: &str,
+    ) -> Result<usize> {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE {column} < ?1"),
+            params![cutoff_iso],
+        )
+        .map_err(Into::into)
     }
 
     pub fn list_work_sessions(&self, limit: usize) -> Result<Vec<WorkSessionSummary>> {
@@ -6367,9 +6557,63 @@ fn clean_app_label(value: &str) -> Option<String> {
         | "worktrace ai"
         | "worktrace-ai"
         | "ai.worktrace.desktop" => Some(DISPLAY_APP_NAME.to_string()),
-        "/bin/zsh" | "zsh" | "terminal" | "iterm2" | "warp" => Some("Terminal".to_string()),
+        "warp" | "warpterminal" | "iterm" | "iterm2" => Some("Terminal".to_string()),
+        "/bin/zsh" | "/bin/bash" | "zsh" | "bash" | "fish" | "pwsh" | "powershell" | "terminal"
+        | "dumb" | "ansi" | "vt100" | "xterm" | "xterm-256color" | "screen" | "tmux" => {
+            Some("Terminal".to_string())
+        }
         _ => Some(cleaned),
     }
+}
+
+fn terminal_bridge_app_label(metadata: &TerminalBridgeMetadata) -> String {
+    metadata
+        .terminal
+        .as_deref()
+        .and_then(normalize_terminal_bridge_label)
+        .or_else(|| {
+            metadata
+                .shell
+                .as_deref()
+                .and_then(normalize_terminal_bridge_label)
+        })
+        .unwrap_or_else(|| "Terminal".to_string())
+}
+
+fn normalize_terminal_bridge_label(value: &str) -> Option<String> {
+    let cleaned = clean_capture_label(value)?;
+    let normalized = cleaned.to_ascii_lowercase();
+    if normalized == "code" || normalized.contains("visual studio code") {
+        return Some("VS Code".to_string());
+    }
+    if normalized.contains("warp") {
+        return Some("Warp".to_string());
+    }
+    if normalized.contains("iterm") {
+        return Some("iTerm".to_string());
+    }
+    if matches!(
+        normalized.as_str(),
+        "/bin/zsh"
+            | "/bin/bash"
+            | "zsh"
+            | "bash"
+            | "fish"
+            | "pwsh"
+            | "powershell"
+            | "dumb"
+            | "unknown"
+            | "ansi"
+            | "vt100"
+            | "xterm"
+            | "xterm-256color"
+            | "screen"
+            | "tmux"
+    ) || normalized.contains("terminal")
+    {
+        return Some("Terminal".to_string());
+    }
+    Some(cleaned)
 }
 
 fn clean_capture_label(value: &str) -> Option<String> {
@@ -7049,8 +7293,7 @@ fn build_capture_health_with_permission_state(
             detail: if settings.full_clipboard_history {
                 "Full clipboard storage is enabled by user choice.".to_string()
             } else {
-                "Metadata-first capture; screenshots off and clipboard content not stored."
-                    .to_string()
+                "Metadata-first capture; clipboard content not stored.".to_string()
             },
             last_seen_at: Some(now_ms()),
             evidence_count: settings.excluded_apps.len()
@@ -7927,6 +8170,30 @@ fn now_utc() -> String {
 
 fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
+}
+
+fn file_size(path: &Path) -> u64 {
+    fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+}
+
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+
+    entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                dir_size(&path)
+            } else {
+                file_size(&path)
+            }
+        })
+        .sum()
 }
 
 fn parse_rfc3339_ms(value: &str) -> Option<i64> {
@@ -8824,7 +9091,7 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
     }
 
     markdown.push_str("\n## Privacy posture\n");
-    markdown.push_str("- Screenshots and full clipboard content remain opt-in.\n");
+    markdown.push_str("- Full clipboard content is stored only if you enable it.\n");
     markdown.push_str("- AI export uses configured redaction and local settings.\n");
 
     markdown
@@ -8931,7 +9198,6 @@ fn classify_app_category(app_name: &str) -> &'static str {
         "textedit",
         "quicktime player",
         "archive utility",
-        "screenshot",
         "font book",
     ];
     const AI_APPS: &[&str] = &[

@@ -9,6 +9,7 @@ pub mod permissions;
 pub mod platform;
 pub mod project_detection;
 pub mod store;
+pub mod store_materialization;
 pub mod tray;
 
 use std::time::Duration;
@@ -27,6 +28,9 @@ pub fn run() {
             let store = WorktraceStore::open_default(app.handle())?;
             if let Err(error) = store.ensure_default_launch_at_login() {
                 eprintln!("failed to enable launch at login by default: {error:#}");
+            }
+            if let Err(error) = store.apply_retention_policy() {
+                eprintln!("failed to apply data retention policy: {error:#}");
             }
             app.manage(store.clone());
             setup_tray(app, store.clone())?;

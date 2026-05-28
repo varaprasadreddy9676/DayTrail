@@ -28,8 +28,18 @@ export type TodaySnapshotLike = {
   appUsageSummary?: { totalDurationMs?: number; apps?: AppUsageLike[] } | null;
   aiUsageSummary?: { totalDurationMs?: number; tools?: Array<{ tool: string; durationMs?: number }> } | null;
   aiOutputLedger?: Array<{ status?: string | null; tool?: string | null; title?: string | null; durationMs?: number | null }> | null;
-  idleBlocks?: Array<{ classified?: boolean }> | null;
-  unclosedLoopInbox?: unknown[] | null;
+  idleBlocks?: Array<{ id?: string; classified?: boolean; durationMs?: number | null }> | null;
+  unclosedLoopInbox?: Array<{
+    id?: string;
+    category?: string | null;
+    title?: string | null;
+    detail?: string | null;
+    source?: string | null;
+    risk?: string | null;
+    status?: string | null;
+    primaryAction?: string | null;
+    evidenceIds?: string[];
+  }> | null;
 };
 
 export function buildTodayView(snapshot: TodaySnapshotLike | null | undefined, settings?: ExperienceSettingsLike | null) {

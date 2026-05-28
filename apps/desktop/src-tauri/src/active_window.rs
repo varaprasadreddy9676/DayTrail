@@ -63,7 +63,6 @@ pub fn spawn_active_window_watcher(store: WorktraceStore, interval: Duration) {
                         metadata.as_deref(),
                         Some(interval),
                     );
-                    let _ = store.materialize_work_memory();
                 }
             }
         }

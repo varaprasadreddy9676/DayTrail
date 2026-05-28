@@ -29,7 +29,7 @@ pub struct LoopSummary {
 
 pub fn export_markdown(report: &DailyReport) -> String {
     let mut output = String::new();
-    output.push_str(&format!("# WorkTrace Report - {}\n\n", clean(&report.date)));
+    output.push_str(&format!("# DayTrail Report - {}\n\n", clean(&report.date)));
 
     output.push_str("## Sessions\n");
     if report.sessions.is_empty() {
@@ -100,7 +100,7 @@ mod tests {
 
         let markdown = export_markdown(&report);
 
-        assert!(markdown.starts_with("# WorkTrace Report - 2026-05-23"));
+        assert!(markdown.starts_with("# DayTrail Report - 2026-05-23"));
         assert!(markdown.contains("- 09:00-10:30 Deep work (90m active)"));
         assert!(markdown.contains("- [ ] Fix checkout bug"));
         assert!(markdown.contains("No unclosed loops."));

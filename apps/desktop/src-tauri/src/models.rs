@@ -88,6 +88,8 @@ pub struct Settings {
     pub show_capture_confidence: bool,
     #[serde(default = "default_show_ai_details")]
     pub show_ai_details: String,
+    #[serde(default)]
+    pub data_retention_days: i64,
 }
 
 fn default_experience_mode() -> String {
@@ -120,6 +122,7 @@ impl Default for Settings {
             show_raw_events: false,
             show_capture_confidence: false,
             show_ai_details: default_show_ai_details(),
+            data_retention_days: 0,
         }
     }
 }
@@ -145,6 +148,7 @@ pub struct SettingsPatch {
     pub show_raw_events: Option<bool>,
     pub show_capture_confidence: Option<bool>,
     pub show_ai_details: Option<String>,
+    pub data_retention_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +165,12 @@ pub struct SettingsConfigPayload {
 pub struct StorageLocationInfo {
     pub database_path: String,
     pub backup_dir: String,
+    pub database_bytes: u64,
+    pub wal_bytes: u64,
+    pub shm_bytes: u64,
+    pub backup_bytes: u64,
+    pub total_bytes: u64,
+    pub retention_days: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

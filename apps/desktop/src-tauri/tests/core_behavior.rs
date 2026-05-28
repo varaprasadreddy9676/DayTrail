@@ -147,6 +147,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(!defaults.show_raw_events);
     assert!(!defaults.show_capture_confidence);
     assert_eq!(defaults.show_ai_details, "summary");
+    assert_eq!(defaults.data_retention_days, 0);
 
     let updated = store
         .update_settings(SettingsPatch {
@@ -155,6 +156,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
             show_raw_events: Some(true),
             show_capture_confidence: Some(true),
             show_ai_details: Some("detailed".into()),
+            data_retention_days: Some(90),
             ..SettingsPatch::default()
         })
         .expect("update display settings");
@@ -164,6 +166,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(updated.show_raw_events);
     assert!(updated.show_capture_confidence);
     assert_eq!(updated.show_ai_details, "detailed");
+    assert_eq!(updated.data_retention_days, 90);
 }
 
 #[test]
@@ -286,6 +289,7 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
             ai_endpoint: Some("https://llm.example.com/v1/".into()),
             ai_redact_secrets: Some(true),
             full_clipboard_history: Some(false),
+            data_retention_days: Some(30),
             ..SettingsPatch::default()
         })
         .expect("source settings");
@@ -323,6 +327,7 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
     assert_eq!(imported.ai_endpoint, "https://llm.example.com/v1");
     assert!(imported.ai_redact_secrets);
     assert!(!imported.full_clipboard_history);
+    assert_eq!(imported.data_retention_days, 30);
     assert_eq!(imported.ai_api_key_ref, None);
 }
 
@@ -347,6 +352,11 @@ fn backs_up_and_restores_sqlite_database_with_integrity_check() {
     assert!(fs::metadata(&backup.path).expect("backup metadata").len() > 0);
     assert!(backup.bytes > 0);
     assert!(backup.pre_restore_backup_path.is_none());
+    let storage = store.storage_locations().expect("storage locations");
+    assert!(storage.database_bytes > 0);
+    assert!(storage.backup_bytes >= backup.bytes);
+    assert!(storage.total_bytes >= storage.database_bytes + storage.backup_bytes);
+    assert_eq!(storage.retention_days, 0);
 
     store
         .create_task(TaskInput {
@@ -1034,6 +1044,72 @@ fn privacy_admin_controls_delete_contexts_clipboard_and_captured_data() {
 }
 
 #[test]
+fn retention_policy_deletes_old_captured_data_and_keeps_recent_data() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Utc::now().timestamp_millis();
+    let old_start = now - 45 * 24 * 60 * 60 * 1000;
+    let recent_start = now - 2 * 24 * 60 * 60 * 1000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("old-event".into()),
+            source: "active-window".into(),
+            event_type: "editor".into(),
+            app: Some("Code".into()),
+            title: Some("Old file".into()),
+            url: None,
+            workspace_key: Some("/repo/old".into()),
+            started_at: Some(old_start),
+            ended_at: Some(old_start + 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("old source event");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("recent-event".into()),
+            source: "active-window".into(),
+            event_type: "editor".into(),
+            app: Some("Code".into()),
+            title: Some("Recent file".into()),
+            url: None,
+            workspace_key: Some("/repo/recent".into()),
+            started_at: Some(recent_start),
+            ended_at: Some(recent_start + 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("recent source event");
+
+    store
+        .update_settings(SettingsPatch {
+            data_retention_days: Some(30),
+            ..SettingsPatch::default()
+        })
+        .expect("retention settings");
+    let pruned = store.apply_retention_policy().expect("apply retention");
+    assert!(pruned.deleted_rows >= 1);
+
+    let conn = Connection::open(&db_path).expect("open database");
+    let remaining_events: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT id FROM source_events ORDER BY id")
+            .expect("prepare source event query");
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .expect("query source events")
+            .map(|row| row.expect("source event row"))
+            .collect()
+    };
+    assert_eq!(remaining_events, vec!["recent-event"]);
+    assert_eq!(
+        store.get_settings().expect("settings").data_retention_days,
+        30
+    );
+}
+
+#[test]
 fn active_window_capture_writes_canonical_source_events() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
@@ -1209,7 +1285,7 @@ fn terminal_bridge_metadata_records_cli_folder_context() {
         )
         .expect("source event");
     assert_eq!(source, "terminal-bridge");
-    assert_eq!(app, "WarpTerminal");
+    assert_eq!(app, "Warp");
     assert_eq!(workspace_key, "/Users/alice/work/payments-api");
 
     let folder_path: String = conn
@@ -1220,6 +1296,38 @@ fn terminal_bridge_metadata_records_cli_folder_context() {
         )
         .expect("workspace context");
     assert_eq!(folder_path, "/Users/alice/work/payments-api");
+}
+
+#[test]
+fn terminal_bridge_metadata_does_not_store_terminal_capability_as_app() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    store
+        .ingest_terminal_bridge_metadata(TerminalBridgeMetadata {
+            cwd: "/Users/alice/work/daytrail".into(),
+            shell: Some("/bin/zsh".into()),
+            terminal: Some("dumb".into()),
+            updated_at: Some("2026-05-23T09:10:00Z".into()),
+            event_type: Some("command".into()),
+            last_command: Some("printf daytrail qa --api-key secret".into()),
+        })
+        .expect("ingest terminal metadata");
+
+    let conn = Connection::open(&db_path).expect("open database");
+    let (app, title, metadata_json): (String, String, String) = conn
+        .query_row(
+            "SELECT app, title, metadata_json FROM source_events LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("source event");
+
+    assert_eq!(app, "Terminal");
+    assert_eq!(title, "printf daytrail qa --api-key [redacted]");
+    assert!(metadata_json.contains("\"terminal\":\"Terminal\""));
+    assert!(!metadata_json.contains("\"terminal\":\"dumb\""));
 }
 
 #[test]
@@ -1907,6 +2015,141 @@ fn today_snapshot_falls_back_to_recent_source_events_when_sessions_are_not_persi
         snapshot.parallel_streams[0].title,
         "ChatGPT - WorkTrace capture"
     );
+}
+
+#[test]
+fn today_snapshot_does_not_persist_derived_sessions_on_read() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("daytrail.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Utc::now().timestamp_millis();
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("raw-window-event".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("Google Chrome".into()),
+            title: Some("ChatGPT - DayTrail capture".into()),
+            url: Some("https://chatgpt.com/c/thread?token=secret".into()),
+            workspace_key: Some("chatgpt.com".into()),
+            started_at: Some(now - 5_000),
+            ended_at: Some(now),
+            sensitivity: Some("normal".into()),
+            metadata_json: None,
+        })
+        .expect("source event");
+
+    let snapshot = store.today_snapshot().expect("today snapshot");
+    assert_eq!(snapshot.work_sessions.len(), 1);
+    assert_eq!(snapshot.parallel_streams.len(), 1);
+
+    let conn = Connection::open(&db_path).expect("open database");
+    let persisted_sessions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM work_sessions", [], |row| row.get(0))
+        .expect("session count");
+    let persisted_streams: i64 = conn
+        .query_row("SELECT COUNT(*) FROM parallel_streams", [], |row| {
+            row.get(0)
+        })
+        .expect("stream count");
+    let persisted_stream_events: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stream_events", [], |row| row.get(0))
+        .expect("stream event count");
+    let persisted_graph_edges: i64 = conn
+        .query_row("SELECT COUNT(*) FROM work_graph_edges", [], |row| {
+            row.get(0)
+        })
+        .expect("graph edge count");
+    assert_eq!(persisted_sessions, 0);
+    assert_eq!(persisted_streams, 0);
+    assert_eq!(persisted_stream_events, 0);
+    assert_eq!(persisted_graph_edges, 0);
+}
+
+#[test]
+fn materialize_work_memory_skips_unchanged_source_events_without_rewriting_rows() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("daytrail.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Utc::now().timestamp_millis();
+
+    for event in [
+        SourceEventInput {
+            id: Some("evt-code".into()),
+            source: "active-window".into(),
+            event_type: "editor".into(),
+            app: Some("Code".into()),
+            title: Some("Ledger.tsx".into()),
+            url: None,
+            workspace_key: Some("/repo/daytrail".into()),
+            started_at: Some(now - 15_000),
+            ended_at: Some(now - 8_000),
+            sensitivity: None,
+            metadata_json: None,
+        },
+        SourceEventInput {
+            id: Some("evt-ai".into()),
+            source: "active-window".into(),
+            event_type: "browser_tab".into(),
+            app: Some("Google Chrome".into()),
+            title: Some("ChatGPT - ledger review".into()),
+            url: Some("https://chatgpt.com/c/thread?token=secret".into()),
+            workspace_key: Some("chatgpt.com".into()),
+            started_at: Some(now - 7_000),
+            ended_at: Some(now),
+            sensitivity: None,
+            metadata_json: None,
+        },
+    ] {
+        store
+            .record_source_event(event)
+            .expect("record source event");
+    }
+
+    let first = store.materialize_work_memory().expect("first materialize");
+    assert_eq!(first.source_events, 2);
+    assert_eq!(first.work_sessions, 1);
+
+    let conn = Connection::open(&db_path).expect("open database");
+    let first_session_updated_at: i64 = conn
+        .query_row("SELECT MAX(updated_at) FROM work_sessions", [], |row| {
+            row.get(0)
+        })
+        .expect("session updated_at");
+    let first_edge_created_at: i64 = conn
+        .query_row(
+            "SELECT MAX(created_at) FROM work_graph_edges WHERE relation = 'session_contains_event'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("edge created_at");
+    drop(conn);
+
+    thread::sleep(Duration::from_millis(10));
+
+    let second = store.materialize_work_memory().expect("second materialize");
+    assert_eq!(second.source_events, first.source_events);
+    assert_eq!(second.work_sessions, first.work_sessions);
+    assert_eq!(second.parallel_streams, first.parallel_streams);
+    assert_eq!(second.graph_edges, first.graph_edges);
+
+    let conn = Connection::open(&db_path).expect("open database");
+    let second_session_updated_at: i64 = conn
+        .query_row("SELECT MAX(updated_at) FROM work_sessions", [], |row| {
+            row.get(0)
+        })
+        .expect("session updated_at");
+    let second_edge_created_at: i64 = conn
+        .query_row(
+            "SELECT MAX(created_at) FROM work_graph_edges WHERE relation = 'session_contains_event'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("edge created_at");
+
+    assert_eq!(second_session_updated_at, first_session_updated_at);
+    assert_eq!(second_edge_created_at, first_edge_created_at);
 }
 
 #[test]

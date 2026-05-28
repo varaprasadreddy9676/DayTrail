@@ -6,37 +6,37 @@ SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SO
 
 if [[ "${1:-}" == "--print-zsh-hook" ]]; then
   cat <<HOOK
-worktrace_terminal_bridge_precmd() {
-  WORKTRACE_TERMINAL_EVENT=prompt "$SCRIPT_PATH" >/dev/null 2>&1
+daytrail_terminal_bridge_precmd() {
+  DAYTRAIL_TERMINAL_EVENT=prompt "$SCRIPT_PATH" >/dev/null 2>&1
 }
 
-worktrace_terminal_bridge_preexec() {
-  WORKTRACE_TERMINAL_EVENT=command WORKTRACE_TERMINAL_COMMAND="\$1" "$SCRIPT_PATH" >/dev/null 2>&1
+daytrail_terminal_bridge_preexec() {
+  DAYTRAIL_TERMINAL_EVENT=command DAYTRAIL_TERMINAL_COMMAND="\$1" "$SCRIPT_PATH" >/dev/null 2>&1
 }
 
 autoload -Uz add-zsh-hook
-add-zsh-hook precmd worktrace_terminal_bridge_precmd
-add-zsh-hook preexec worktrace_terminal_bridge_preexec
+add-zsh-hook precmd daytrail_terminal_bridge_precmd
+add-zsh-hook preexec daytrail_terminal_bridge_preexec
 HOOK
   exit 0
 fi
 
 if [[ "${1:-}" == "--print-bash-hook" ]]; then
   cat <<HOOK
-worktrace_terminal_bridge_prompt() {
-  WORKTRACE_TERMINAL_EVENT=prompt "$SCRIPT_PATH" >/dev/null 2>&1
+daytrail_terminal_bridge_prompt() {
+  DAYTRAIL_TERMINAL_EVENT=prompt "$SCRIPT_PATH" >/dev/null 2>&1
 }
 
-worktrace_terminal_bridge_debug() {
+daytrail_terminal_bridge_debug() {
   local command="\$BASH_COMMAND"
   case "\$command" in
-    worktrace_terminal_bridge_*|"$SCRIPT_PATH"*) return ;;
+    daytrail_terminal_bridge_*|worktrace_terminal_bridge_*|"$SCRIPT_PATH"*) return ;;
   esac
-  WORKTRACE_TERMINAL_EVENT=command WORKTRACE_TERMINAL_COMMAND="\$command" "$SCRIPT_PATH" >/dev/null 2>&1
+  DAYTRAIL_TERMINAL_EVENT=command DAYTRAIL_TERMINAL_COMMAND="\$command" "$SCRIPT_PATH" >/dev/null 2>&1
 }
 
-PROMPT_COMMAND="worktrace_terminal_bridge_prompt\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"
-trap worktrace_terminal_bridge_debug DEBUG
+PROMPT_COMMAND="daytrail_terminal_bridge_prompt\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"
+trap daytrail_terminal_bridge_debug DEBUG
 HOOK
   exit 0
 fi
@@ -46,7 +46,7 @@ mkdir -p "$(dirname "$OUT_FILE")"
 node -e '
 const fs = require("node:fs");
 const out = process.argv[1];
-const redacted = (process.env.WORKTRACE_TERMINAL_COMMAND || "")
+const redacted = (process.env.DAYTRAIL_TERMINAL_COMMAND || process.env.WORKTRACE_TERMINAL_COMMAND || "")
   .split(/\s+/)
   .reduce((parts, part, index, words) => {
     if (!part) return parts;
@@ -64,6 +64,12 @@ const redacted = (process.env.WORKTRACE_TERMINAL_COMMAND || "")
   .join(" ");
 const normalizeTerminal = (value) => {
   const lower = String(value || "").toLowerCase();
+  if (
+    !lower ||
+    ["dumb", "unknown", "ansi", "vt100", "xterm", "xterm-256color", "screen", "tmux"].includes(lower)
+  ) {
+    return "Terminal";
+  }
   if (lower === "vscode" || lower.includes("visual studio code")) return "VS Code";
   if (lower.includes("warp")) return "Warp";
   if (lower.includes("iterm")) return "iTerm";
@@ -74,7 +80,7 @@ const metadata = {
   cwd: process.cwd(),
   shell: process.env.SHELL || null,
   terminal: normalizeTerminal(process.env.TERM_PROGRAM || process.env.TERM),
-  eventType: process.env.WORKTRACE_TERMINAL_EVENT || "terminal_context",
+  eventType: process.env.DAYTRAIL_TERMINAL_EVENT || process.env.WORKTRACE_TERMINAL_EVENT || "terminal_context",
   lastCommand: redacted || null,
   updatedAt: new Date().toISOString()
 };

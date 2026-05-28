@@ -1,7 +1,7 @@
 {
-  "name": "worktrace-ai-vscode-extension",
-  "displayName": "WorkTrace AI Editor Bridge",
-  "description": "Captures active VS Code and Cursor editor context metadata for the local WorkTrace AI desktop bridge.",
+  "name": "daytrail-vscode-extension",
+  "displayName": "DayTrail Editor Bridge",
+  "description": "Captures active VS Code and Cursor editor context metadata for the local DayTrail desktop bridge.",
   "version": "0.1.0",
   "private": false,
   "license": "MIT OR Apache-2.0",
@@ -22,20 +22,20 @@
     "commands": [
       {
         "command": "worktrace.captureActiveEditor",
-        "title": "WorkTrace: Capture Active Editor Context"
+        "title": "DayTrail: Capture Active Editor Context"
       },
       {
         "command": "worktrace.flushEditorContext",
-        "title": "WorkTrace: Flush Editor Context"
+        "title": "DayTrail: Flush Editor Context"
       }
     ],
     "configuration": {
-      "title": "WorkTrace AI Editor Tracking",
+      "title": "DayTrail Editor Tracking",
       "properties": {
         "worktrace.editorTracking.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Capture active editor context metadata for WorkTrace AI."
+          "description": "Capture active editor context metadata for DayTrail."
         },
         "worktrace.editorTracking.includeContentHash": {
           "type": "boolean",
@@ -78,7 +78,7 @@
         },
         "worktrace.editorTracking.bridgeFile": {
           "type": "string",
-          "default": "~/.worktrace/editor-bridge.jsonl",
+          "default": "~/.daytrail/editor-bridge.jsonl",
           "description": "Fallback desktop bridge JSONL file used when bridgeCommand is not configured."
         },
         "worktrace.editorTracking.bridgeTimeoutMs": {

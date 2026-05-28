@@ -1,7 +1,7 @@
 param(
   [switch]$PrintProfileSnippet,
-  [string]$CommandText = $env:WORKTRACE_TERMINAL_COMMAND,
-  [string]$EventType = $(if ($env:WORKTRACE_TERMINAL_EVENT) { $env:WORKTRACE_TERMINAL_EVENT } else { "terminal_context" }),
+  [string]$CommandText = $(if ($env:DAYTRAIL_TERMINAL_COMMAND) { $env:DAYTRAIL_TERMINAL_COMMAND } else { $env:WORKTRACE_TERMINAL_COMMAND }),
+  [string]$EventType = $(if ($env:DAYTRAIL_TERMINAL_EVENT) { $env:DAYTRAIL_TERMINAL_EVENT } elseif ($env:WORKTRACE_TERMINAL_EVENT) { $env:WORKTRACE_TERMINAL_EVENT } else { "terminal_context" }),
   [string]$OutFile = $(if ($env:DAYTRAIL_TERMINAL_BRIDGE) { $env:DAYTRAIL_TERMINAL_BRIDGE } elseif ($env:WORKTRACE_TERMINAL_BRIDGE) { $env:WORKTRACE_TERMINAL_BRIDGE } else { Join-Path $HOME ".daytrail\terminal-bridge.json" })
 )
 
@@ -13,22 +13,22 @@ if ($PrintProfileSnippet) {
 if (Get-Module -ListAvailable PSReadLine) {
   Set-PSReadLineOption -AddToHistoryHandler {
     param([string]`$line)
-    `$env:WORKTRACE_TERMINAL_EVENT = "command"
-    `$env:WORKTRACE_TERMINAL_COMMAND = `$line
+    `$env:DAYTRAIL_TERMINAL_EVENT = "command"
+    `$env:DAYTRAIL_TERMINAL_COMMAND = `$line
     & "$scriptPath" | Out-Null
     return `$true
   }
 }
 
 if (Test-Path function:\prompt) {
-  `$script:WorkTraceOriginalPrompt = (Get-Command prompt).ScriptBlock
+  `$script:DayTrailOriginalPrompt = (Get-Command prompt).ScriptBlock
 }
 function global:prompt {
-  `$env:WORKTRACE_TERMINAL_EVENT = "prompt"
-  Remove-Item Env:\WORKTRACE_TERMINAL_COMMAND -ErrorAction SilentlyContinue
+  `$env:DAYTRAIL_TERMINAL_EVENT = "prompt"
+  Remove-Item Env:\DAYTRAIL_TERMINAL_COMMAND -ErrorAction SilentlyContinue
   & "$scriptPath" | Out-Null
-  if (`$script:WorkTraceOriginalPrompt) {
-    & `$script:WorkTraceOriginalPrompt
+  if (`$script:DayTrailOriginalPrompt) {
+    & `$script:DayTrailOriginalPrompt
   } else {
     "PS `$(`$executionContext.SessionState.Path.CurrentLocation)> "
   }
@@ -37,7 +37,7 @@ function global:prompt {
   exit 0
 }
 
-function Redact-WorkTraceCommand {
+function Redact-DayTrailCommand {
   param([string]$Value)
   if ([string]::IsNullOrWhiteSpace($Value)) {
     return $null
@@ -62,17 +62,42 @@ function Redact-WorkTraceCommand {
   return ($redacted -join " ")
 }
 
+function Normalize-DayTrailTerminal {
+  param([string]$Value)
+
+  $cleaned = "$Value".Trim()
+  $normalized = $cleaned.ToLowerInvariant()
+  if (-not $normalized -or @("dumb", "unknown", "ansi", "vt100", "xterm", "xterm-256color", "screen", "tmux") -contains $normalized) {
+    return "Terminal"
+  }
+  if ($normalized -eq "vscode" -or $normalized.Contains("visual studio code")) {
+    return "VS Code"
+  }
+  if ($normalized.Contains("warp")) {
+    return "Warp"
+  }
+  if ($normalized.Contains("iterm")) {
+    return "iTerm"
+  }
+  if ($normalized.Contains("terminal")) {
+    return "Terminal"
+  }
+  return $cleaned
+}
+
 $parent = Split-Path -Parent $OutFile
 if ($parent) {
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
 }
 
+$terminalValue = if ($env:WT_SESSION) { "Windows Terminal" } else { $env:TERM_PROGRAM }
+
 $metadata = [ordered]@{
   cwd = (Get-Location).Path
   shell = "PowerShell"
-  terminal = $(if ($env:WT_SESSION) { "Windows Terminal" } else { $env:TERM_PROGRAM })
+  terminal = Normalize-DayTrailTerminal $terminalValue
   eventType = $EventType
-  lastCommand = Redact-WorkTraceCommand $CommandText
+  lastCommand = Redact-DayTrailCommand $CommandText
   updatedAt = (Get-Date).ToUniversalTime().ToString("o")
 }
 

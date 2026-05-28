@@ -53,6 +53,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         privacy::clear_clipboard_history,
         privacy::delete_context_data,
         privacy::purge_captured_data,
+        privacy::prune_captured_data,
+        privacy::apply_retention_policy,
         quick_note::add_quick_note,
         tracking::pause_tracking,
         tracking::resume_tracking,

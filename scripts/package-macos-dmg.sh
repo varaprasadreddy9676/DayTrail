@@ -24,7 +24,7 @@ command -v hdiutil >/dev/null 2>&1 || {
 }
 
 mkdir -p "$OUT_DIR"
-STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/worktrace-dmg.XXXXXX")"
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/daytrail-dmg.XXXXXX")"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
 cp -R "$APP_BUNDLE" "$STAGING_DIR/"

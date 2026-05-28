@@ -1,4 +1,4 @@
-# WorkTrace AI: Complete UI/UX Specification Document
+# DayTrail: Complete UI/UX Specification Document
 
 **Target Architecture:** Tauri v2 Core Shell | React + TypeScript + Tailwind Frontend
 **Design Paradigm:** Desktop-Native, High-Density, Data-Informed Adaptive System
@@ -45,14 +45,14 @@ Font selection scales down by default to match native system application informa
 
 ## 2. Window & Shell Architecture
 
-WorkTrace AI utilizes a dual-window configuration managed directly through the Tauri runtime: the Main App Shell and the Global Command Overlay.
+DayTrail utilizes a dual-window configuration managed directly through the Tauri runtime: the Main App Shell and the Global Command Overlay.
 
 ### 2.1 Main App Shell Window Configurations
 
 ```json
 {
   "label": "main",
-  "title": "WorkTrace AI",
+  "title": "DayTrail",
   "width": 1120,
   "height": 780,
   "minWidth": 900,
@@ -308,7 +308,7 @@ When the application captures an anomaly (e.g., **Stuck Developer Session** or *
 
 ```
 +-------------------------------------------+
-|  WorkTrace AI                             |
+|  DayTrail                             |
 |  Session Block Warning: Stuck Detector    | [System Toast Layout]
 |  You have run 'npm test' 6 times with     |
 |  identical error output. Generate doubt?  |
@@ -343,7 +343,7 @@ Check active terminal stream watcher hooks if this persists.
 
 ```
 
-This specification document provides a production-ready blueprint for building the WorkTrace AI design framework. By combining native system effects with tight CSS controls, the interface delivers the responsive, data-dense layout expected of professional desktop developer utilities.
+This specification document provides a production-ready blueprint for building the DayTrail design framework. By combining native system effects with tight CSS controls, the interface delivers the responsive, data-dense layout expected of professional desktop developer utilities.
 
 
 Absolutely. To make this an bulletproof desktop app, the system tray (Windows) or status menu bar (macOS) is non-negotiable. If a user closes the main window, the application **must** live on invisibly in the background, continuously running your terminal and browser watchers.
@@ -369,7 +369,7 @@ When a user right-clicks your tray icon, it should instantly render the system's
 
 ```
 +------------------------------------+
-|  WorkTrace AI: Tracking Active     |  <- Descriptive Disabled Label (Context Indicator)
+|  DayTrail: Tracking Active     |  <- Descriptive Disabled Label (Context Indicator)
 |  --------------------------------  |
 |  Show Command Center     (⌥Space)  |  <- Focus Window Target
 |  Quick-Capture Note      (⌥Shift+D)|  <- Spawns context scratchpad
@@ -378,7 +378,7 @@ When a user right-clicks your tray icon, it should instantly render the system's
 |  Run End-of-Day Ritual   (⌘E)      |  <- Deep link shortcut
 |  --------------------------------  |
 |  Settings...                       |
-|  Quit WorkTrace                    |  <- Explicitly destroys background daemon process
+|  Quit DayTrail                    |  <- Explicitly destroys background daemon process
 +------------------------------------+
 
 ```
@@ -399,7 +399,7 @@ pub fn run() {
         .setup(|app| {
             // Core Tray Setup
             let toggle = tauri::menu::MenuItemBuilder::with_id("toggle", "Show Command Center").build(app)?;
-            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "Quit WorkTrace").build(app)?;
+            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "Quit DayTrail").build(app)?;
             let menu = tauri::menu::MenuBuilder::new(app).items(&[&toggle, &quit]).build()?;
             
             let _tray = tauri::tray::TrayIconBuilder::new()

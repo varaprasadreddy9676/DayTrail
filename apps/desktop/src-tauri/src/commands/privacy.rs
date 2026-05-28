@@ -23,3 +23,20 @@ pub fn purge_captured_data(
 ) -> Result<PrivacyDeleteSummary, CommandError> {
     store.purge_captured_data().map_err(Into::into)
 }
+
+#[tauri::command]
+pub fn prune_captured_data(
+    store: State<'_, WorktraceStore>,
+    days: i64,
+) -> Result<PrivacyDeleteSummary, CommandError> {
+    store
+        .prune_captured_data_older_than_days(days)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn apply_retention_policy(
+    store: State<'_, WorktraceStore>,
+) -> Result<PrivacyDeleteSummary, CommandError> {
+    store.apply_retention_policy().map_err(Into::into)
+}

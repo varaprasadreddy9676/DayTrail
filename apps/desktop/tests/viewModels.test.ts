@@ -215,7 +215,7 @@ describe("Simple Mode view models", () => {
       baseSettings,
     );
 
-    expect(view.toolSummaries[0]).toMatchObject({ tool: "Codex", label: "Used with session" });
+    expect(view.toolSummaries[0]).toMatchObject({ tool: "Codex", label: "Linked to work" });
     expect(view.toolSummaries.map((tool) => tool.label).join(" ")).not.toMatch(/accepted|generated|agent completed/i);
   });
 
@@ -354,8 +354,8 @@ describe("Simple Mode view models", () => {
       baseSettings,
     );
 
-    expect(detectedOnly.evidenceStatus).toBe("Detected only");
-    expect(completed.evidenceStatus).toBe("Completed");
+    expect(detectedOnly.evidenceStatus).toBe("Observed");
+    expect(completed.evidenceStatus).toBe("Accepted/completed");
     expect(JSON.stringify(detectedOnly)).not.toMatch(/accepted|generated|agent completed/i);
   });
 });

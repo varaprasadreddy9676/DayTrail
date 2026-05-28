@@ -10,6 +10,6 @@ export function buildSettingsView(settings?: ExperienceSettingsLike | null) {
     showCaptureConfidence: normalized.showCaptureConfidence,
     showAiDetails: normalized.showAiDetails,
     sections: ["Mode", "Capture Health", "Privacy", "AI Provider", "Advanced"],
-    privacyBadges: ["Metadata-first capture", "Screenshots off", "Clipboard not stored"],
+    privacyBadges: ["Metadata-first capture", "Clipboard not stored", "File contents not read"],
   };
 }

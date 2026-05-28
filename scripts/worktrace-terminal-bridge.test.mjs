@@ -18,11 +18,14 @@ test('terminal bridge writes redacted command metadata', async () => {
       WORKTRACE_TERMINAL_BRIDGE: outFile,
       WORKTRACE_TERMINAL_EVENT: 'command',
       WORKTRACE_TERMINAL_COMMAND: 'curl https://api.example.test --api-key secret-token',
+      TERM: 'dumb',
+      TERM_PROGRAM: 'dumb',
     },
   });
 
   const metadata = JSON.parse(await readFile(outFile, 'utf8'));
   assert.equal(metadata.eventType, 'command');
+  assert.equal(metadata.terminal, 'Terminal');
   assert.equal(metadata.lastCommand, 'curl https://api.example.test --api-key [redacted]');
   assert.equal(metadata.cwd, process.cwd());
 });
@@ -35,10 +38,10 @@ test('terminal bridge prints installable shell hooks with absolute script path',
     '--print-bash-hook',
   ]);
 
-  assert.match(zshHook, /add-zsh-hook precmd worktrace_terminal_bridge_precmd/);
-  assert.match(zshHook, /WORKTRACE_TERMINAL_EVENT=command/);
+  assert.match(zshHook, /add-zsh-hook precmd daytrail_terminal_bridge_precmd/);
+  assert.match(zshHook, /DAYTRAIL_TERMINAL_EVENT=command/);
   assert.match(zshHook, /\/scripts\/worktrace-terminal-bridge\.sh/);
-  assert.match(bashHook, /trap worktrace_terminal_bridge_debug DEBUG/);
+  assert.match(bashHook, /trap daytrail_terminal_bridge_debug DEBUG/);
   assert.match(bashHook, /PROMPT_COMMAND=/);
   assert.match(bashHook, /\/scripts\/worktrace-terminal-bridge\.sh/);
 });

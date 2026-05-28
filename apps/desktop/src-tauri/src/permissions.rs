@@ -158,29 +158,19 @@ fn macos_permission_checks(
             action_label: Some("Open Accessibility Settings".to_string()),
         },
         browser_automation_check.unwrap_or_else(default_browser_automation_check),
-        CapturePermissionCheck {
-            id: "screen-recording".to_string(),
-            label: "Screen Recording".to_string(),
-            required: false,
-            status: "not_required".to_string(),
-            detail: "Not requested because screenshots are off by default.".to_string(),
-            settings_label: None,
-            settings_url: None,
-            action_label: None,
-        },
     ]
 }
 
 fn default_browser_automation_check() -> CapturePermissionCheck {
     CapturePermissionCheck {
         id: "browser-automation".to_string(),
-        label: "Browser automation".to_string(),
+        label: "Browser tab context".to_string(),
         required: false,
         status: "user_prompt".to_string(),
-        detail: "Lets DayTrail read active tab URLs from supported browsers. Click \"Grant now\" while the browser is open, or macOS will ask the first time DayTrail captures a tab.".to_string(),
+        detail: "Optional. Adds the active browser tab title and domain to your timeline. Skip this if app names are enough.".to_string(),
         settings_label: Some("Privacy & Security > Automation".to_string()),
         settings_url: Some(AUTOMATION_URL.to_string()),
-        action_label: Some("Grant now".to_string()),
+        action_label: Some("Check access".to_string()),
     }
 }
 
@@ -271,14 +261,15 @@ fn browser_automation_check_from_probe_results(
     let (status, detail, action_label) = if results.is_empty() {
         (
             "not_running",
-            "Open Safari, Chrome, Brave, Edge, Arc, Chromium, Opera, Vivaldi, or ChatGPT Atlas, then click \"Grant now\" to verify browser automation.".to_string(),
-            "Grant now",
+            "Open a browser, then check access if you want tab titles and domains in DayTrail."
+                .to_string(),
+            "Check access",
         )
     } else if blocked.is_empty() {
         (
             "granted",
             format!(
-                "Automation verified for running browsers: {}. DayTrail can read active tab URLs when those browsers are frontmost.",
+                "Browser tab context is available for: {}.",
                 granted.join(", ")
             ),
             "Recheck",
@@ -287,26 +278,26 @@ fn browser_automation_check_from_probe_results(
         (
             "missing",
             format!(
-                "macOS did not allow DayTrail to automate {}. Open Automation Settings and enable DayTrail for the browser, then click \"Grant now\" again.",
+                "macOS did not allow tab context for {}. Enable DayTrail in Automation Settings if you want browser domains and titles.",
                 blocked.join(", ")
             ),
-            "Grant now",
+            "Check access",
         )
     } else {
         (
             "limited",
             format!(
-                "Automation verified for {}. Still needs access for {}.",
+                "Browser tab context works for {}. Still blocked for {}.",
                 granted.join(", "),
                 blocked.join(", ")
             ),
-            "Grant now",
+            "Check access",
         )
     };
 
     CapturePermissionCheck {
         id: "browser-automation".to_string(),
-        label: "Browser automation".to_string(),
+        label: "Browser tab context".to_string(),
         required: false,
         status: status.to_string(),
         detail: detail.to_string(),
@@ -365,9 +356,6 @@ pub fn open_permission_settings(permission_id: &str) -> Result<CapturePermission
             "accessibility" => ACCESSIBILITY_URL,
             "browser-automation" => AUTOMATION_URL,
             "automation" => AUTOMATION_URL,
-            "screen-recording" => {
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-            }
             other => bail!("unknown macOS permission setting: {other}"),
         };
 
@@ -597,7 +585,8 @@ mod tests {
         assert!(!summary.restart_recommended);
         assert_eq!(summary.checks[0].status, "granted");
         assert_eq!(summary.checks[1].status, "user_prompt");
-        assert_eq!(summary.checks[2].status, "not_required");
+        assert_eq!(summary.checks[1].id, "browser-automation");
+        assert_eq!(summary.checks.len(), 2);
     }
 
     #[test]
@@ -606,7 +595,7 @@ mod tests {
 
         assert_eq!(check.id, "browser-automation");
         assert_eq!(check.status, "not_running");
-        assert_eq!(check.action_label.as_deref(), Some("Grant now"));
+        assert_eq!(check.action_label.as_deref(), Some("Check access"));
     }
 
     #[test]
@@ -647,7 +636,7 @@ mod tests {
         }]);
 
         assert_eq!(check.status, "missing");
-        assert_eq!(check.action_label.as_deref(), Some("Grant now"));
+        assert_eq!(check.action_label.as_deref(), Some("Check access"));
     }
 
     #[test]

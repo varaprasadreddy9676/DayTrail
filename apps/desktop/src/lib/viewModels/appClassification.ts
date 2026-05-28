@@ -35,7 +35,6 @@ const utilityAppNames = [
   "textedit",
   "quicktime player",
   "archive utility",
-  "screenshot",
   "font book",
 ];
 

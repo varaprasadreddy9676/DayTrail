@@ -13,7 +13,7 @@
     "browser-extension:check": "node --check apps/browser-extension/src/service_worker.js && node --check apps/browser-extension/src/options.js && node --check apps/browser-extension/src/privacy.js && node --check apps/browser-extension/src/batching.js",
     "browser-extension:pack": "scripts/package-browser-extension.sh",
     "vscode-extension:check": "npm --prefix apps/vscode-extension run check",
-    "terminal:bridge": "scripts/worktrace-terminal-bridge.sh",
+    "terminal:bridge": "bash scripts/daytrail-terminal-bridge.sh",
     "test:scripts": "node --test scripts/*.test.mjs",
     "release:check": "scripts/release-check.sh"
   }

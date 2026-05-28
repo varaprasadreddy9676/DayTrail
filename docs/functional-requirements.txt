@@ -1,14 +1,14 @@
-Status note: this document is the product requirements backlog and acceptance target for WorkTrace AI. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
+Status note: this document is the product requirements backlog and acceptance target for DayTrail. It is broader than the current implementation. The README and release notes describe shipped behavior; do not treat every item below as a completed public claim until it is covered by tests and release notes.
 
-Below is the **complete comprehensive functional requirements document** for WorkTrace AI, focused only on **what the product must do**, not the technical implementation.
+Below is the **complete comprehensive functional requirements document** for DayTrail, focused only on **what the product must do**, not the technical implementation.
 
-This includes the original work command center requirements plus the later refined direction: **state recovery for your own brain**, context-anchored scratchpad, parallel streams, interrupted state snapshots, clipboard stitching, return-to-work markers, ghost agent monitoring, and developer-focused rescue scenarios. Those additions came from the uploaded notes describing WorkTrace as a “state recovery” system for high-context multitasking and short-term memory restoration.  The practical developer use cases like rabbit-hole backtracking, stale hypothesis detection, scattered AI chat finding, clipboard overflow, and ghost agent monitoring are also incorporated. 
+This includes the original work command center requirements plus the later refined direction: **state recovery for your own brain**, context-anchored scratchpad, parallel streams, interrupted state snapshots, clipboard stitching, return-to-work markers, ghost agent monitoring, and developer-focused rescue scenarios. Those additions came from the uploaded notes describing DayTrail as a “state recovery” system for high-context multitasking and short-term memory restoration.  The practical developer use cases like rabbit-hole backtracking, stale hypothesis detection, scattered AI chat finding, clipboard overflow, and ghost agent monitoring are also incorporated.
 
-# WorkTrace AI — Complete Functional Requirements
+# DayTrail — Complete Functional Requirements
 
 ## 1. Product Vision
 
-WorkTrace AI shall be a **local-first AI work command center** that helps users recover, understand, plan, and explain their work.
+DayTrail shall be a **local-first AI work command center** that helps users recover, understand, plan, and explain their work.
 
 The product must help users answer:
 
@@ -51,9 +51,9 @@ Client/meeting follow-up assistant
 
 # 2. Product Positioning
 
-## 2.1 What WorkTrace AI is
+## 2.1 What DayTrail is
 
-WorkTrace AI is a system that observes real work signals and converts them into meaningful work memory.
+DayTrail is a system that observes real work signals and converts them into meaningful work memory.
 
 It should capture:
 
@@ -94,7 +94,7 @@ Next best actions
 Project/client memory
 ```
 
-## 2.2 What WorkTrace AI is not
+## 2.2 What DayTrail is not
 
 It should not be positioned as:
 
@@ -893,7 +893,7 @@ User copies a large SQL migration from AI, then accidentally overwrites clipboar
 
 ### Requirement
 
-The user should be able to open WorkTrace and retrieve important recent clipboard items, especially:
+The user should be able to open DayTrail and retrieve important recent clipboard items, especially:
 
 ```text
 Code blocks
@@ -2063,7 +2063,7 @@ You worked on these recently but did not close them:
 
 ## 5.50 Daily Work Replay
 
-The system shall generate a semantic replay of the day, not a screen recording.
+The system shall generate a semantic replay of the day from captured metadata.
 
 ### Example
 
@@ -2334,7 +2334,6 @@ Corrections should improve future behavior.
 The system shall not capture by default:
 
 ```text
-Screenshots
 Audio
 Full email body
 Full AI prompt/response
@@ -2439,12 +2438,12 @@ Role-specific modes
 
 # 10. Final Functional Requirement Summary
 
-WorkTrace AI shall function as a **personal AI work memory and recovery system** that captures real work signals, groups them into parallel work streams, restores interrupted context, detects missed replies and promises, tracks AI-assisted outputs, records offline/field work, supports planning, and generates clear daily/weekly reports.
+DayTrail shall function as a **personal AI work memory and recovery system** that captures real work signals, groups them into parallel work streams, restores interrupted context, detects missed replies and promises, tracks AI-assisted outputs, records offline/field work, supports planning, and generates clear daily/weekly reports.
 
 The product’s highest-value experience should be:
 
 ```text
-When I return to any task, WorkTrace tells me exactly where I stopped, what I tried, what mattered, which AI thread helped, what is still pending, and what I should do next.
+When I return to any task, DayTrail tells me exactly where I stopped, what I tried, what mattered, which AI thread helped, what is still pending, and what I should do next.
 ```
 
 That is the core functional requirement that makes the product irreplaceable.

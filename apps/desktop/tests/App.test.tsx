@@ -1,13 +1,20 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import App from "../src/App";
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   window.__TAURI__ = undefined;
   window.__TAURI_INTERNALS__ = undefined;
+  if (typeof window.localStorage?.clear === "function") {
+    window.localStorage.clear();
+  }
+  if (typeof window.sessionStorage?.clear === "function") {
+    window.sessionStorage.clear();
+  }
 });
 
 async function openAiSettings(user: ReturnType<typeof userEvent.setup>) {
@@ -15,7 +22,7 @@ async function openAiSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /ai provider/i }));
 }
 
-describe("WorkTrace command center", () => {
+describe("DayTrail command center", () => {
   it("renders the native today shell and switches to app usage", async () => {
     const user = userEvent.setup();
 
@@ -35,11 +42,221 @@ describe("WorkTrace command center", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: /activity/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/no sessions yet/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/no sessions yet/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /^activity$/i })).toHaveAttribute(
       "aria-current",
       "page",
     );
+  });
+
+  it("monkey-clicks the primary navigation without extra onboarding burden", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(screen.queryByText(/view sample day/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/keep daytrail running while you work/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^from$/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /app range custom range/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^activity$/i }));
+    expect(screen.getByRole("heading", { level: 2, name: /activity/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^ai impact$/i }));
+    expect(screen.getByRole("heading", { level: 2, name: /ai impact/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^needs review$/i }));
+    expect(screen.getByRole("heading", { level: 2, name: /needs review/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/source-backed/i).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /^reports$/i }));
+    expect(screen.getAllByRole("heading", { level: 2, name: /reports/i }).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    expect(screen.getByRole("heading", { level: 2, name: /settings/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^today$/i }));
+    expect(screen.getAllByText(/today timeline/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows the 24-hour timeline for a selected single-day range", async () => {
+    const user = userEvent.setup();
+    const settings = {
+      browserBridgeEnabled: true,
+      excludedDomains: [],
+      aiProvider: "Ollama Local",
+      aiModel: "llama3.1",
+      aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      aiRedactSecrets: true,
+      fullClipboardHistory: false,
+    };
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-05-28",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings,
+          projectContext: null,
+        };
+      }
+
+      if (command === "export_data_range") {
+        const range = args?.range as { fromDate: string; toDate: string };
+        const startedAt = new Date(`${range.fromDate}T08:15:00`).getTime();
+        const endedAt = startedAt + 15 * 60_000;
+        return {
+          generatedAt: "2026-05-28T09:00:00Z",
+          fromDate: range.fromDate,
+          toDate: range.toDate,
+          timesheetRows: [],
+          aiContributionRows: [],
+          sourceEvents: [
+            {
+              id: "single-day-vscode",
+              source: "active-window",
+              eventType: "editor",
+              app: "VS Code",
+              title: "yesterday.ts - DayTrail",
+              domain: null,
+              urlRedacted: null,
+              workspaceKey: "/repo/daytrail",
+              startedAt,
+              endedAt,
+              durationMs: endedAt - startedAt,
+              sensitivity: "normal",
+              metadataJson: null,
+              createdAt: endedAt,
+            },
+          ],
+          workSessions: [],
+          idleBlocks: [],
+          aiUsage: [],
+          appUsageSummary: {
+            totalDurationMs: endedAt - startedAt,
+            apps: [
+              {
+                app: "VS Code",
+                category: "editor",
+                durationMs: endedAt - startedAt,
+                events: 1,
+                projects: [],
+                aiTools: [],
+                files: [],
+              },
+            ],
+          },
+          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+          automationCandidates: [],
+          unclosedLoopInbox: [],
+          settings,
+          pauseState: { paused: false },
+          projectContext: null,
+          activeWorkContext: null,
+        };
+      }
+
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /app range yesterday/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "export_data_range",
+        expect.objectContaining({
+          range: expect.objectContaining({
+            fromDate: expect.any(String),
+            toDate: expect.any(String),
+          }),
+        }),
+      ),
+    );
+    expect(await screen.findByRole("heading", { name: /what happened yesterday/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /24-hour timeline/i })).toBeInTheDocument();
+    expect(await screen.findByText(/showing 1 active hour/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/selected range summary/i)).not.toBeInTheDocument();
+  });
+
+  it("shows terminal bridge capability labels as Terminal", async () => {
+    const now = new Date("2026-05-28T09:15:00").getTime();
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== "today") {
+        return null;
+      }
+
+      return {
+        localDate: "2026-05-28",
+        tasks: [],
+        quickNotes: [],
+        commitments: [],
+        pendingReplies: [],
+        aiOutputs: [],
+        meetings: [],
+        fieldVisits: [],
+        idleBlocks: [],
+        sourceEvents: [
+          {
+            id: "terminal-dumb-env",
+            source: "terminal-bridge",
+            eventType: "command",
+            app: "dumb",
+            title: "printf daytrail qa --api-key [redacted]",
+            domain: null,
+            urlRedacted: null,
+            workspaceKey: "/Users/alice/work/daytrail",
+            startedAt: now - 60_000,
+            endedAt: now,
+            durationMs: 60_000,
+            sensitivity: "normal",
+            metadataJson: null,
+            createdAt: now,
+          },
+        ],
+        workSessions: [],
+        parallelStreams: [],
+        nextBestAction: null,
+        pauseState: { paused: false },
+        settings: { browserBridgeEnabled: true, excludedDomains: [] },
+        projectContext: { path: "/Users/alice/work/daytrail", source: "terminal-bridge" },
+      };
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect((await screen.findAllByText(/^terminal$/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^dumb$/i)).not.toBeInTheDocument();
   });
 
   it("toggles watcher status from the sidebar", async () => {
@@ -209,10 +426,10 @@ describe("WorkTrace command center", () => {
             source: "active-window",
             eventType: "active_window",
             app: "Code",
-            title: "App.tsx - WorkTrace",
+            title: "App.tsx - DayTrail",
             domain: null,
             urlRedacted: null,
-            workspaceKey: "/Users/alice/work/worktrace",
+            workspaceKey: "/Users/alice/work/daytrail",
             startedAt: now - 900_000,
             endedAt: now - 600_000,
             durationMs: 300_000,
@@ -225,7 +442,7 @@ describe("WorkTrace command center", () => {
             source: "active-window",
             eventType: "active_window",
             app: "Google Chrome",
-            title: "ChatGPT - WorkTrace summary",
+            title: "ChatGPT - DayTrail summary",
             domain: "chatgpt.com",
             urlRedacted: "https://chatgpt.com/c/thread",
             workspaceKey: "chatgpt.com",
@@ -260,11 +477,11 @@ describe("WorkTrace command center", () => {
               aiTools: [],
               projects: [
                 {
-                  label: "worktrace",
+                  label: "daytrail",
                   durationMs: 300_000,
                   events: 1,
                   aiTools: [],
-                  examples: ["App.tsx - WorkTrace"],
+                  examples: ["App.tsx - DayTrail"],
                 },
               ],
             },
@@ -293,7 +510,7 @@ describe("WorkTrace command center", () => {
                       contexts: ["chatgpt.com"],
                     },
                   ],
-                  examples: ["ChatGPT - WorkTrace summary"],
+                  examples: ["ChatGPT - DayTrail summary"],
                 },
               ],
             },
@@ -301,8 +518,8 @@ describe("WorkTrace command center", () => {
         },
         automationCandidates: [
           {
-            id: "automation-worktrace",
-            title: "worktrace",
+            id: "automation-daytrail",
+            title: "daytrail",
             signal: "Repeated app/project pattern",
             reason: "Repeated Today UI inspection",
             occurrences: 3,
@@ -319,7 +536,7 @@ describe("WorkTrace command center", () => {
         },
         pauseState: { paused: true },
         settings: { browserBridgeEnabled: true, excludedDomains: [] },
-        projectContext: { path: "/tmp/worktrace", source: "git" },
+        projectContext: { path: "/tmp/daytrail", source: "git" },
       };
     });
 
@@ -340,7 +557,7 @@ describe("WorkTrace command center", () => {
     expect(screen.getByRole("button", { name: /capture paused/i })).toBeInTheDocument();
     expect(screen.getAllByText(/ai detected/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/chatgpt/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/top apps today/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/today timeline/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/google chrome/i).length).toBeGreaterThan(0);
 
     const dayTrackerRow = screen.getAllByText(/10 AM/i)
@@ -357,7 +574,7 @@ describe("WorkTrace command center", () => {
     await user.click(screen.getAllByRole("button", { name: /sqlite capture block/i })[0]);
 
     expect(screen.getByText(/session details/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/app\.tsx - worktrace/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/app\.tsx - daytrail/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/https:\/\/chatgpt\.com\/c\/thread/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: /close session details/i }));
 
@@ -373,7 +590,7 @@ describe("WorkTrace command center", () => {
     expect(screen.getByText(/app breakdown/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: /google chrome/i })).toBeInTheDocument();
     expect(screen.getByText(/event timeline/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/chatgpt - worktrace summary/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/chatgpt - daytrail summary/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /^activity$/i }));
 
@@ -560,6 +777,7 @@ describe("WorkTrace command center", () => {
           aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
           aiRedactSecrets: true,
           fullClipboardHistory: false,
+          dataRetentionDays: 30,
         },
       },
       null,
@@ -589,6 +807,7 @@ describe("WorkTrace command center", () => {
             aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
             aiRedactSecrets: true,
             fullClipboardHistory: false,
+            dataRetentionDays: 0,
           },
           projectContext: null,
         };
@@ -598,7 +817,36 @@ describe("WorkTrace command center", () => {
         return {
           databasePath: "/Users/alice/Library/Application Support/ai.daytrail.desktop/daytrail.sqlite3",
           backupDir: "/Users/alice/Library/Application Support/ai.daytrail.desktop/backups",
+          databaseBytes: 4096,
+          walBytes: 1024,
+          shmBytes: 512,
+          backupBytes: 8192,
+          totalBytes: 13_824,
+          retentionDays: 30,
         };
+      }
+
+      if (command === "update_settings") {
+        expect(args).toEqual({ patch: { dataRetentionDays: 30 } });
+        return {
+          browserBridgeEnabled: true,
+          excludedDomains: [],
+          aiProvider: "Ollama Local",
+          aiModel: "llama3.1",
+          aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+          aiRedactSecrets: true,
+          fullClipboardHistory: false,
+          dataRetentionDays: 30,
+        };
+      }
+
+      if (command === "prune_captured_data") {
+        expect(args).toEqual({ days: 30 });
+        return { deletedRows: 3 };
+      }
+
+      if (command === "purge_captured_data") {
+        return { deletedRows: 12 };
       }
 
       if (command === "export_settings_config") {
@@ -657,6 +905,22 @@ describe("WorkTrace command center", () => {
     await user.click(screen.getByRole("button", { name: /data storage/i }));
 
     expect(await screen.findByText(/daytrail\.sqlite3/i)).toBeInTheDocument();
+    expect(screen.getByText(/14 KB/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^30 days$/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_settings", {
+        patch: { dataRetentionDays: 30 },
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("prune_captured_data", { days: 30 }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /apply now/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("prune_captured_data", { days: 30 }),
+    );
 
     await user.click(screen.getByRole("button", { name: /export configuration/i }));
     expect(await screen.findByDisplayValue(/"schemaVersion": 1/i)).toBeInTheDocument();
@@ -683,6 +947,10 @@ describe("WorkTrace command center", () => {
       }),
     );
     expect(await screen.findByText(/database restored/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /clear captured data now/i }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("purge_captured_data", undefined));
+    expect(await screen.findByText(/cleared 12 row/i)).toBeInTheDocument();
   });
 
   it("blocks first-run app entry until required capture permission is granted", async () => {
@@ -712,24 +980,14 @@ describe("WorkTrace command center", () => {
         },
         {
           id: "browser-automation",
-          label: "Browser automation",
+          label: "Browser tab context",
           required: false,
           status: "user_prompt",
-          detail: "macOS asks once when DayTrail reads a supported browser's active tab URL.",
+          detail: "Optional. Adds the active browser tab title and domain to your timeline. Skip this if app names are enough.",
           settingsLabel: "Privacy & Security > Automation",
           settingsUrl:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
-          actionLabel: "Open Automation Settings",
-        },
-        {
-          id: "screen-recording",
-          label: "Screen Recording",
-          required: false,
-          status: "not_required",
-          detail: "Not requested because screenshots are off by default.",
-          settingsLabel: null,
-          settingsUrl: null,
-          actionLabel: null,
+          actionLabel: "Check access",
         },
       ],
     };
@@ -797,7 +1055,7 @@ describe("WorkTrace command center", () => {
     expect(screen.getAllByText(/privacy & security > accessibility/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/\/applications\/daytrail\.app/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /restart app/i }).length).toBeGreaterThan(0);
-    expect(screen.getByText(/screenshots are off by default/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/browser tab context/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { name: /^today$/i })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: /open accessibility settings/i })[0]);

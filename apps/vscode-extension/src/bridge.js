@@ -120,7 +120,7 @@ function sendNativeProcessMessage(message, options = {}) {
 }
 
 async function appendBridgeFile(message, options = {}) {
-  const filePath = expandHome(options.filePath ?? "~/.worktrace/editor-bridge.jsonl");
+  const filePath = expandHome(options.filePath ?? "~/.daytrail/editor-bridge.jsonl");
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.appendFile(filePath, `${stableStringify(message)}\n`, "utf8");
   return { ok: true, stored: Array.isArray(message.events) ? message.events.length : 0, transport: "file" };

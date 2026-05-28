@@ -19,7 +19,7 @@ The requirements files in `docs/` are product targets, not a claim that every re
 - AI tool usage signals for ChatGPT, Claude, Codex, Copilot, Gemini, Cursor, Cline, Aider, Continue, and similar tools when detectable from app/browser/editor metadata.
 - Local scratchpad notes, commitments, loop risks, reports, and export payloads.
 
-Screenshots and full clipboard contents are off by default. The app is designed around metadata-first capture.
+Full clipboard contents are off by default. The app is designed around metadata-first capture.
 
 ## Repository Layout
 
@@ -107,19 +107,19 @@ powershell -ExecutionPolicy Bypass -File scripts\install-browser-host.ps1 -Chrom
 zsh:
 
 ```bash
-scripts/worktrace-terminal-bridge.sh --print-zsh-hook >> ~/.zshrc
+bash scripts/daytrail-terminal-bridge.sh --print-zsh-hook >> ~/.zshrc
 ```
 
 bash:
 
 ```bash
-scripts/worktrace-terminal-bridge.sh --print-bash-hook >> ~/.bashrc
+bash scripts/daytrail-terminal-bridge.sh --print-bash-hook >> ~/.bashrc
 ```
 
 PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\worktrace-terminal-bridge.ps1 -PrintProfileSnippet >> $PROFILE
+powershell -ExecutionPolicy Bypass -File scripts\daytrail-terminal-bridge.ps1 -PrintProfileSnippet >> $PROFILE
 ```
 
 ## AI Providers
@@ -141,4 +141,3 @@ Do not commit real API keys, local databases, generated bundles, or captured use
 ## License
 
 Licensed under MIT OR Apache-2.0. See `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE`.
-

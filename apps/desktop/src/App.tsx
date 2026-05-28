@@ -1,12 +1,15 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { FormEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Icon, type IconName } from "./components/Icon";
+import { dateRangeForPreset, formatLocalDateInput, rangePresetLabel, type RangePreset } from "./lib/dateRanges";
 import { buildActivityView } from "./lib/viewModels/activityViewModel";
 import { buildAiImpactView } from "./lib/viewModels/aiImpactViewModel";
 import { isIdleSystemApp, isSimpleVisibleApp } from "./lib/viewModels/appClassification";
 import { buildHourTimelineView, normalizeExperienceSettings, type ExperienceSettingsLike } from "./lib/viewModels/hourTimelineViewModel";
 import { buildDeterministicReportMarkdown, buildReportView } from "./lib/viewModels/reportViewModel";
 import { buildReviewView } from "./lib/viewModels/reviewViewModel";
+import { buildRangeSummaryView } from "./lib/viewModels/rangeSummaryViewModel";
 import { buildSettingsView } from "./lib/viewModels/settingsViewModel";
 import { buildTodayView } from "./lib/viewModels/todayViewModel";
 
@@ -45,7 +48,10 @@ type ActionItem = {
   id: string;
   title: string;
   source: string;
-  state: "open" | "done" | "snoozed";
+  reason: string;
+  primaryAction: string;
+  evidenceCount?: number;
+  state: "open" | "done" | "snoozed" | "ignored";
 };
 
 type StreamEvent = {
@@ -118,11 +124,18 @@ type BackendSettings = {
   showRawEvents?: boolean;
   showCaptureConfidence?: boolean;
   showAiDetails?: "summary" | "detailed";
+  dataRetentionDays?: number;
 };
 
 type BackendStorageLocationInfo = {
   databasePath: string;
   backupDir: string;
+  databaseBytes: number;
+  walBytes: number;
+  shmBytes: number;
+  backupBytes: number;
+  totalBytes: number;
+  retentionDays: number;
 };
 
 type BackendTerminalBridgeInstallResult = {
@@ -139,6 +152,10 @@ type BackendDatabaseTransferResult = {
   bytes: number;
   generatedAt: string;
   preRestoreBackupPath?: string | null;
+};
+
+type BackendPrivacyDeleteSummary = {
+  deletedRows: number;
 };
 
 type BackendCapturePermissionSummary = {
@@ -470,6 +487,11 @@ type BackendExportPayload = {
     destination: string;
     status: string;
   }>;
+  tasks?: BackendTodaySnapshot["tasks"];
+  quickNotes?: BackendTodaySnapshot["quickNotes"];
+  commitments?: BackendTodaySnapshot["commitments"];
+  pendingReplies?: BackendTodaySnapshot["pendingReplies"];
+  outputs?: BackendTodaySnapshot["aiOutputs"];
   sourceEvents: BackendSourceEvent[];
   workSessions: BackendTodaySnapshot["workSessions"];
   idleBlocks: BackendTodaySnapshot["idleBlocks"];
@@ -491,6 +513,10 @@ type BackendExportPayload = {
   aiUsageSummary: BackendAiUsageSummary;
   automationCandidates: BackendAutomationCandidate[];
   unclosedLoopInbox: BackendUnclosedLoopItem[];
+  settings?: BackendSettings;
+  pauseState?: BackendTodaySnapshot["pauseState"];
+  projectContext?: BackendTodaySnapshot["projectContext"];
+  activeWorkContext?: BackendTodaySnapshot["activeWorkContext"];
 };
 
 type BackendReport = {
@@ -761,6 +787,69 @@ Start capture from the desktop watcher, browser bridge, editor bridge, or termin
   return buildDeterministicReportMarkdown(snapshot, settings);
 }
 
+function exportPayloadToSnapshot(
+  payload: BackendExportPayload | null,
+  fallback: BackendTodaySnapshot | null,
+): BackendTodaySnapshot | null {
+  if (!payload) {
+    return null;
+  }
+
+  const fallbackSettings = fallback?.settings ?? {
+    browserBridgeEnabled: true,
+    excludedDomains: [],
+    launchAtLogin: true,
+  };
+  const rangeLabel =
+    payload.fromDate && payload.toDate && payload.fromDate !== payload.toDate
+      ? `${payload.fromDate} to ${payload.toDate}`
+      : (payload.fromDate ?? payload.toDate ?? fallback?.localDate ?? "");
+
+  return {
+    localDate: rangeLabel,
+    tasks: payload.tasks ?? [],
+    quickNotes: payload.quickNotes ?? [],
+    commitments: payload.commitments ?? [],
+    pendingReplies: payload.pendingReplies ?? [],
+    aiOutputs: payload.outputs ?? [],
+    meetings: [],
+    fieldVisits: [],
+    idleBlocks: payload.idleBlocks ?? [],
+    sourceEvents: payload.sourceEvents ?? [],
+    aiUsageSummary: payload.aiUsageSummary,
+    appUsageSummary: payload.appUsageSummary,
+    automationCandidates: payload.automationCandidates ?? [],
+    captureHealth: fallback?.captureHealth,
+    unclosedLoopInbox: payload.unclosedLoopInbox ?? [],
+    aiOutputLedger: fallback?.aiOutputLedger ?? [],
+    menuBarSummary: fallback?.menuBarSummary,
+    loopRisks: fallback?.loopRisks ?? [],
+    workSessions: payload.workSessions ?? [],
+    parallelStreams: [],
+    nextBestAction: null,
+    pauseState: payload.pauseState ?? fallback?.pauseState ?? { paused: false },
+    settings: payload.settings ?? fallbackSettings,
+    projectContext: payload.projectContext ?? fallback?.projectContext ?? null,
+    activeWorkContext: payload.activeWorkContext ?? fallback?.activeWorkContext ?? null,
+  };
+}
+
+function formatBytes(bytes?: number | null) {
+  if (!bytes || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
 async function invokeTauri<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -844,17 +933,47 @@ function dayStartMsFor(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-function hourRangeForToday(hour: number) {
-  const start = dayStartMsFor() + hour * 60 * 60 * 1000;
+function dayStartMsForLocalDate(value?: string | null) {
+  if (!value) {
+    return dayStartMsFor();
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return dayStartMsFor();
+  }
+
+  return new Date(year, month - 1, day).getTime();
+}
+
+function formatLocalDateHeading(value?: string | null) {
+  if (!value) {
+    return "this day";
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return "this day";
+  }
+
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function hourRangeForDay(hour: number, baseDayStartMs = dayStartMsFor()) {
+  const start = baseDayStartMs + hour * 60 * 60 * 1000;
   return { startMs: start, endMs: start + 60 * 60 * 1000 };
 }
 
-function hoursToRange(hours: number[]) {
+function hoursToRange(hours: number[], baseDayStartMs = dayStartMsFor()) {
   const sorted = [...new Set(hours)].sort((left, right) => left - right);
   const first = sorted[0] ?? new Date().getHours();
   const last = sorted[sorted.length - 1] ?? first;
-  const start = hourRangeForToday(first).startMs;
-  const end = hourRangeForToday(last).endMs;
+  const start = hourRangeForDay(first, baseDayStartMs).startMs;
+  const end = hourRangeForDay(last, baseDayStartMs).endMs;
   return { startMs: start, endMs: end };
 }
 
@@ -943,7 +1062,36 @@ function compactDisplayLabel(value?: string | null) {
   if (normalized === "code" || normalized === "visual studio code") {
     return "VS Code";
   }
-  if (normalized === "/bin/zsh" || normalized === "zsh" || normalized === "iterm2") {
+  if (["warp", "warpterminal", "warp terminal"].includes(normalized)) {
+    return "Warp";
+  }
+  if (normalized === "iterm" || normalized === "iterm2") {
+    return "iTerm";
+  }
+  if (
+    [
+      "/bin/zsh",
+      "/bin/bash",
+      "zsh",
+      "bash",
+      "fish",
+      "pwsh",
+      "powershell",
+      "dumb",
+      "ansi",
+      "vt100",
+      "xterm",
+      "xterm-256color",
+      "screen",
+      "tmux",
+      "terminal",
+      "terminal.app",
+      "apple_terminal",
+      "apple terminal",
+      "windows terminal",
+      "com.apple.terminal",
+    ].includes(normalized)
+  ) {
     return "Terminal";
   }
   if (cleaned.startsWith("/") || cleaned.startsWith("~/") || cleaned.includes("\\")) {
@@ -1195,15 +1343,23 @@ const DOMAIN_CATEGORY_COLORS: Record<DomainCategory, string> = {
 
 const appIconCache = new Map<string, string | null>();
 
+function specialAppIconName(appName: string) {
+  const normalized = appName.trim().toLowerCase();
+  if (normalized === "codex" || normalized.includes("openai codex")) return "codex";
+  return null;
+}
+
 function AppIcon({ appName, className = "sidebar-app-icon" }: { appName: string; className?: string }) {
+  const specialIcon = specialAppIconName(appName);
   const [iconSrc, setIconSrc] = useState<string | null>(() => {
     const cached = appIconCache.get(appName);
     return cached !== undefined ? cached : null;
   });
-  const [loading, setLoading] = useState(() => !appIconCache.has(appName));
+  const [loading, setLoading] = useState(() => !specialIcon && !appIconCache.has(appName));
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (specialIcon) return;
     if (appIconCache.has(appName)) return;
     let cancelled = false;
     invokeTauri<string | null>("get_app_icon", { appName }).then((src) => {
@@ -1221,7 +1377,15 @@ function AppIcon({ appName, className = "sidebar-app-icon" }: { appName: string;
       }
     });
     return () => { cancelled = true; };
-  }, [appName]);
+  }, [appName, specialIcon]);
+
+  if (specialIcon === "codex") {
+    return (
+      <span aria-label={appName} className={`${className} fallback-app-icon fallback-app-icon-codex`} role="img">
+        Cx
+      </span>
+    );
+  }
 
   if (!loading && iconSrc && !failed) {
     return (
@@ -1390,9 +1554,13 @@ function parseBrowserTab(event: BackendSourceEvent): HourFileEntry | null {
 
 // ── End file-breakdown helpers ─────────────────────────────────────────────
 
-function buildHourBuckets(sourceEvents: BackendSourceEvent[], manualBlocks: ManualTimeBlock[] = []) {
+function buildHourBuckets(
+  sourceEvents: BackendSourceEvent[],
+  manualBlocks: ManualTimeBlock[] = [],
+  baseDayStartMs = dayStartMsFor(),
+) {
   const hourMs = 60 * 60 * 1000;
-  const dayStart = dayStartMsFor();
+  const dayStart = baseDayStartMs;
   const dayEnd = dayStart + 24 * hourMs;
   const working = Array.from({ length: 24 }, (_, hour) => ({
     hour,
@@ -1684,17 +1852,36 @@ function mapNotes(snapshot: BackendTodaySnapshot | null): Note[] {
   }));
 }
 
+function formatLoopLabel(value: string | null | undefined) {
+  return (value || "review")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
   if (!snapshot) {
     return [];
   }
 
   const actions: ActionItem[] = [];
+  actions.push(
+    ...(snapshot.unclosedLoopInbox ?? []).slice(0, 6).map((item) => ({
+      id: `loop-inbox-${item.id}`,
+      title: item.title,
+      source: item.source || formatLoopLabel(item.category),
+      reason: item.detail || "DayTrail found source evidence that needs a quick decision.",
+      primaryAction: item.primaryAction || "Review",
+      evidenceCount: item.evidenceIds.length,
+      state: "open" as const,
+    })),
+  );
   if (snapshot.nextBestAction) {
     actions.push({
       id: `nba-${snapshot.nextBestAction.sourceType}-${snapshot.nextBestAction.sourceId}`,
       title: snapshot.nextBestAction.title,
-      source: snapshot.nextBestAction.reason,
+      source: formatLoopLabel(snapshot.nextBestAction.sourceType),
+      reason: snapshot.nextBestAction.reason,
+      primaryAction: "Review",
       state: "open",
     });
   }
@@ -1702,13 +1889,17 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
     ...snapshot.pendingReplies.slice(0, 3).map((reply) => ({
       id: `reply-${reply.id}`,
       title: `Reply to ${reply.subject}`,
-      source: reply.latestSender ?? "Unanswered message",
+      source: reply.latestSender ?? "Message",
+      reason: "A captured conversation still looks unanswered.",
+      primaryAction: "Reply",
       state: "open" as const,
     })),
     ...snapshot.commitments.slice(0, 3).map((commitment) => ({
       id: `commitment-${commitment.id}`,
       title: commitment.title,
       source: commitment.source ?? "Commitment tracker",
+      reason: "A promise or task is still open.",
+      primaryAction: "Mark done",
       state: "open" as const,
     })),
     ...snapshot.aiOutputs
@@ -1717,7 +1908,9 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       .map((output) => ({
         id: `output-${output.id}`,
         title: output.title,
-        source: `AI-assisted work - ${output.outputType}`,
+        source: `AI output - ${output.outputType}`,
+        reason: "AI generated or drafted something that has not been accepted or completed.",
+        primaryAction: "Review output",
         state: "open" as const,
       })),
     ...snapshot.idleBlocks
@@ -1726,7 +1919,9 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       .map((block) => ({
         id: `idle-${block.id}`,
         title: `Classify ${Math.max(1, Math.round(block.durationMs / 60_000))}m idle block`,
-        source: "Smart idle recovery",
+        source: "Idle recovery",
+        reason: "This gap needs a simple label so reports do not guess.",
+        primaryAction: "Classify",
         state: "open" as const,
       })),
     ...(snapshot.loopRisks ?? [])
@@ -1742,7 +1937,9 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       .map((risk) => ({
         id: `loop-${risk.riskType}-${risk.id}`,
         title: risk.title,
-        source: `${risk.riskType} - ${risk.reason}`,
+        source: risk.source || formatLoopLabel(risk.riskType),
+        reason: risk.reason,
+        primaryAction: "Review",
         state: "open" as const,
       })),
   );
@@ -1750,7 +1947,7 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
   const seenCategories = new Set<string>();
 
   return actions.filter((action) => {
-    const text = `${action.title} ${action.source}`.toLowerCase();
+    const text = `${action.title} ${action.source} ${action.reason}`.toLowerCase();
     const category =
       text.includes("idle") || text.includes("away")
         ? "idle-away"
@@ -2177,6 +2374,7 @@ export default function App() {
   const [quickNote, setQuickNote] = useState("");
   const [notes, setNotes] = useState<Note[]>(defaultNotes);
   const [actions, setActions] = useState<ActionItem[]>(initialActions);
+  const [actionStates, setActionStates] = useState<Record<string, ActionItem["state"]>>({});
   const [folders, setFolders] = useState<WorkspaceFolder[]>(initialFolders);
   const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig);
   const [draftAiConfig, setDraftAiConfig] = useState<AiConfig>(defaultAiConfig);
@@ -2206,32 +2404,51 @@ export default function App() {
   const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
 
   // Review / timesheet state
-  const [reviewFromDate, setReviewFromDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [reviewToDate, setReviewToDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reviewFromDate, setReviewFromDate] = useState(() => formatLocalDateInput(new Date()));
+  const [reviewToDate, setReviewToDate] = useState(() => formatLocalDateInput(new Date()));
   const [reviewSessions, setReviewSessions] = useState<BackendWorkSessionSummary[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [exportingTimesheet, setExportingTimesheet] = useState(false);
+  const [timelineRangePreset, setTimelineRangePreset] = useState<RangePreset>("today");
+  const [timelineFromDate, setTimelineFromDate] = useState(() => formatLocalDateInput(new Date()));
+  const [timelineToDate, setTimelineToDate] = useState(() => formatLocalDateInput(new Date()));
+  const [timelineRangePayload, setTimelineRangePayload] = useState<BackendExportPayload | null>(null);
+  const [timelineRangeStatus, setTimelineRangeStatus] = useState("Today");
 
-  const displayStreams = useMemo(() => mapStreams(todaySnapshot), [todaySnapshot]);
-  const displaySessions = useMemo(() => mapSessions(todaySnapshot), [todaySnapshot]);
+  const effectiveSnapshot = useMemo(
+    () =>
+      timelineRangePreset === "today"
+        ? todaySnapshot
+        : exportPayloadToSnapshot(timelineRangePayload, todaySnapshot),
+    [timelineRangePayload, timelineRangePreset, todaySnapshot],
+  );
+  const displayActions = useMemo(() => {
+    const baseActions = timelineRangePreset === "today" ? actions : mapActions(effectiveSnapshot);
+    return baseActions.map((action) => ({
+      ...action,
+      state: actionStates[action.id] ?? action.state,
+    }));
+  }, [actionStates, actions, effectiveSnapshot, timelineRangePreset]);
+  const displayStreams = useMemo(() => mapStreams(effectiveSnapshot), [effectiveSnapshot]);
+  const displaySessions = useMemo(() => mapSessions(effectiveSnapshot), [effectiveSnapshot]);
   const experienceSettings = useMemo(
-    () => normalizeExperienceSettings(todaySnapshot?.settings),
-    [todaySnapshot?.settings],
+    () => normalizeExperienceSettings(effectiveSnapshot?.settings),
+    [effectiveSnapshot?.settings],
   );
   const isSimpleMode = experienceSettings.experienceMode === "simple";
   const workSourceEvents = useMemo(
-    () => (todaySnapshot?.sourceEvents ?? []).filter(isWorkTimelineEvent),
-    [todaySnapshot?.sourceEvents],
+    () => (effectiveSnapshot?.sourceEvents ?? []).filter(isWorkTimelineEvent),
+    [effectiveSnapshot?.sourceEvents],
   );
   const displayApps = useMemo(
     () => {
-      const apps = todaySnapshot?.appUsageSummary?.apps ?? [];
+      const apps = effectiveSnapshot?.appUsageSummary?.apps ?? [];
       if (!isSimpleMode || experienceSettings.showSystemApps) {
         return apps;
       }
       return apps.filter((app) => isSimpleVisibleApp(app.app, app.category));
     },
-    [experienceSettings.showSystemApps, isSimpleMode, todaySnapshot],
+    [effectiveSnapshot, experienceSettings.showSystemApps, isSimpleMode],
   );
 
   // Most recently captured app — always visible in sidebar even if outside top-8
@@ -2250,15 +2467,15 @@ export default function App() {
     // Pin active app at top, keep total at 8
     return [liveEntry, ...top8.filter((a) => a.app !== liveAppName).slice(0, 7)];
   }, [displayApps, liveAppName]);
-  const displaySourceFeed = useMemo(() => mapSourceFeed(todaySnapshot), [todaySnapshot]);
-  const displayAiThreads = useMemo(() => mapAiThreads(todaySnapshot), [todaySnapshot]);
-  const displayMemoryFacts = useMemo(() => mapMemoryFacts(todaySnapshot), [todaySnapshot]);
+  const displaySourceFeed = useMemo(() => mapSourceFeed(effectiveSnapshot), [effectiveSnapshot]);
+  const displayAiThreads = useMemo(() => mapAiThreads(effectiveSnapshot), [effectiveSnapshot]);
+  const displayMemoryFacts = useMemo(() => mapMemoryFacts(effectiveSnapshot), [effectiveSnapshot]);
   const displayLoopItems = useMemo(
     () =>
-      (todaySnapshot?.unclosedLoopInbox ?? []).filter(
+      (effectiveSnapshot?.unclosedLoopInbox ?? []).filter(
         (item) => !dismissedLoopIds.has(item.id),
       ),
-    [dismissedLoopIds, todaySnapshot],
+    [dismissedLoopIds, effectiveSnapshot],
   );
 
   const currentView = navigation.find((item) => item.id === activeView);
@@ -2278,9 +2495,9 @@ export default function App() {
     displayStreams[0] ??
     emptyStream;
   const latestStream = displayStreams[0] ?? selectedStream;
-  const openActions = actions.filter((action) => action.state === "open");
+  const openActions = displayActions.filter((action) => action.state === "open");
   const selectedFolders = folders.filter((folder) => folder.selected);
-  const pendingReplyCount = todaySnapshot?.pendingReplies.length ?? 0;
+  const pendingReplyCount = effectiveSnapshot?.pendingReplies.length ?? 0;
 
   async function applyTodaySnapshot(snapshot: BackendTodaySnapshot) {
     const mappedStreams = mapStreams(snapshot);
@@ -2664,6 +2881,7 @@ export default function App() {
   }
 
   function updateAction(actionId: string, state: ActionItem["state"]) {
+    setActionStates((currentStates) => ({ ...currentStates, [actionId]: state }));
     setActions((currentActions) =>
       currentActions.map((action) =>
         action.id === actionId ? { ...action, state } : action,
@@ -2690,13 +2908,13 @@ export default function App() {
     });
 
     if (!saved) {
-      setActions((currentActions) =>
-        currentActions.map((item) =>
-          item.id === itemId
-            ? { ...item, state: action === "snoozed" ? "snoozed" : "done" }
-            : item,
-        ),
-      );
+      setDismissedLoopIds((current) => {
+        const next = new Set(current);
+        next.delete(itemId);
+        return next;
+      });
+      addToast("warning", "Review action not saved", "The item is still visible until DayTrail can save your decision.");
+      await refreshTodaySnapshot();
     }
   }
 
@@ -2989,6 +3207,54 @@ export default function App() {
     await generateRitual("daily");
   }
 
+  async function loadTimelineRange(
+    preset: RangePreset,
+    customRange?: { fromDate: string; toDate: string },
+  ) {
+    if (preset === "today") {
+      setTimelineRangePreset("today");
+      setTimelineRangePayload(null);
+      setTimelineRangeStatus("Today");
+      const range = dateRangeForPreset("today");
+      setTimelineFromDate(range.fromDate);
+      setTimelineToDate(range.toDate);
+      setExportFromDate(range.fromDate);
+      setExportToDate(range.toDate);
+      setReviewFromDate(range.fromDate);
+      setReviewToDate(range.toDate);
+      return;
+    }
+
+    const range = customRange ?? (preset === "custom"
+      ? { fromDate: timelineFromDate, toDate: timelineToDate }
+      : dateRangeForPreset(preset));
+    setTimelineRangePreset(preset);
+    setTimelineFromDate(range.fromDate);
+    setTimelineToDate(range.toDate);
+    setExportFromDate(range.fromDate);
+    setExportToDate(range.toDate);
+    setReviewFromDate(range.fromDate);
+    setReviewToDate(range.toDate);
+    setTimelineRangeStatus(`Loading ${rangePresetLabel(preset).toLowerCase()}...`);
+
+    const payload = await invokeTauri<BackendExportPayload>("export_data_range", {
+      range: {
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+      },
+    });
+
+    if (!payload) {
+      setTimelineRangePayload(null);
+      setTimelineRangeStatus("Range unavailable");
+      addToast("error", "Range unavailable", "Could not load that date range.");
+      return;
+    }
+
+    setTimelineRangePayload(payload);
+    setTimelineRangeStatus(`${rangePresetLabel(preset)} loaded`);
+  }
+
   function exportRangeArgs() {
     return {
       range: {
@@ -3100,6 +3366,88 @@ export default function App() {
     await loadStorageLocations();
   }
 
+  async function saveRetentionDays(days: number) {
+    const normalizedDays = Number.isFinite(days) ? Math.max(0, Math.round(days)) : 0;
+    setStorageStatus("Saving retention policy...");
+    const savedSettings = await invokeTauri<BackendSettings>("update_settings", {
+      patch: { dataRetentionDays: normalizedDays },
+    });
+
+    if (!savedSettings) {
+      setStorageStatus("Retention policy failed");
+      addToast("error", "Retention not saved", "Could not save the data retention setting.");
+      return;
+    }
+
+    setTodaySnapshot((previous) =>
+      previous ? { ...previous, settings: { ...previous.settings, ...savedSettings } } : previous,
+    );
+
+    if (normalizedDays > 0) {
+      const pruned = await invokeTauri<BackendPrivacyDeleteSummary>("prune_captured_data", {
+        days: normalizedDays,
+      });
+      setStorageStatus(
+        pruned
+          ? `Keeping last ${normalizedDays} days. Removed ${pruned.deletedRows} old row(s).`
+          : `Keeping last ${normalizedDays} days`,
+      );
+      await refreshTodaySnapshot();
+    } else {
+      setStorageStatus("Keeping all captured data");
+    }
+
+    addToast("success", "Retention updated", normalizedDays > 0 ? `Keeping last ${normalizedDays} days.` : "Keeping all captured data.");
+    await loadStorageLocations();
+  }
+
+  async function applyRetentionNow() {
+    const days = todaySnapshot?.settings.dataRetentionDays ?? 0;
+    if (days <= 0) {
+      setStorageStatus("Retention is set to keep all data");
+      addToast("info", "No retention limit", "Choose 30, 90, or 180 days before applying retention.");
+      return;
+    }
+
+    setStorageStatus("Applying retention...");
+    const pruned = await invokeTauri<BackendPrivacyDeleteSummary>("prune_captured_data", { days });
+    if (!pruned) {
+      setStorageStatus("Retention prune failed");
+      addToast("error", "Retention failed", "Could not delete old captured data.");
+      return;
+    }
+
+    setStorageStatus(`Removed ${pruned.deletedRows} old row(s).`);
+    addToast("success", "Retention applied", `${pruned.deletedRows} old row(s) removed.`);
+    await refreshTodaySnapshot();
+    await loadStorageLocations();
+  }
+
+  async function clearCapturedDataNow() {
+    const confirmed = window.confirm(
+      "Clear captured DayTrail activity now? Settings and backups stay, but timelines, sessions, review items, reports, and memory will be removed.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setStorageStatus("Clearing captured data...");
+    const cleared = await invokeTauri<BackendPrivacyDeleteSummary>("purge_captured_data");
+    if (!cleared) {
+      setStorageStatus("Clear failed");
+      addToast("error", "Clear failed", "Could not clear captured data.");
+      return;
+    }
+
+    setStorageStatus(`Cleared ${cleared.deletedRows} row(s).`);
+    addToast("success", "Captured data cleared", `${cleared.deletedRows} row(s) removed.`);
+    setTimelineRangePayload(null);
+    setTimelineRangePreset("today");
+    setTimelineRangeStatus("Today");
+    await refreshTodaySnapshot();
+    await loadStorageLocations();
+  }
+
   async function restoreDatabase() {
     const path = databaseRestorePath.trim();
 
@@ -3139,9 +3487,17 @@ export default function App() {
     setActiveView("rituals");
     setActiveRitual(ritual);
 
-    const report = await invokeTauri<BackendReport>("generate_daily_report");
+    const report =
+      timelineRangePreset === "today"
+        ? await invokeTauri<BackendReport>("generate_daily_report")
+        : await invokeTauri<BackendReport>("analyze_export_range", {
+            range: {
+              fromDate: timelineFromDate,
+              toDate: timelineToDate,
+            },
+          });
 
-    setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, todaySnapshot, experienceSettings));
+    setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, effectiveSnapshot, experienceSettings));
   }
 
   async function regenerateContextData() {
@@ -3226,8 +3582,8 @@ export default function App() {
         </nav>
 
         {!isSimpleMode && sidebarApps.length > 0 && (
-          <section className="sidebar-section sidebar-apps" aria-label="Apps today">
-            <span className="sidebar-label">Apps Today</span>
+          <section className="sidebar-section sidebar-apps" aria-label="Apps in selected range">
+            <span className="sidebar-label">{timelineRangePreset === "today" ? "Apps Today" : "Apps in Range"}</span>
             {sidebarApps.map((app) => (
               <button
                 className={`sidebar-app-row${app.app === liveAppName ? " sidebar-app-row--live" : ""}`}
@@ -3312,11 +3668,22 @@ export default function App() {
         </header>
 
         <section className="content-pane" aria-live="polite">
+          {activeView !== "settings" && (
+            <GlobalRangeControls
+              fromDate={timelineFromDate}
+              onLoadRange={loadTimelineRange}
+              preset={timelineRangePreset}
+              setFromDate={setTimelineFromDate}
+              setToDate={setTimelineToDate}
+              status={timelineRangeStatus}
+              toDate={timelineToDate}
+            />
+          )}
           {activeView === "today" && (
             <TodayView
-              actions={actions}
-              aiUsageSummary={todaySnapshot?.aiUsageSummary}
-              appUsageSummary={todaySnapshot?.appUsageSummary}
+              actions={displayActions}
+              aiUsageSummary={effectiveSnapshot?.aiUsageSummary}
+              appUsageSummary={effectiveSnapshot?.appUsageSummary}
               onGenerateReport={generateDailyReport}
               onOpenHour={(hour) => {
                 setActiveHourDetail(hour);
@@ -3325,23 +3692,32 @@ export default function App() {
               onOpenWorkContextEditor={(initialForm) => setWorkContextEditor(initialForm)}
               onClearWorkContext={clearWorkContext}
               onUpdateAction={updateAction}
-              idleGapCount={todaySnapshot?.idleBlocks.filter((block) => !block.classified).length ?? 0}
+              idleGapCount={effectiveSnapshot?.idleBlocks.filter((block) => !block.classified).length ?? 0}
               isPaused={isPaused}
               pendingReplyCount={pendingReplyCount}
               selectedStream={latestStream}
               sourceEvents={workSourceEvents}
               sessions={displaySessions}
-              settings={todaySnapshot?.settings}
-              snapshot={todaySnapshot}
+              settings={effectiveSnapshot?.settings}
+              snapshot={effectiveSnapshot}
               appCount={displayApps.length}
               bridgeStatus={bridgeStatus}
               backendReady={backendReady}
+              rangePayload={timelineRangePayload}
+              rangeFromDate={timelineFromDate}
+              rangePreset={timelineRangePreset}
+              rangeStatus={timelineRangeStatus}
+              rangeToDate={timelineToDate}
             />
           )}
           {activeView === "hour" && (
             <HourDetailView
               bucket={
-                buildHourBuckets(workSourceEvents, manualBlocksFromIdleBlocks(todaySnapshot?.idleBlocks))[
+                buildHourBuckets(
+                  workSourceEvents,
+                  manualBlocksFromIdleBlocks(effectiveSnapshot?.idleBlocks),
+                  dayStartMsForLocalDate(timelineFromDate),
+                )[
                   activeHourDetail ?? new Date().getHours()
                 ]
               }
@@ -3349,17 +3725,17 @@ export default function App() {
               onEditManualBlock={(block) => setWorkContextEditor(manualBlockToEditorState(block))}
               onBack={() => setActiveView("today")}
               onOpenActivity={() => setActiveView("apps")}
-              settings={todaySnapshot?.settings}
+              settings={effectiveSnapshot?.settings}
             />
           )}
           {activeView === "apps" && (
             isSimpleMode ? (
-              <SimpleActivityView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
+              <SimpleActivityView settings={effectiveSnapshot?.settings} snapshot={effectiveSnapshot} />
             ) : (
               <AppsView
                 activeAppName={activeAppName}
                 setActiveAppName={setActiveAppName}
-                summary={todaySnapshot?.appUsageSummary}
+                summary={effectiveSnapshot?.appUsageSummary}
                 sourceEvents={workSourceEvents}
               />
             )
@@ -3369,20 +3745,21 @@ export default function App() {
           )}
           {activeView === "ai" && (
             isSimpleMode ? (
-              <SimpleAiImpactView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
+              <SimpleAiImpactView settings={effectiveSnapshot?.settings} snapshot={effectiveSnapshot} />
             ) : (
               <AiLedgerView
-                ledger={todaySnapshot?.aiOutputLedger ?? []}
-                summary={todaySnapshot?.aiUsageSummary}
-                appSummary={todaySnapshot?.appUsageSummary}
-                sourceEvents={todaySnapshot?.sourceEvents ?? []}
+                ledger={effectiveSnapshot?.aiOutputLedger ?? []}
+                summary={effectiveSnapshot?.aiUsageSummary}
+                appSummary={effectiveSnapshot?.appUsageSummary}
+                sourceEvents={effectiveSnapshot?.sourceEvents ?? []}
+                sessions={effectiveSnapshot?.workSessions ?? []}
               />
             )
           )}
           {activeView === "automation" && (
             <AutomationView
               aiProvider={aiConfig.provider}
-              candidates={todaySnapshot?.automationCandidates ?? []}
+              candidates={effectiveSnapshot?.automationCandidates ?? []}
               exportFromDate={exportFromDate}
               exportPreview={exportPreview}
               exportStatus={exportStatus}
@@ -3406,22 +3783,10 @@ export default function App() {
             />
           )}
           {activeView === "review" && (
-            isSimpleMode ? (
-              <NeedsReviewSimpleView settings={todaySnapshot?.settings} snapshot={todaySnapshot} />
-            ) : (
-              <ReviewView
-                sessions={reviewSessions}
-                loading={reviewLoading}
-                fromDate={reviewFromDate}
-                toDate={reviewToDate}
-                onFromDate={setReviewFromDate}
-                onToDate={setReviewToDate}
-                onLoad={loadReviewSessions}
-                onUpdate={updateSessionBilling}
-                onExport={exportTimesheetMarkdown}
-                exporting={exportingTimesheet}
-              />
-            )
+            <LoopsView
+              items={displayLoopItems}
+              onLoopAction={handleLoopAction}
+            />
           )}
           {activeView === "rituals" && (
             <RitualsView
@@ -3429,9 +3794,9 @@ export default function App() {
               onGenerateReport={() => generateRitual(activeRitual)}
               onRegenerateContext={regenerateContextData}
               reportMarkdown={reportMarkdown}
-              settings={todaySnapshot?.settings}
+              settings={effectiveSnapshot?.settings}
               sourceFeed={displaySourceFeed}
-              snapshot={todaySnapshot}
+              snapshot={effectiveSnapshot}
             />
           )}
           {activeView === "memory" && (
@@ -3439,7 +3804,7 @@ export default function App() {
               contextPack={contextPack}
               facts={displayMemoryFacts}
               onDeleteFact={deleteMemoryFact}
-              snapshot={todaySnapshot}
+              snapshot={effectiveSnapshot}
             />
           )}
           {activeView === "settings" && (
@@ -3451,8 +3816,10 @@ export default function App() {
               folders={folders}
               launchAtLogin={draftLaunchAtLogin}
               onBackupDatabase={backupDatabase}
+              onClearCapturedData={clearCapturedDataNow}
               onExportSettingsConfig={exportSettingsConfig}
               onImportSettingsConfig={importSettingsConfig}
+              onApplyRetentionNow={applyRetentionNow}
               onLoadStorageInfo={loadStorageLocations}
               onInstallTerminalBridge={installTerminalBridge}
               onOpenCapturePermission={openCapturePermissionSettings}
@@ -3462,6 +3829,7 @@ export default function App() {
               onRestartApp={restartDayTrail}
               onTriggerBrowserAutomation={triggerBrowserAutomation}
               onRestoreDatabase={restoreDatabase}
+              onSaveRetentionDays={saveRetentionDays}
               onSaveExperienceSettings={saveExperienceSettings}
               permissionStatus={permissionStatus}
               permissionSummary={permissionSummary}
@@ -3617,7 +3985,7 @@ function PermissionSetupView({
           <p>
             {stillMissingAfterCheck
               ? "macOS may have a stale or mismatched grant. Click \"Fix accessibility\" — it clears the old entry and opens System Settings so you can re-grant in one step."
-              : "DayTrail needs Accessibility access to identify the active app and window title. It does not capture screenshots, keystrokes, clipboard text, or file contents."}
+              : "DayTrail needs Accessibility access to identify the active app and window title. It does not capture keystrokes, clipboard text, or file contents."}
           </p>
           {stillMissingAfterCheck && (
             <ol className="permission-steps">
@@ -3832,7 +4200,7 @@ function permissionStatusLabel(status: string) {
     return "Needs access";
   }
   if (status === "user_prompt") {
-    return "Prompts when needed";
+    return "Optional";
   }
   if (status === "limited") {
     return "Partial access";
@@ -3847,6 +4215,85 @@ function permissionStatusLabel(status: string) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function GlobalRangeControls({
+  fromDate,
+  onLoadRange,
+  preset,
+  setFromDate,
+  setToDate,
+  status,
+  toDate,
+}: {
+  fromDate: string;
+  onLoadRange: (preset: RangePreset, customRange?: { fromDate: string; toDate: string }) => void;
+  preset: RangePreset;
+  setFromDate: (value: string) => void;
+  setToDate: (value: string) => void;
+  status: string;
+  toDate: string;
+}) {
+  const applyPreset = (nextPreset: RangePreset) => {
+    if (nextPreset === "custom") {
+      onLoadRange("custom", { fromDate, toDate });
+      return;
+    }
+    onLoadRange(nextPreset);
+  };
+
+  return (
+    <section className="global-range-toolbar" aria-label="Selected date range">
+      <div className="global-range-copy">
+        <span>Showing</span>
+        <strong>{rangePresetLabel(preset)}</strong>
+      </div>
+      <div className="range-controls" aria-label="App date range">
+        {(["today", "yesterday", "last7", "thisMonth", "custom"] as RangePreset[]).map((option) => (
+          <button
+            aria-label={`App range ${rangePresetLabel(option)}`}
+            aria-pressed={preset === option}
+            className="range-chip"
+            key={option}
+            onClick={() => applyPreset(option)}
+            type="button"
+          >
+            {rangePresetLabel(option)}
+          </button>
+        ))}
+      </div>
+      {preset === "custom" && (
+        <div className="custom-range-row">
+          <label>
+            From
+            <input
+              aria-label="From"
+              type="date"
+              value={fromDate}
+              onChange={(event) => setFromDate(event.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <input
+              aria-label="To"
+              type="date"
+              value={toDate}
+              onChange={(event) => setToDate(event.target.value)}
+            />
+          </label>
+          <button
+            className="button compact"
+            onClick={() => applyPreset("custom")}
+            type="button"
+          >
+            Load range
+          </button>
+        </div>
+      )}
+      <span className="global-range-status">{status}</span>
+    </section>
+  );
+}
+
 function TodayView({
   actions,
   aiUsageSummary,
@@ -3859,6 +4306,11 @@ function TodayView({
   onClearWorkContext,
   onUpdateAction,
   pendingReplyCount,
+  rangePayload,
+  rangeFromDate,
+  rangePreset,
+  rangeStatus,
+  rangeToDate,
   selectedStream,
   sourceEvents,
   sessions,
@@ -3879,6 +4331,11 @@ function TodayView({
   onClearWorkContext: () => void;
   onUpdateAction: (actionId: string, state: ActionItem["state"]) => void;
   pendingReplyCount: number;
+  rangePayload: BackendExportPayload | null;
+  rangeFromDate: string;
+  rangePreset: RangePreset;
+  rangeStatus: string;
+  rangeToDate: string;
   selectedStream: Stream;
   sourceEvents: BackendSourceEvent[];
   sessions: WorkSession[];
@@ -3912,17 +4369,23 @@ function TodayView({
   const openActions = actions.filter((action) => action.state === "open");
   const latestSession = sessions[0] ?? null;
   const latestEvent = [...sourceEvents].sort((left, right) => right.endedAt - left.endedAt)[0] ?? null;
+  const isSingleDayRange = rangePreset === "today" || Boolean(rangeFromDate && rangeFromDate === rangeToDate);
+  const selectedDayStartMs = dayStartMsForLocalDate(rangeFromDate);
   const manualBlocks = useMemo(
     () => manualBlocksFromIdleBlocks(snapshot?.idleBlocks),
     [snapshot?.idleBlocks],
   );
   const hourBuckets = useMemo(
-    () => buildHourBuckets(visibleSourceEvents, manualBlocks),
-    [manualBlocks, visibleSourceEvents],
+    () => buildHourBuckets(visibleSourceEvents, manualBlocks, selectedDayStartMs),
+    [manualBlocks, selectedDayStartMs, visibleSourceEvents],
   );
   const simpleToday = useMemo(
     () => buildTodayView(snapshot, settings),
     [settings, snapshot],
+  );
+  const rangeSummary = useMemo(
+    () => buildRangeSummaryView(rangePayload),
+    [rangePayload],
   );
   const projectUsage = useMemo(() => buildProjectUsageBreakdown(visibleSourceEvents), [visibleSourceEvents]);
   const activeHour = selectedHour ?? (latestEvent ? new Date(latestEvent.endedAt).getHours() : new Date().getHours());
@@ -4010,9 +4473,29 @@ function TodayView({
     .filter((event) => aiToolLabelsForEvent(event).length > 0)
     .reduce((sum, event) => sum + event.durationMs, 0);
   const totalTrackedDuration = hourBuckets.reduce((sum, bucket) => sum + bucket.durationMs, 0);
+  const dayHeading =
+    rangePreset === "today"
+      ? "Today Timeline"
+      : rangePreset === "yesterday"
+        ? "Yesterday Timeline"
+        : "Day Timeline";
+  const detailScope =
+    rangePreset === "today"
+      ? "captured today"
+      : isSingleDayRange
+        ? "captured on this day"
+        : "in selected range";
+  const rangeTitle =
+    rangePreset === "today"
+      ? "What happened today"
+      : isSingleDayRange
+        ? rangePreset === "yesterday"
+          ? "What happened yesterday"
+          : `What happened on ${formatLocalDateHeading(rangeFromDate)}`
+        : rangePresetLabel(rangePreset);
   const stats = [
-    { label: "Time tracked", value: simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration), detail: "captured today" },
-    { label: "Work sessions", value: sessions.length, detail: "captured today" },
+    { label: "Time tracked", value: simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration), detail: detailScope },
+    { label: "Work sessions", value: sessions.length, detail: detailScope },
     { label: "Work apps", value: simpleToday.appCount || appCount, detail: "with activity" },
     {
       label: "AI detected",
@@ -4029,140 +4512,213 @@ function TodayView({
 
   return (
     <div className="view-frame today-view">
-      <section className="today-live-card">
-        <div className="focus-copy">
-          <span className={!backendReady || isPaused ? "capture-pill paused" : "capture-pill"}>
-            {!backendReady ? "Bridge offline" : isPaused ? "Paused" : "Capturing"}
-          </span>
-          <h2>Now: {currentContext}</h2>
-          <p>{currentSummary}</p>
-        </div>
-        <div className="focus-actions">
+      <section className="today-zone now-zone" aria-label="Now">
+        <div className="zone-heading">
+          <div>
+            <span>{rangePreset === "today" ? "Now" : isSingleDayRange ? "Selected day" : "Selected range"}</span>
+            <h2>{currentContext}</h2>
+          </div>
           <button className="button compact" onClick={onGenerateReport} type="button">
             <Icon name="ritual" />
             Daily report
           </button>
         </div>
-      </section>
 
-      {simpleToday.lowData && (
-        <section className="panel-block early-capture-panel">
-          <PanelHeader eyebrow="Getting started" title="DayTrail is capturing your workday" value={simpleToday.totalTrackedLabel} />
-          <p>
-            Captured so far: {simpleToday.totalTrackedLabel} across {simpleToday.appCount} work app{simpleToday.appCount === 1 ? "" : "s"}.
-            Keep working. Your timeline becomes useful after a few minutes.
-          </p>
-        </section>
-      )}
-
-      <section className="today-stat-strip" aria-label="Today stats">
-        {stats.map((stat) => (
-          <div className="stat-card" key={stat.label}>
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
-            <em>{stat.detail}</em>
-          </div>
-        ))}
-      </section>
-
-      <section className="today-hero-grid" aria-label="Daily timeline and selected hour">
-        <HourlyTimelinePanel
-          buckets={hourBuckets}
-          onClearWorkContext={onClearWorkContext}
-          onOpenWorkContextEditor={onOpenWorkContextEditor}
-          onSelectHour={handleSelectHour}
-          selectedHour={activeHour}
-          selectedHours={selectedHours.length ? selectedHours : [activeHour]}
-        />
-        <SelectedHourPanel
-          bucket={selectedHourBucket}
-          onOpenFullBreakdown={() => onOpenHour(activeHour)}
-        />
-      </section>
-
-      <section className="today-highlights-grid" aria-label="Today highlights">
-        <ProjectUsagePanel projects={projectUsage} />
-        <AppUsagePanel summary={visibleAppUsageSummary} />
-        <AiUsagePanel activeDurationMs={aiActiveDuration} summary={aiUsageSummary} />
-        <section className="panel-block recent-panel">
-          <PanelHeader
-            eyebrow="Recent highlights"
-            title="What you worked on"
-            value={`${sessions.length} captured`}
-          />
-          <div className="recent-highlight-list">
-            {sessions.length === 0 && (
-              <div className="empty-state compact-empty">
-                <strong>No work captured yet</strong>
-                <span>Keep DayTrail open while you use editors, terminals, browsers, and AI tools.</span>
-              </div>
-            )}
-            {sessions.slice(0, 6).map((session) => (
-              <button
-                aria-pressed={inspectedSession?.id === session.id}
-                aria-label={`Open details for ${session.title}`}
-                className="recent-highlight-card"
-                key={session.id}
-                onClick={() => setInspectedSessionId(session.id)}
-                title={`${session.title} - ${session.project}`}
-                type="button"
-              >
-                <span>{session.time}</span>
-                <strong>{session.title}</strong>
-                <em>{session.project}</em>
-                <small>{session.tools}</small>
-              </button>
-            ))}
+        <section className="today-live-card">
+          <div className="focus-copy">
+            <span className={!backendReady || isPaused ? "capture-pill paused" : "capture-pill"}>
+              {rangePreset !== "today" ? isSingleDayRange ? "Day view" : "Range view" : !backendReady ? "Bridge offline" : isPaused ? "Paused" : "Capturing"}
+            </span>
+            <p>{currentSummary}</p>
           </div>
         </section>
-        <section className="panel-block attention-panel">
-          <PanelHeader
-            eyebrow="Next actions"
-            title="Needs review"
-            value={`${openActions.length} open`}
-          />
-          <div className="action-list">
-            {openActions.length === 0 && (
+
+        <section className="today-stat-strip" aria-label="Today stats">
+          {stats.map((stat) => (
+            <div className="stat-card" key={stat.label}>
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
+              <em>{stat.detail}</em>
+            </div>
+          ))}
+        </section>
+      </section>
+
+      <section className="today-zone timeline-zone" aria-label="Today timeline">
+        <div className="zone-heading">
+          <div>
+            <span>{isSingleDayRange ? dayHeading : "Range Timeline"}</span>
+            <h2>{rangeTitle}</h2>
+          </div>
+          <span className="zone-status">{rangeStatus}</span>
+        </div>
+
+        {isSingleDayRange ? (
+          <section className="today-hero-grid" aria-label="Daily timeline and selected hour">
+            <HourlyTimelinePanel
+              buckets={hourBuckets}
+              dayStartMs={selectedDayStartMs}
+              onClearWorkContext={onClearWorkContext}
+              onOpenWorkContextEditor={onOpenWorkContextEditor}
+              onSelectHour={handleSelectHour}
+              selectedHour={activeHour}
+              selectedHours={selectedHours.length ? selectedHours : [activeHour]}
+            />
+            <SelectedHourPanel
+              bucket={selectedHourBucket}
+              onOpenFullBreakdown={() => onOpenHour(activeHour)}
+            />
+          </section>
+        ) : rangeSummary.empty ? (
+          <section className="range-summary-grid range-empty-grid" aria-label="Selected range summary">
+            <div className="panel-block range-summary-card range-empty-card">
+              <PanelHeader eyebrow="Range summary" title={rangePresetLabel(rangePreset)} value={rangeSummary.trackedLabel} />
               <div className="empty-state compact-empty">
-                <strong>No open actions</strong>
-                <span>Unclear sessions, idle gaps, AI activity without context, and unfinished report inputs appear here when detected.</span>
+                <strong>No captured work in this range</strong>
+                <span>Pick another range or keep DayTrail running while you work.</span>
               </div>
-            )}
-            {openActions.slice(0, 6).map((action) => (
-              <article className="action-row" data-state={action.state} key={action.id}>
-                <label>
-                  <input
-                    checked={action.state === "done"}
-                    onChange={() => onUpdateAction(action.id, "done")}
-                    type="checkbox"
-                  />
-                  <span>
-                    <strong>{action.title}</strong>
-                    <em>{action.source}</em>
-                  </span>
-                </label>
-                <div className="action-row-actions">
-                  <button
-                    className="text-button"
-                    onClick={() => onUpdateAction(action.id, "snoozed")}
-                    type="button"
-                  >
-                    Snooze
-                  </button>
-                  <button
-                    className="text-button"
-                    onClick={() => onUpdateAction(action.id, "done")}
-                    type="button"
-                  >
-                    Done
-                  </button>
+            </div>
+          </section>
+        ) : (
+          <section className="range-summary-grid" aria-label="Selected range summary">
+            <div className="panel-block range-summary-card">
+              <PanelHeader eyebrow="Range summary" title={rangePresetLabel(rangePreset)} value={rangeSummary.trackedLabel} />
+              <div className="range-kpi-grid">
+                <div><span>Tracked</span><strong>{rangeSummary.trackedLabel}</strong></div>
+                <div><span>Sessions</span><strong>{rangeSummary.sessionCount}</strong></div>
+                <div><span>AI outputs</span><strong>{rangeSummary.aiOutputCount}</strong></div>
+                <div><span>Needs review</span><strong>{rangeSummary.needsReviewCount}</strong></div>
+              </div>
+            </div>
+            <div className="panel-block range-summary-card">
+              <PanelHeader eyebrow="Top apps" title="Where time went" value={`${rangeSummary.topApps.length} shown`} />
+              <div className="range-list">
+                {rangeSummary.topApps.length === 0 ? (
+                  <div className="empty-state compact-empty">
+                    <strong>No app activity</strong>
+                    <span>Apps appear here when captured in this range.</span>
+                  </div>
+                ) : rangeSummary.topApps.map((app) => (
+                  <article key={app.label}>
+                    <strong>{app.label}</strong>
+                    <span>{app.durationLabel}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="panel-block range-summary-card">
+              <PanelHeader eyebrow="AI" title="Observed AI work" value={`${rangeSummary.topAiTools.length} tool${rangeSummary.topAiTools.length === 1 ? "" : "s"}`} />
+              <div className="range-list">
+                {rangeSummary.topAiTools.length === 0 ? (
+                  <div className="empty-state compact-empty">
+                    <strong>No AI detected</strong>
+                    <span>AI use appears here when source evidence exists.</span>
+                  </div>
+                ) : rangeSummary.topAiTools.map((tool) => (
+                  <article key={tool.label}>
+                    <strong>{tool.label}</strong>
+                    <span>{tool.durationLabel}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+      </section>
+
+      <section className="today-zone needs-action-zone" aria-label="Needs action">
+        <div className="zone-heading">
+          <div>
+            <span>Needs Action</span>
+            <h2>{openActions.length ? `${openActions.length} item${openActions.length === 1 ? "" : "s"} to review` : "Nothing urgent"}</h2>
+          </div>
+        </div>
+
+        <section className={`needs-action-layout${openActions.length === 0 ? " needs-action-layout-idle" : ""}`}>
+          <div className="panel-block attention-panel">
+            <PanelHeader
+              eyebrow="Review queue"
+              title="Source-backed decisions"
+              value={`${openActions.length} open`}
+            />
+            <div className="action-list">
+              {openActions.length === 0 && (
+                <div className="empty-state compact-empty">
+                  <strong>No open actions</strong>
+                  <span>Unanswered messages, promises, idle gaps, and AI drafts appear here with source and reason.</span>
                 </div>
-              </article>
-            ))}
+              )}
+              {openActions.slice(0, 6).map((action) => (
+                <article className="action-row" data-state={action.state} key={action.id}>
+                  <div className="action-copy">
+                    <span className="review-source">{action.source}</span>
+                    <strong>{action.title}</strong>
+                    <em>{action.reason}</em>
+                    {typeof action.evidenceCount === "number" && <small>{action.evidenceCount} source record{action.evidenceCount === 1 ? "" : "s"}</small>}
+                  </div>
+                  <div className="action-row-actions">
+                    <button
+                      className="button compact primary"
+                      onClick={() => onUpdateAction(action.id, "done")}
+                      type="button"
+                    >
+                      <Icon name="check" />
+                      {action.primaryAction || "Done"}
+                    </button>
+                    <button
+                      className="button compact"
+                      onClick={() => onUpdateAction(action.id, "snoozed")}
+                      type="button"
+                    >
+                      Snooze
+                    </button>
+                    <button
+                      className="button compact"
+                      onClick={() => onUpdateAction(action.id, "ignored")}
+                      type="button"
+                    >
+                      <Icon name="x" />
+                      Ignore
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel-block recent-panel">
+            <PanelHeader
+              eyebrow="Recent work"
+              title="What DayTrail saw"
+              value={`${sessions.length} captured`}
+            />
+            <div className="recent-highlight-list">
+              {sessions.length === 0 && (
+                <div className="empty-state compact-empty">
+                  <strong>No work captured yet</strong>
+                  <span>Keep DayTrail open while you use editors, terminals, browsers, and AI tools.</span>
+                </div>
+              )}
+              {sessions.slice(0, 4).map((session) => (
+                <button
+                  aria-pressed={inspectedSession?.id === session.id}
+                  aria-label={`Open details for ${session.title}`}
+                  className="recent-highlight-card"
+                  key={session.id}
+                  onClick={() => setInspectedSessionId(session.id)}
+                  title={`${session.title} - ${session.project}`}
+                  type="button"
+                >
+                  <span>{session.time}</span>
+                  <strong>{session.title}</strong>
+                  <em>{session.project}</em>
+                  <small>{session.tools}</small>
+                </button>
+              ))}
+            </div>
           </div>
         </section>
       </section>
-
       {inspectedSession && (
         <SessionDetailPanel
           events={inspectedEvents}
@@ -4194,6 +4750,7 @@ function TodayView({
 
 function HourlyTimelinePanel({
   buckets,
+  dayStartMs,
   onClearWorkContext,
   onOpenWorkContextEditor,
   onSelectHour,
@@ -4201,6 +4758,7 @@ function HourlyTimelinePanel({
   selectedHours,
 }: {
   buckets: HourBucket[];
+  dayStartMs?: number;
   onClearWorkContext: () => void;
   onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
   onSelectHour: (hour: number, options?: { toggle?: boolean; range?: boolean }) => void;
@@ -4229,7 +4787,7 @@ function HourlyTimelinePanel({
     const topApp = bucket.apps[0] ?? null;
     const rawContext = topApp?.contexts.find((context) => context && context !== topApp.app);
     const hours = selectedHourSet.has(bucket.hour) ? selectedHours : [bucket.hour];
-    const range = hoursToRange(hours);
+    const range = hoursToRange(hours, dayStartMs);
     return {
       mode: "time-block",
       blockType: "Work",
@@ -5615,7 +6173,7 @@ function SimpleActivityView({
           <p>Sessions first, with app and project breakdowns when enough activity is captured.</p>
         </div>
         <div className="screen-actions">
-          <span className="mini-meter">{view.lowDataMessage ? "Getting started" : `${view.sessions.length} session${view.sessions.length === 1 ? "" : "s"}`}</span>
+          <span className="mini-meter">{view.lowDataMessage ? "No sessions yet" : `${view.sessions.length} session${view.sessions.length === 1 ? "" : "s"}`}</span>
         </div>
       </div>
 
@@ -6057,15 +6615,26 @@ function LoopsView({
 function AiLedgerView({
   appSummary,
   ledger,
+  sessions,
   summary,
   sourceEvents,
 }: {
   appSummary?: BackendAppUsageSummary;
   ledger: BackendAiOutputLedgerItem[];
+  sessions: BackendTodaySnapshot["workSessions"];
   summary?: BackendAiUsageSummary;
   sourceEvents: BackendSourceEvent[];
 }) {
   const tools = summary?.tools ?? [];
+  const impactView = useMemo(
+    () => buildAiImpactView({
+      aiOutputLedger: ledger,
+      aiUsageSummary: summary,
+      sourceEvents,
+      workSessions: sessions,
+    }),
+    [ledger, sessions, sourceEvents, summary],
+  );
   const appsWithAi =
     appSummary?.apps.filter((app) => app.aiTools.length > 0 || app.projects.some((project) => project.aiTools.length > 0)) ?? [];
   const aiEvents = sourceEvents.filter((event) => aiToolLabelsForEvent(event).length > 0);
@@ -6097,10 +6666,11 @@ function AiLedgerView({
 
   const maxHourDuration = Math.max(...hourlyAi.map((hour) => hour.totalMs), 1);
   const impactRows = [
-    ["AI source events", aiEvents.length, "Events where an AI tool was detected"],
-    ["Linked outputs", ledger.length, "Drafted, shared, completed, or reviewed outputs"],
-    ["Completed outputs", completedOutputs, "Outputs with a completed/shared/sent status"],
-    ["Agent-like sessions", agentSessions, "Codex, Claude Code, Gemini, or agent-labeled events"],
+    ["Observed", impactView.evidenceCounts.observed, "AI tool activity was seen in captured events"],
+    ["Linked to work", impactView.evidenceCounts.linkedToWork, "AI evidence appears inside a work session"],
+    ["Generated output", impactView.evidenceCounts.linkedOutputs, "Output ledger rows exist"],
+    ["Accepted/completed", impactView.evidenceCounts.completed, "Output status proves completion or acceptance"],
+    ["Needs review", impactView.evidenceCounts.needsReview, "Drafts, blocked items, or failures still need a decision"],
   ];
   const recentInteractions =
     ledger.length > 0
@@ -6248,7 +6818,7 @@ function AiLedgerView({
         </section>
 
         <section className="panel-block ai-impact-summary-panel">
-          <PanelHeader eyebrow="AI impact summary" title="What AI helped you accomplish" value="Source-backed" />
+          <PanelHeader eyebrow="AI impact summary" title="What the evidence proves" value={impactView.evidenceStatus} />
           <div className="ai-impact-list">
             {impactRows.map(([label, value, detail]) => (
               <article className="ai-impact-row" key={label}>
@@ -7254,7 +7824,6 @@ function RitualsView({
             </button>
           </div>
           <div className="report-settings-list">
-            <div><span>Screenshots</span><strong>Off</strong></div>
             <div><span>Full URLs</span><strong>Off</strong></div>
             <div><span>Idle time</span><strong>Manual</strong></div>
             <div><span>AI details</span><strong>On</strong></div>
@@ -7397,7 +7966,9 @@ function SettingsView({
   excludedDomainCount,
   folders,
   launchAtLogin,
+  onApplyRetentionNow,
   onBackupDatabase,
+  onClearCapturedData,
   onExportSettingsConfig,
   onImportSettingsConfig,
   onInstallTerminalBridge,
@@ -7409,6 +7980,7 @@ function SettingsView({
   onRestartApp,
   onRestoreDatabase,
   onSaveExperienceSettings,
+  onSaveRetentionDays,
   onTriggerBrowserAutomation,
   permissionStatus,
   permissionSummary,
@@ -7433,7 +8005,9 @@ function SettingsView({
   excludedDomainCount: number;
   folders: WorkspaceFolder[];
   launchAtLogin: boolean;
+  onApplyRetentionNow: () => void;
   onBackupDatabase: () => void;
+  onClearCapturedData: () => void;
   onExportSettingsConfig: () => void;
   onImportSettingsConfig: () => void;
   onInstallTerminalBridge: () => void;
@@ -7445,6 +8019,7 @@ function SettingsView({
   onRestartApp: () => void;
   onRestoreDatabase: () => void;
   onSaveExperienceSettings: (patch: Partial<BackendSettings>) => Promise<void>;
+  onSaveRetentionDays: (days: number) => void;
   onTriggerBrowserAutomation: () => void;
   permissionStatus: string;
   permissionSummary: BackendCapturePermissionSummary | null;
@@ -7504,6 +8079,7 @@ function SettingsView({
   const checkState = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
     return checkForSource(source)?.status ?? "waiting";
   };
+  const retentionDays = storageInfo?.retentionDays ?? settings?.dataRetentionDays ?? 0;
 
   return (
     <div className="view-frame settings-view">
@@ -7545,7 +8121,7 @@ function SettingsView({
           ))}
           <div className="settings-help-card">
             <strong>Need help?</strong>
-            <span>DayTrail stores metadata locally and keeps screenshots and clipboard text off by default.</span>
+            <span>DayTrail stores metadata locally and does not keep clipboard text or file contents by default.</span>
           </div>
         </aside>
 
@@ -7893,7 +8469,6 @@ function SettingsView({
                 <div className="status-row" data-state="ok"><span>Browsers</span><strong>Domain + redacted URL</strong></div>
                 <div className="status-row" data-state="ok"><span>Editor and terminal</span><strong>Project/folder path</strong></div>
                 <div className="status-row" data-state="ok"><span>AI prompts</span><strong>Redacted before analysis</strong></div>
-                <div className="status-row" data-state="muted"><span>Screenshots</span><strong>Not captured</strong></div>
                 <div className="status-row" data-state="muted"><span>Clipboard content</span><strong>Not captured</strong></div>
                 <div className="status-row" data-state="muted"><span>File contents</span><strong>Not captured by default</strong></div>
                 <div className="status-row" data-state={excludedDomainCount > 0 ? "warning" : "ok"}><span>Excluded browser domains</span><strong>{excludedDomainCount}</strong></div>
@@ -7940,6 +8515,26 @@ function SettingsView({
               </div>
               <div className="status-matrix storage-location-list">
                 <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
+                  <span>Storage used</span>
+                  <strong>{storageInfo ? formatBytes(storageInfo.totalBytes) : "Load storage info"}</strong>
+                </div>
+                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
+                  <span>Database</span>
+                  <strong>
+                    {storageInfo
+                      ? `${formatBytes(storageInfo.databaseBytes + storageInfo.walBytes + storageInfo.shmBytes)}`
+                      : "Waiting for desktop app"}
+                  </strong>
+                </div>
+                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
+                  <span>Backups</span>
+                  <strong>{storageInfo ? formatBytes(storageInfo.backupBytes) : "Waiting for desktop app"}</strong>
+                </div>
+                <div className="status-row" data-state={retentionDays > 0 ? "ok" : "muted"}>
+                  <span>Auto-delete</span>
+                  <strong>{retentionDays > 0 ? `Keep last ${retentionDays} days` : "Keep all data"}</strong>
+                </div>
+                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
                   <span>Current database</span>
                   <strong>{storageInfo?.databasePath ?? "Waiting for desktop app"}</strong>
                 </div>
@@ -7947,6 +8542,23 @@ function SettingsView({
                   <span>Backup folder</span>
                   <strong>{storageInfo?.backupDir ?? "Waiting for desktop app"}</strong>
                 </div>
+              </div>
+              <div className="retention-controls" aria-label="Auto-delete captured data">
+                <span>Auto-delete captured data</span>
+                {[0, 30, 90, 180].map((days) => (
+                  <button
+                    aria-pressed={retentionDays === days}
+                    className="range-chip"
+                    key={days}
+                    onClick={() => onSaveRetentionDays(days)}
+                    type="button"
+                  >
+                    {days === 0 ? "Keep all" : `${days} days`}
+                  </button>
+                ))}
+                <button className="button compact" onClick={onApplyRetentionNow} type="button">
+                  Apply now
+                </button>
               </div>
               <div className="settings-action-list">
                 <button className="settings-action-row" onClick={onOpenExports} type="button">
@@ -7967,6 +8579,11 @@ function SettingsView({
                 <button className="settings-action-row" onClick={onBackupDatabase} type="button">
                   <Icon name="save" />
                   <span><strong>Backup database</strong><em>Create a verified SQLite backup in the backup folder.</em></span>
+                  <Icon name="arrow" />
+                </button>
+                <button className="settings-action-row danger-action-row" onClick={onClearCapturedData} type="button">
+                  <Icon name="warning" />
+                  <span><strong>Clear captured data now</strong><em>Remove timelines, sessions, review items, reports, and memory immediately.</em></span>
                   <Icon name="arrow" />
                 </button>
               </div>
@@ -8265,110 +8882,5 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
-  );
-}
-
-type IconName =
-  | "apps"
-  | "archive"
-  | "arrow"
-  | "check"
-  | "copy"
-  | "layout"
-  | "plus"
-  | "return"
-  | "ritual"
-  | "save"
-  | "search"
-  | "sliders"
-  | "sync"
-  | "warning"
-  | "x";
-
-function Icon({ name }: { name: IconName }) {
-  const pathByName: Record<IconName, ReactNode> = {
-    apps: (
-      <>
-        <rect height="6" rx="1.5" width="6" x="4" y="4" />
-        <rect height="6" rx="1.5" width="6" x="14" y="4" />
-        <rect height="6" rx="1.5" width="6" x="4" y="14" />
-        <rect height="6" rx="1.5" width="6" x="14" y="14" />
-      </>
-    ),
-    archive: (
-      <>
-        <path d="M4 7h16v13H4z" />
-        <path d="M3 4h18v3H3zM9 11h6" />
-      </>
-    ),
-    arrow: <path d="M5 12h13M13 6l6 6-6 6" />,
-    check: <path d="m5 12 4 4L19 6" />,
-    copy: (
-      <>
-        <rect height="12" rx="2" width="12" x="8" y="8" />
-        <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
-      </>
-    ),
-    layout: (
-      <>
-        <rect height="14" rx="2" width="16" x="4" y="5" />
-        <path d="M9 5v14M4 10h16" />
-      </>
-    ),
-    plus: <path d="M12 5v14M5 12h14" />,
-    return: <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />,
-    ritual: (
-      <>
-        <path d="M12 3v5M12 16v5M5.6 5.6l3.5 3.5M14.9 14.9l3.5 3.5M3 12h5M16 12h5M5.6 18.4l3.5-3.5M14.9 9.1l3.5-3.5" />
-        <circle cx="12" cy="12" r="3" />
-      </>
-    ),
-    save: (
-      <>
-        <path d="M5 3h12l2 2v16H5z" />
-        <path d="M8 3v6h8V3M8 21v-7h8v7" />
-      </>
-    ),
-    search: (
-      <>
-        <circle cx="11" cy="11" r="7" />
-        <path d="m16.5 16.5 4 4" />
-      </>
-    ),
-    sliders: (
-      <>
-        <path d="M4 7h16M4 17h16" />
-        <circle cx="9" cy="7" r="2" />
-        <circle cx="15" cy="17" r="2" />
-      </>
-    ),
-    sync: (
-      <>
-        <path d="M20 11a8 8 0 0 0-14.8-4M4 5v5h5" />
-        <path d="M4 13a8 8 0 0 0 14.8 4M20 19v-5h-5" />
-      </>
-    ),
-    warning: (
-      <>
-        <path d="m12 3 10 18H2z" />
-        <path d="M12 9v5M12 17h.01" />
-      </>
-    ),
-    x: <path d="M6 6l12 12M18 6 6 18" />,
-  };
-
-  return (
-    <svg
-      aria-hidden="true"
-      className="icon"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.75"
-      viewBox="0 0 24 24"
-    >
-      {pathByName[name]}
-    </svg>
   );
 }
