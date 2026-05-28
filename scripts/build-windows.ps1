@@ -6,7 +6,6 @@ $ErrorActionPreference = "Stop"
 
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DesktopDir = Join-Path $RootDir "apps\desktop"
-$TauriCliVersion = "2.11.2"
 
 Push-Location $RootDir
 try {
@@ -24,14 +23,9 @@ try {
 
   npm --prefix apps/desktop run build
 
-  $tauriVersion = cargo tauri --version 2>$null
-  if (-not $tauriVersion) {
-    cargo install tauri-cli --version $TauriCliVersion --locked
-  }
-
   Push-Location $DesktopDir
   try {
-    cargo tauri build --bundles nsis,msi
+    npm run tauri -- build --bundles nsis,msi
   } finally {
     Pop-Location
   }

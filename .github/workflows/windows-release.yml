@@ -14,7 +14,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  TAURI_CLI_VERSION: 2.11.2
 
 jobs:
   quality:
@@ -101,12 +100,8 @@ jobs:
       - name: Build desktop frontend
         run: npm --prefix apps/desktop run build
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version $env:TAURI_CLI_VERSION --locked
-
       - name: Build NSIS and MSI installers
-        working-directory: apps/desktop
-        run: cargo tauri build --bundles nsis,msi
+        run: npm --prefix apps/desktop run tauri -- build --bundles nsis,msi
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
