@@ -101,5 +101,7 @@ $metadata = [ordered]@{
   updatedAt = (Get-Date).ToUniversalTime().ToString("o")
 }
 
-($metadata | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $OutFile -Encoding UTF8
+$json = $metadata | ConvertTo-Json -Depth 5
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($OutFile, "$json`n", $utf8NoBom)
 Write-Output $OutFile
