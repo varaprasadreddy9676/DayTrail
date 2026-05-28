@@ -549,7 +549,7 @@ pub fn detect_git_context(workspace_path: &str) -> Option<GitContext> {
     })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn ai_tools_from_processes(app_name: &str, process_id: Option<u32>) -> Vec<String> {
     let mut tools = Vec::new();
     for tool in terminal_ai_tools_from_processes(app_name, process_id) {
@@ -1238,13 +1238,14 @@ fn terminal_bridge_matches_app(app_name: &str, bridge: &TerminalBridgeMetadata) 
 
 #[cfg(target_os = "windows")]
 fn platform_active_window() -> Option<ActiveWindowInfo> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId,
+    use windows_sys::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
     };
 
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd == 0 {
+        let hwnd: HWND = GetForegroundWindow();
+        if hwnd.is_null() {
             return None;
         }
 
@@ -1290,7 +1291,7 @@ fn platform_active_window() -> Option<ActiveWindowInfo> {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn windows_window_title(hwnd: isize) -> Option<String> {
+unsafe fn windows_window_title(hwnd: windows_sys::Win32::Foundation::HWND) -> Option<String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
 
     let len = GetWindowTextLengthW(hwnd);
@@ -1315,7 +1316,7 @@ unsafe fn windows_process_image_path(pid: u32) -> Option<String> {
     };
 
     let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-    if handle == 0 {
+    if handle.is_null() {
         return None;
     }
 

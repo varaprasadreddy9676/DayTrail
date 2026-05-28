@@ -307,8 +307,11 @@ fn keychain_get(key: &str) -> Result<Option<String>> {
 #[cfg(target_os = "windows")]
 fn keychain_set(key: &str, value: &str) -> Result<()> {
     use std::ptr;
-    use windows_sys::Win32::Security::Credentials::{
-        CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        Security::Credentials::{
+            CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+        },
     };
 
     let mut target_name = windows_wide(&format!("{SERVICE_NAME}:{key}"));
@@ -323,7 +326,10 @@ fn keychain_set(key: &str, value: &str) -> Result<()> {
         Type: CRED_TYPE_GENERIC,
         TargetName: target_name.as_mut_ptr(),
         Comment: ptr::null_mut(),
-        LastWritten: Default::default(),
+        LastWritten: FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        },
         CredentialBlobSize: blob.len() as u32,
         CredentialBlob: blob.as_ptr() as *mut u8,
         Persist: CRED_PERSIST_LOCAL_MACHINE,
