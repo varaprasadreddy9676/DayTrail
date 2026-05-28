@@ -2630,18 +2630,24 @@ fn detects_most_recent_editor_workspace_storage_when_multiple_projects_are_open(
     let root = dir.path().join("Code/User/workspaceStorage");
     let stale = root.join("stale");
     let recent = root.join("recent");
+    let stale_project = dir.path().join("LMS-production");
+    let recent_project = dir.path().join("CFM-main");
     fs::create_dir_all(&stale).expect("stale workspace storage");
     fs::create_dir_all(&recent).expect("recent workspace storage");
+    fs::create_dir_all(&stale_project).expect("stale project folder");
+    fs::create_dir_all(&recent_project).expect("recent project folder");
+    let stale_url = url::Url::from_file_path(&stale_project).expect("stale file url");
+    let recent_url = url::Url::from_file_path(&recent_project).expect("recent file url");
     fs::write(
         stale.join("workspace.json"),
-        r#"{"folder":"file:///Users/example/src/LMS-production"}"#,
+        json!({ "folder": stale_url.as_str() }).to_string(),
     )
     .expect("stale workspace json");
     fs::write(stale.join("state.vscdb"), "old").expect("stale state");
     thread::sleep(Duration::from_millis(25));
     fs::write(
         recent.join("workspace.json"),
-        r#"{"folder":"file:///Users/example/src/CFM-main"}"#,
+        json!({ "folder": recent_url.as_str() }).to_string(),
     )
     .expect("recent workspace json");
     fs::write(recent.join("state.vscdb"), "new").expect("recent state");
@@ -2652,6 +2658,6 @@ fn detects_most_recent_editor_workspace_storage_when_multiple_projects_are_open(
     })
     .expect("detect recent editor project");
 
-    assert_eq!(detected.path, "/Users/example/src/CFM-main");
+    assert_eq!(detected.path, recent_project.display().to_string());
     assert_eq!(detected.source, "workspace-storage");
 }
