@@ -103,6 +103,14 @@ fn watcher_tick(
     }
 
     let idle_ms = system_idle_ms().unwrap_or(0);
+    let trusted = accessibility_trusted();
+    // Heartbeat: published every tick so the UI can tell "alive" from "dead".
+    update_heartbeat(|hb| {
+        hb.last_tick_at_ms = epoch_ms();
+        hb.last_idle_ms = idle_ms;
+        hb.accessibility_trusted = trusted;
+    });
+
     if !should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS) {
         if *recording {
             watcher_log(&format!("capture paused — user idle {idle_ms}ms"));
@@ -122,7 +130,7 @@ fn watcher_tick(
         return;
     }
     let metadata = serde_json::to_string(&info).ok();
-    if let Err(error) = store.record_active_window_context(
+    match store.record_active_window_context(
         &info.app_name,
         info.window_title.as_deref(),
         info.url.as_deref(),
@@ -130,7 +138,16 @@ fn watcher_tick(
         metadata.as_deref(),
         Some(interval),
     ) {
-        watcher_log(&format!("record_active_window_context failed: {error}"));
+        Ok(()) => update_heartbeat(|hb| {
+            hb.last_capture_at_ms = Some(epoch_ms());
+            hb.consecutive_record_errors = 0;
+        }),
+        Err(error) => {
+            watcher_log(&format!("record_active_window_context failed: {error}"));
+            update_heartbeat(|hb| {
+                hb.consecutive_record_errors = hb.consecutive_record_errors.saturating_add(1);
+            });
+        }
     }
 }
 
@@ -156,6 +173,107 @@ fn clear_content_title_cache() {
             cache.clear();
         }
     }
+}
+
+// ── Capture liveness / heartbeat ──────────────────────────────────────────────
+//
+// The watcher publishes a heartbeat every tick so the rest of the app can tell
+// the difference between "capture is quiet because you're idle" and "capture is
+// broken". This is what makes a silent stop (App Nap suspension, a hung poll, or
+// a revoked Accessibility permission) visible instead of looking like a normal
+// quiet morning.
+
+/// Diagnostics published by the capture watcher. All timestamps are UNIX epoch ms.
+#[derive(Debug, Clone)]
+pub struct WatcherHeartbeat {
+    /// Most recent watcher tick — proves the poll thread is still alive.
+    pub last_tick_at_ms: i64,
+    /// Most recent successful active-window capture, if any this run.
+    pub last_capture_at_ms: Option<i64>,
+    /// HID idle (ms) measured at the last tick.
+    pub last_idle_ms: u64,
+    /// macOS Accessibility trust at the last tick; `None` on other platforms.
+    pub accessibility_trusted: Option<bool>,
+    /// Consecutive `record_active_window_context` failures.
+    pub consecutive_record_errors: u32,
+}
+
+static WATCHER_HEARTBEAT: Mutex<Option<WatcherHeartbeat>> = Mutex::new(None);
+
+/// Snapshot of the latest watcher heartbeat, or `None` before the first tick.
+pub fn watcher_heartbeat() -> Option<WatcherHeartbeat> {
+    WATCHER_HEARTBEAT.lock().ok().and_then(|guard| guard.clone())
+}
+
+fn update_heartbeat(apply: impl FnOnce(&mut WatcherHeartbeat)) {
+    if let Ok(mut guard) = WATCHER_HEARTBEAT.lock() {
+        let heartbeat = guard.get_or_insert_with(|| WatcherHeartbeat {
+            last_tick_at_ms: epoch_ms(),
+            last_capture_at_ms: None,
+            last_idle_ms: 0,
+            accessibility_trusted: None,
+            consecutive_record_errors: 0,
+        });
+        apply(heartbeat);
+    }
+}
+
+fn epoch_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_trusted() -> Option<bool> {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> u8;
+    }
+    Some(unsafe { AXIsProcessTrusted() != 0 })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn accessibility_trusted() -> Option<bool> {
+    None
+}
+
+/// Overall liveness of the capture watcher, derived from its heartbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureLiveness {
+    /// No heartbeat yet (just launched) — not enough info to judge.
+    Unknown,
+    /// Ticking recently and permissions intact.
+    Healthy,
+    /// The poll thread has not ticked within the staleness window — capture is
+    /// effectively stopped (suspended, hung, or dead).
+    Stalled,
+    /// Ticking, but the OS Accessibility permission is no longer granted — capture
+    /// is degraded (app/window titles cannot be read reliably).
+    PermissionLost,
+}
+
+/// Classify capture liveness from a heartbeat snapshot. Pure for testability.
+///
+/// `stale_after_ms` is how long without a tick counts as stalled. `Stalled`
+/// takes precedence over `PermissionLost`: if the thread is not ticking, the
+/// permission reading is itself stale and not trustworthy.
+pub fn assess_capture_liveness(
+    heartbeat: Option<&WatcherHeartbeat>,
+    now_ms: i64,
+    stale_after_ms: i64,
+) -> CaptureLiveness {
+    let Some(heartbeat) = heartbeat else {
+        return CaptureLiveness::Unknown;
+    };
+    if now_ms.saturating_sub(heartbeat.last_tick_at_ms) > stale_after_ms {
+        return CaptureLiveness::Stalled;
+    }
+    if heartbeat.accessibility_trusted == Some(false) {
+        return CaptureLiveness::PermissionLost;
+    }
+    CaptureLiveness::Healthy
 }
 
 /// Append-only watcher diagnostics so silent capture failures are debuggable in
@@ -2454,6 +2572,72 @@ mod tests {
         let interval_ms = 100;
         assert!(!is_resume(30_000, interval_ms));
         assert!(is_resume(60_000, interval_ms));
+    }
+
+    fn heartbeat(tick_at_ms: i64, trusted: Option<bool>) -> super::WatcherHeartbeat {
+        super::WatcherHeartbeat {
+            last_tick_at_ms: tick_at_ms,
+            last_capture_at_ms: None,
+            last_idle_ms: 0,
+            accessibility_trusted: trusted,
+            consecutive_record_errors: 0,
+        }
+    }
+
+    #[test]
+    fn liveness_is_unknown_before_first_heartbeat() {
+        assert_eq!(
+            super::assess_capture_liveness(None, 1_000_000, 30_000),
+            super::CaptureLiveness::Unknown
+        );
+    }
+
+    #[test]
+    fn liveness_flags_a_stalled_watcher() {
+        let now = 1_000_000;
+        // Last tick 31s ago with a 30s window → stalled (App Nap / hang / dead).
+        let hb = heartbeat(now - 31_000, Some(true));
+        assert_eq!(
+            super::assess_capture_liveness(Some(&hb), now, 30_000),
+            super::CaptureLiveness::Stalled
+        );
+    }
+
+    #[test]
+    fn liveness_flags_lost_accessibility_permission() {
+        let now = 1_000_000;
+        let hb = heartbeat(now - 2_000, Some(false));
+        assert_eq!(
+            super::assess_capture_liveness(Some(&hb), now, 30_000),
+            super::CaptureLiveness::PermissionLost
+        );
+    }
+
+    #[test]
+    fn liveness_is_healthy_when_ticking_and_trusted() {
+        let now = 1_000_000;
+        let hb = heartbeat(now - 2_000, Some(true));
+        assert_eq!(
+            super::assess_capture_liveness(Some(&hb), now, 30_000),
+            super::CaptureLiveness::Healthy
+        );
+        // Non-macOS reports `None` for trust and must still read as healthy.
+        let hb_no_ax = heartbeat(now - 2_000, None);
+        assert_eq!(
+            super::assess_capture_liveness(Some(&hb_no_ax), now, 30_000),
+            super::CaptureLiveness::Healthy
+        );
+    }
+
+    #[test]
+    fn stalled_takes_precedence_over_permission_loss() {
+        let now = 1_000_000;
+        // Both stale AND untrusted → stalled wins (perm reading is itself stale).
+        let hb = heartbeat(now - 120_000, Some(false));
+        assert_eq!(
+            super::assess_capture_liveness(Some(&hb), now, 30_000),
+            super::CaptureLiveness::Stalled
+        );
     }
 
     #[test]

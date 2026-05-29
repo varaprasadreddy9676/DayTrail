@@ -17,6 +17,10 @@ use serde_json::Value;
 use tauri::Manager;
 
 const SOURCE_EVENT_COALESCE_GAP_MS: i64 = 2 * 60 * 1000;
+/// How long the capture watcher can go without a heartbeat tick before it is
+/// considered stalled. The watcher ticks every 2s, so 30s is ~15 missed ticks —
+/// well clear of scheduling jitter but fast enough to flag a real stop.
+const CAPTURE_STALE_AFTER_MS: i64 = 30_000;
 const DISPLAY_APP_NAME: &str = "DayTrail";
 const DATA_DIR_NAME: &str = "ai.daytrail.desktop";
 const DB_FILE_NAME: &str = "daytrail.sqlite3";
@@ -1868,11 +1872,19 @@ impl WorktraceStore {
         let next_best_action = self.next_best_action()?;
         let required_permissions_granted =
             crate::permissions::capture_permission_summary().all_required_granted;
+        let watcher_heartbeat = crate::active_window::watcher_heartbeat();
+        let capture_liveness = crate::active_window::assess_capture_liveness(
+            watcher_heartbeat.as_ref(),
+            now_ms(),
+            CAPTURE_STALE_AFTER_MS,
+        );
         let capture_health = build_capture_health_with_permission_state(
             &source_events,
             &settings,
             &pause_state,
             required_permissions_granted,
+            capture_liveness,
+            watcher_heartbeat.as_ref(),
         );
         let unclosed_loop_inbox = build_unclosed_loop_inbox(
             &pending_replies,
@@ -7194,8 +7206,55 @@ fn build_capture_health_with_permission_state(
     settings: &Settings,
     pause_state: &PauseState,
     required_permissions_granted: bool,
+    liveness: crate::active_window::CaptureLiveness,
+    heartbeat: Option<&crate::active_window::WatcherHeartbeat>,
 ) -> CaptureHealthSummary {
-    let mut checks = vec![CaptureHealthCheck {
+    use crate::active_window::CaptureLiveness;
+
+    // The watcher heartbeat distinguishes "quiet" from "broken". When the poll
+    // thread has stalled (App Nap / hang / crash) or lost Accessibility, this is
+    // the single most important signal — surfaced first and escalated to an error.
+    let last_tick_at = heartbeat.map(|hb| hb.last_tick_at_ms);
+    let watcher_check = match liveness {
+        CaptureLiveness::Stalled => CaptureHealthCheck {
+            id: "capture-watcher".to_string(),
+            label: "Capture engine".to_string(),
+            status: "error".to_string(),
+            detail: "The capture watcher stopped responding — recent activity is not being recorded.".to_string(),
+            last_seen_at: last_tick_at,
+            evidence_count: 0,
+            action: Some("Quit and reopen DayTrail to restart capture.".to_string()),
+        },
+        CaptureLiveness::PermissionLost => CaptureHealthCheck {
+            id: "capture-watcher".to_string(),
+            label: "Capture engine".to_string(),
+            status: "error".to_string(),
+            detail: "Accessibility permission was revoked — apps and window titles can no longer be captured.".to_string(),
+            last_seen_at: last_tick_at,
+            evidence_count: 0,
+            action: Some("Re-grant Accessibility for DayTrail in Privacy & Security.".to_string()),
+        },
+        CaptureLiveness::Healthy => CaptureHealthCheck {
+            id: "capture-watcher".to_string(),
+            label: "Capture engine".to_string(),
+            status: "ok".to_string(),
+            detail: "Capture engine is running.".to_string(),
+            last_seen_at: last_tick_at,
+            evidence_count: 1,
+            action: None,
+        },
+        CaptureLiveness::Unknown => CaptureHealthCheck {
+            id: "capture-watcher".to_string(),
+            label: "Capture engine".to_string(),
+            status: "waiting".to_string(),
+            detail: "Capture engine is starting up.".to_string(),
+            last_seen_at: last_tick_at,
+            evidence_count: 0,
+            action: None,
+        },
+    };
+
+    let mut checks = vec![watcher_check, CaptureHealthCheck {
         id: "os-permissions".to_string(),
         label: "OS permissions".to_string(),
         status: if required_permissions_granted {
@@ -7314,8 +7373,15 @@ fn build_capture_health_with_permission_state(
     let ai_waiting = checks
         .iter()
         .any(|check| check.id == "ai-tools" && check.status != "ok");
+    // A broken capture engine outranks everything except an intentional pause:
+    // the user must know capture is down, not see a reassuring "warming up".
     let status = if pause_state.paused {
         "paused"
+    } else if matches!(
+        liveness,
+        CaptureLiveness::Stalled | CaptureLiveness::PermissionLost
+    ) {
+        "error"
     } else if needs_setup > 0 {
         "needs_setup"
     } else if ok_count >= 3 && !ai_waiting {
@@ -7323,10 +7389,14 @@ fn build_capture_health_with_permission_state(
     } else {
         "warming_up"
     };
-    let headline = match status {
-        "paused" => "Capture is paused".to_string(),
-        "healthy" => "Core capture is receiving signals".to_string(),
-        "needs_setup" => format!("{needs_setup} capture source(s) need setup"),
+    let headline = match (status, liveness) {
+        ("paused", _) => "Capture is paused".to_string(),
+        ("error", CaptureLiveness::PermissionLost) => {
+            "Capture degraded — Accessibility permission was revoked".to_string()
+        }
+        ("error", _) => "Capture stopped — the capture engine isn't responding".to_string(),
+        ("healthy", _) => "Core capture is receiving signals".to_string(),
+        ("needs_setup", _) => format!("{needs_setup} capture source(s) need setup"),
         _ => "Capture is waiting for more signals".to_string(),
     };
 
@@ -9627,6 +9697,8 @@ mod tests {
             &Settings::default(),
             &test_pause_state(),
             false,
+            crate::active_window::CaptureLiveness::Unknown,
+            None,
         );
 
         assert_eq!(summary.status, "needs_setup");
@@ -9643,14 +9715,72 @@ mod tests {
             terminal_bridge_path: Some("/tmp/daytrail-shell-integration".into()),
             ..Default::default()
         };
-        let summary =
-            build_capture_health_with_permission_state(&[], &settings, &test_pause_state(), true);
+        let summary = build_capture_health_with_permission_state(
+            &[],
+            &settings,
+            &test_pause_state(),
+            true,
+            crate::active_window::CaptureLiveness::Unknown,
+            None,
+        );
 
         assert_eq!(summary.status, "warming_up");
         assert!(summary
             .checks
             .iter()
             .any(|check| check.id == "os-permissions" && check.status == "ok"));
+    }
+
+    #[test]
+    fn capture_health_raises_an_error_when_the_watcher_has_stalled() {
+        // A stalled watcher must override the otherwise-reassuring status so the
+        // user is told capture stopped (the silent-stop bug made visible).
+        let summary = build_capture_health_with_permission_state(
+            &[],
+            &Settings::default(),
+            &test_pause_state(),
+            true,
+            crate::active_window::CaptureLiveness::Stalled,
+            None,
+        );
+
+        assert_eq!(summary.status, "error");
+        assert!(summary.headline.to_lowercase().contains("stopped"));
+        assert!(summary.checks.iter().any(|check| {
+            check.id == "capture-watcher" && check.status == "error" && check.action.is_some()
+        }));
+    }
+
+    #[test]
+    fn capture_health_flags_revoked_accessibility_permission() {
+        let summary = build_capture_health_with_permission_state(
+            &[],
+            &Settings::default(),
+            &test_pause_state(),
+            true,
+            crate::active_window::CaptureLiveness::PermissionLost,
+            None,
+        );
+
+        assert_eq!(summary.status, "error");
+        assert!(summary.headline.to_lowercase().contains("accessibility"));
+    }
+
+    #[test]
+    fn capture_health_pause_outranks_a_stalled_watcher() {
+        // An intentional pause is not an error; don't cry wolf.
+        let mut paused = test_pause_state();
+        paused.paused = true;
+        let summary = build_capture_health_with_permission_state(
+            &[],
+            &Settings::default(),
+            &paused,
+            true,
+            crate::active_window::CaptureLiveness::Stalled,
+            None,
+        );
+
+        assert_eq!(summary.status, "paused");
     }
 
     #[test]

@@ -4354,6 +4354,12 @@ function TodayView({
   const latestSession = sessions[0] ?? null;
   const latestEvent = [...sourceEvents].sort((left, right) => right.endedAt - left.endedAt)[0] ?? null;
   const isSingleDayRange = rangePreset === "today" || Boolean(rangeFromDate && rangeFromDate === rangeToDate);
+  // Truthful capture status: "error" means the watcher stalled or lost
+  // Accessibility, so the badge must say "stopped" instead of a reassuring lie.
+  const captureHealthSummary = snapshot?.captureHealth;
+  const captureBroken = captureHealthSummary?.status === "error";
+  const captureHealthAction =
+    captureHealthSummary?.checks?.find((check) => check.id === "capture-watcher")?.action ?? null;
   const selectedDayStartMs = dayStartMsForLocalDate(rangeFromDate);
   const manualBlocks = useMemo(
     () => manualBlocksFromIdleBlocks(snapshot?.idleBlocks),
@@ -4510,12 +4516,39 @@ function TodayView({
 
         <section className="today-live-card">
           <div className="focus-copy">
-            <span className={!backendReady || isPaused ? "capture-pill paused" : "capture-pill"}>
-              {rangePreset !== "today" ? isSingleDayRange ? "Day view" : "Range view" : !backendReady ? "Bridge offline" : isPaused ? "Paused" : "Capturing"}
+            <span
+              className={
+                !backendReady || isPaused
+                  ? "capture-pill paused"
+                  : captureBroken
+                    ? "capture-pill error"
+                    : "capture-pill"
+              }
+            >
+              {rangePreset !== "today"
+                ? isSingleDayRange
+                  ? "Day view"
+                  : "Range view"
+                : !backendReady
+                  ? "Bridge offline"
+                  : isPaused
+                    ? "Paused"
+                    : captureBroken
+                      ? "Capture stopped"
+                      : "Capturing"}
             </span>
             <p>{currentSummary}</p>
           </div>
         </section>
+        {captureBroken && rangePreset === "today" && !isPaused && (
+          <div className="capture-alert" role="alert">
+            <Icon name="warning" />
+            <div>
+              <strong>{captureHealthSummary?.headline ?? "Capture stopped"}</strong>
+              {captureHealthAction && <span>{captureHealthAction}</span>}
+            </div>
+          </div>
+        )}
 
         <section className="today-stat-strip" aria-label="Today stats">
           {stats.map((stat) => (
