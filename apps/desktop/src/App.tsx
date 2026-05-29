@@ -4360,6 +4360,8 @@ function TodayView({
   const captureBroken = captureHealthSummary?.status === "error";
   const captureHealthAction =
     captureHealthSummary?.checks?.find((check) => check.id === "capture-watcher")?.action ?? null;
+  const capturePermissionIssue =
+    captureHealthSummary?.headline?.toLowerCase().includes("accessibility") ?? false;
   const selectedDayStartMs = dayStartMsForLocalDate(rangeFromDate);
   const manualBlocks = useMemo(
     () => manualBlocksFromIdleBlocks(snapshot?.idleBlocks),
@@ -4547,6 +4549,17 @@ function TodayView({
               <strong>{captureHealthSummary?.headline ?? "Capture stopped"}</strong>
               {captureHealthAction && <span>{captureHealthAction}</span>}
             </div>
+            <button
+              className="button compact"
+              type="button"
+              onClick={() => {
+                void invokeTauri(
+                  capturePermissionIssue ? "open_capture_permission_settings" : "restart_app",
+                );
+              }}
+            >
+              {capturePermissionIssue ? "Open Settings" : "Restart capture"}
+            </button>
           </div>
         )}
 

@@ -1,13 +1,24 @@
+use std::time::{Duration, SystemTime};
+
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
+    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry,
 };
 
 use crate::store::WorktraceStore;
 
+/// Without a heartbeat tick for this long, the tray treats capture as stopped.
+const TRAY_STALE_AFTER_MS: i64 = 30_000;
+/// How often the tray re-checks capture health.
+const TRAY_HEALTH_POLL: Duration = Duration::from_secs(10);
+
 pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> {
     let is_paused = store.pause_state().map(|s| s.paused).unwrap_or(false);
+    // Clones for the background health updater (the originals are moved into the
+    // menu-event closure below).
+    let updater_app = app.handle().clone();
+    let updater_store = store.clone();
 
     let status = MenuItem::with_id(
         app,
@@ -48,6 +59,8 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
     let pause_item = pause.clone();
     let resume_item = resume.clone();
     let status_item = status.clone();
+    // A separate clone for the background health updater.
+    let updater_status_item = status.clone();
 
     let mut tray = TrayIconBuilder::with_id("daytrail-tray")
         .tooltip("DayTrail")
@@ -109,9 +122,60 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
         tray = tray.icon(icon.clone());
     }
 
-    tray.build(app)?;
+    let tray_icon = tray.build(app)?;
+
+    spawn_tray_health_updater(updater_app, updater_store, updater_status_item, tray_icon);
 
     Ok(())
+}
+
+/// Periodically reflect real capture health in the tray: the status menu item
+/// text, plus a ⚠ badge in the menu bar (macOS) that is visible even when the
+/// main window is closed — the exact situation where capture tends to die. This
+/// is what turns a silent stop into something the user actually notices.
+fn spawn_tray_health_updater(
+    app: AppHandle,
+    store: WorktraceStore,
+    status_item: MenuItem<Wry>,
+    tray: TrayIcon<Wry>,
+) {
+    use crate::active_window::{assess_capture_liveness, watcher_heartbeat, CaptureLiveness};
+
+    std::thread::spawn(move || loop {
+        std::thread::sleep(TRAY_HEALTH_POLL);
+
+        let paused = store.pause_state().map(|state| state.paused).unwrap_or(false);
+        let heartbeat = watcher_heartbeat();
+        let liveness =
+            assess_capture_liveness(heartbeat.as_ref(), tray_now_ms(), TRAY_STALE_AFTER_MS);
+
+        let (label, badge): (&str, Option<&str>) = if paused {
+            ("DayTrail: Paused", None)
+        } else {
+            match liveness {
+                CaptureLiveness::Stalled => ("DayTrail: ⚠ Capture stopped", Some("⚠")),
+                CaptureLiveness::PermissionLost => {
+                    ("DayTrail: ⚠ Accessibility needed", Some("⚠"))
+                }
+                _ => ("DayTrail: Tracking Active", None),
+            }
+        };
+
+        let status_item = status_item.clone();
+        let tray = tray.clone();
+        // Menu/tray mutations must run on the main thread.
+        let _ = app.run_on_main_thread(move || {
+            let _ = status_item.set_text(label);
+            let _ = tray.set_title(badge);
+        });
+    });
+}
+
+fn tray_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
 }
 
 pub fn show_main_window(app: &AppHandle) {

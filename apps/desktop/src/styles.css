@@ -1167,6 +1167,12 @@ kbd {
   opacity: 0.85;
 }
 
+.capture-alert button {
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+}
+
 .today-stat-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
