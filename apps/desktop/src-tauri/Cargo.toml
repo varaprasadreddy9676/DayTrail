@@ -32,7 +32,7 @@ worktrace-ai-engine = { path = "../../../crates/ai-engine" }
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSRunningApplication", "NSWorkspace", "libc"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSString", "NSProcessInfo"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59.0", features = [

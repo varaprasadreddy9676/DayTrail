@@ -5,7 +5,7 @@ use std::{
     process::Command,
     sync::Mutex,
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 type ContentTitleCache = HashMap<u32, (Option<String>, SystemTime)>;
@@ -47,28 +47,186 @@ pub struct ActiveWindowInfo {
 const IDLE_SKIP_THRESHOLD_MS: u64 = 60_000; // 60 seconds
 
 pub fn spawn_active_window_watcher(store: WorktraceStore, interval: Duration) {
-    thread::spawn(move || loop {
-        let _ = store.ingest_local_bridge_files();
-        // Skip when the user has been away (keyboard/mouse idle) for ≥1 minute.
-        let idle_ms = system_idle_ms().unwrap_or(0);
-        if idle_ms < IDLE_SKIP_THRESHOLD_MS {
-            if let Some(info) = active_window_fallback() {
-                if !is_self_app(&info.app_name) {
-                    let metadata = serde_json::to_string(&info).ok();
-                    let _ = store.record_active_window_context(
-                        &info.app_name,
-                        info.window_title.as_deref(),
-                        info.url.as_deref(),
-                        info.workspace_key.as_deref(),
-                        metadata.as_deref(),
-                        Some(interval),
-                    );
-                }
-            }
-        }
-        thread::sleep(interval);
+    thread::spawn(move || {
+        // Keep the capture loop out of macOS App Nap. A tray-resident app with
+        // its window hidden is a prime App Nap target: macOS throttles/suspends
+        // its background timers and threads, which silently stops capture until
+        // the user re-foregrounds the app — the "nothing recorded on a new day"
+        // report. The assertion still allows normal system (idle/lid) sleep, so
+        // it does not drain the battery.
+        let _activity = begin_background_activity();
+        run_watcher_loop(&store, interval);
     });
 }
+
+/// Watcher main loop. Each tick is wrapped in `catch_unwind` so a single bad
+/// poll (e.g. a transient AX/objc failure) can never kill capture for the rest
+/// of the process lifetime — it logs and continues on the next interval.
+fn run_watcher_loop(store: &WorktraceStore, interval: Duration) {
+    let interval_ms = duration_to_ms(interval);
+    let mut last_tick = Instant::now();
+    let mut recording = true;
+    watcher_log("watcher started");
+
+    loop {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            watcher_tick(store, interval, interval_ms, &mut last_tick, &mut recording)
+        }));
+        if outcome.is_err() {
+            watcher_log("PANIC in watcher tick — recovered, continuing");
+        }
+        thread::sleep(interval);
+    }
+}
+
+/// A single poll cycle. Records the active window unless the user is idle.
+/// Detects process suspension (App Nap / sleep) via a wall-clock gap and clears
+/// the stale per-PID AX cache on resume. Logs only state transitions and
+/// resume/record failures to keep the log low-noise but diagnosable.
+fn watcher_tick(
+    store: &WorktraceStore,
+    interval: Duration,
+    interval_ms: u64,
+    last_tick: &mut Instant,
+    recording: &mut bool,
+) {
+    let _ = store.ingest_local_bridge_files();
+
+    let now = Instant::now();
+    let gap_ms = duration_to_ms(now.duration_since(*last_tick));
+    *last_tick = now;
+    if is_resume(gap_ms, interval_ms) {
+        watcher_log(&format!(
+            "resume after {gap_ms}ms gap (sleep/App Nap) — clearing AX cache"
+        ));
+        clear_content_title_cache();
+    }
+
+    let idle_ms = system_idle_ms().unwrap_or(0);
+    if !should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS) {
+        if *recording {
+            watcher_log(&format!("capture paused — user idle {idle_ms}ms"));
+            *recording = false;
+        }
+        return;
+    }
+    if !*recording {
+        watcher_log("capture resumed — user active");
+        *recording = true;
+    }
+
+    let Some(info) = active_window_fallback() else {
+        return;
+    };
+    if is_self_app(&info.app_name) {
+        return;
+    }
+    let metadata = serde_json::to_string(&info).ok();
+    if let Err(error) = store.record_active_window_context(
+        &info.app_name,
+        info.window_title.as_deref(),
+        info.url.as_deref(),
+        info.workspace_key.as_deref(),
+        metadata.as_deref(),
+        Some(interval),
+    ) {
+        watcher_log(&format!("record_active_window_context failed: {error}"));
+    }
+}
+
+fn duration_to_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
+/// Whether the active window should be captured this tick.
+fn should_record(idle_ms: u64, idle_threshold_ms: u64) -> bool {
+    idle_ms < idle_threshold_ms
+}
+
+/// Whether the gap since the previous tick indicates the process was suspended
+/// (system sleep or App Nap throttling) rather than a normal interval wait.
+fn is_resume(gap_ms: u64, interval_ms: u64) -> bool {
+    let threshold = interval_ms.saturating_mul(5).max(60_000);
+    gap_ms >= threshold
+}
+
+fn clear_content_title_cache() {
+    if let Ok(mut guard) = CONTENT_TITLE_CACHE.lock() {
+        if let Some(cache) = guard.as_mut() {
+            cache.clear();
+        }
+    }
+}
+
+/// Append-only watcher diagnostics so silent capture failures are debuggable in
+/// shipped builds. Best-effort; truncates if it grows past ~1 MB.
+fn watcher_log(message: &str) {
+    let Some(dir) = dirs::data_local_dir() else {
+        return;
+    };
+    let path = dir.join("ai.daytrail.desktop").join("watcher.log");
+    if let Ok(metadata) = fs::metadata(&path) {
+        if metadata.len() > 1_000_000 {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = writeln!(file, "{} {message}", now_utc());
+    }
+}
+
+/// Hold an `NSProcessInfo` activity assertion that disables App Nap while still
+/// allowing the system to sleep when idle. The returned token must be kept alive
+/// for as long as capture should run; dropping it ends the activity.
+#[cfg(target_os = "macos")]
+fn begin_background_activity() -> Option<impl Sized> {
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+
+    let reason = NSString::from_str("DayTrail continuous activity capture");
+    let token = NSProcessInfo::processInfo()
+        .beginActivityWithOptions_reason(NSActivityOptions::UserInitiatedAllowingIdleSystemSleep, &reason);
+    watcher_log("App Nap disabled via NSProcessInfo activity assertion");
+    Some(token)
+}
+
+/// Opt the capture process out of Windows power throttling (EcoQoS).
+///
+/// A classic Win32 process (which Tauri produces) is never PLM-suspended the way
+/// a macOS App Nap target is, so capture keeps running when the window is hidden.
+/// This call only stops the OS from down-clocking the capture process while it is
+/// backgrounded, keeping poll timing reliable. Like the macOS assertion, it does
+/// **not** prevent the system from sleeping, so it is battery-safe.
+#[cfg(target_os = "windows")]
+fn begin_background_activity() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, ProcessPowerThrottling, SetProcessInformation,
+        PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        PROCESS_POWER_THROTTLING_STATE,
+    };
+
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: 0, // 0 = throttling disabled for the controlled knob
+    };
+    let ok = unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            std::ptr::addr_of!(state) as *const core::ffi::c_void,
+            core::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        )
+    };
+    if ok != 0 {
+        watcher_log("Windows power throttling disabled for capture process");
+    } else {
+        watcher_log("Windows power throttling opt-out failed (non-fatal)");
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn begin_background_activity() {}
 
 /// Returns how long the system HID devices (keyboard/mouse) have been idle, in milliseconds.
 /// Returns `None` if the check is unavailable or fails.
@@ -2261,11 +2419,42 @@ mod tests {
     use super::is_chromium_browser;
     use super::{
         clean_codex_context_title, codex_thread_hint_from_state_db,
-        display_app_name_from_executable, meaningful_ax_candidate, push_ai_tool_from_path,
-        score_ax_context_candidate, single_workspace_candidate, status_prefixed_ax_candidate,
-        terminal_ai_tools_from_ps_output, workspace_from_candidates,
+        display_app_name_from_executable, is_resume, meaningful_ax_candidate, push_ai_tool_from_path,
+        score_ax_context_candidate, should_record, single_workspace_candidate,
+        status_prefixed_ax_candidate, terminal_ai_tools_from_ps_output, workspace_from_candidates,
     };
     use std::path::Path;
+
+    #[test]
+    fn records_only_while_user_is_active() {
+        // Below the 60s idle threshold → capture.
+        assert!(should_record(0, 60_000));
+        assert!(should_record(59_999, 60_000));
+        // At/above the threshold → user is away, skip.
+        assert!(!should_record(60_000, 60_000));
+        assert!(!should_record(10 * 60_000, 60_000));
+    }
+
+    #[test]
+    fn detects_suspension_gap_as_resume() {
+        let interval_ms = 2_000;
+        // Normal ticks (~interval) are not a resume.
+        assert!(!is_resume(0, interval_ms));
+        assert!(!is_resume(2_100, interval_ms));
+        assert!(!is_resume(9_000, interval_ms));
+        // A large wall-clock gap (App Nap throttle / sleep) is a resume.
+        assert!(is_resume(60_000, interval_ms));
+        assert!(is_resume(12 * 60 * 60 * 1_000, interval_ms));
+    }
+
+    #[test]
+    fn resume_threshold_has_a_floor_for_tiny_intervals() {
+        // With a sub-second interval, 5x would be far too twitchy; the 60s floor
+        // prevents false "resume" detection on ordinary scheduling jitter.
+        let interval_ms = 100;
+        assert!(!is_resume(30_000, interval_ms));
+        assert!(is_resume(60_000, interval_ms));
+    }
 
     #[test]
     fn matches_focused_vscode_title_to_the_right_project_candidate() {
