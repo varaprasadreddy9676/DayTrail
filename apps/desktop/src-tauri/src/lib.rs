@@ -26,6 +26,7 @@ pub fn run() {
     install_panic_logger();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let store = WorktraceStore::open_default(app.handle())?;
             if let Err(error) = store.ensure_default_launch_at_login() {
@@ -34,9 +35,10 @@ pub fn run() {
             if let Err(error) = store.apply_retention_policy() {
                 eprintln!("failed to apply data retention policy: {error:#}");
             }
+            ensure_notification_permission(app.handle());
             app.manage(store.clone());
             setup_tray(app, store.clone())?;
-            spawn_active_window_watcher(store.clone(), Duration::from_secs(2));
+            spawn_active_window_watcher(store.clone(), app.handle().clone(), Duration::from_secs(2));
             // Enforce the data-retention policy on a daily schedule. Without this
             // it would only run at startup — and DayTrail is built to never quit,
             // so on an always-on machine the DB would grow unbounded. This is a
@@ -66,6 +68,18 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+/// Ask for system-notification permission once at startup so the "welcome back"
+/// away alert can actually be delivered. Best-effort and non-fatal.
+fn ensure_notification_permission(app: &tauri::AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    match app.notification().permission_state() {
+        Ok(tauri_plugin_notification::PermissionState::Granted) => {}
+        _ => {
+            let _ = app.notification().request_permission();
+        }
+    }
 }
 
 /// Record every panic to a crash log before the default handler runs, so a

@@ -5,7 +5,7 @@ use std::{
     process::Command,
     sync::Mutex,
     thread,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
 
 type ContentTitleCache = HashMap<u32, (Option<String>, SystemTime)>;
@@ -22,6 +22,7 @@ use std::{ffi::OsString, os::windows::ffi::OsStringExt};
 
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
 
 use crate::{
     models::{GitContext, TerminalBridgeMetadata},
@@ -46,7 +47,7 @@ pub struct ActiveWindowInfo {
 /// Threshold: skip recording if system has been idle longer than this.
 const IDLE_SKIP_THRESHOLD_MS: u64 = 60_000; // 60 seconds
 
-pub fn spawn_active_window_watcher(store: WorktraceStore, interval: Duration) {
+pub fn spawn_active_window_watcher(store: WorktraceStore, app: AppHandle, interval: Duration) {
     thread::spawn(move || {
         // Keep the capture loop out of macOS App Nap. A tray-resident app with
         // its window hidden is a prime App Nap target: macOS throttles/suspends
@@ -55,22 +56,21 @@ pub fn spawn_active_window_watcher(store: WorktraceStore, interval: Duration) {
         // report. The assertion still allows normal system (idle/lid) sleep, so
         // it does not drain the battery.
         let _activity = begin_background_activity();
-        run_watcher_loop(&store, interval);
+        run_watcher_loop(&store, &app, interval);
     });
 }
 
 /// Watcher main loop. Each tick is wrapped in `catch_unwind` so a single bad
 /// poll (e.g. a transient AX/objc failure) can never kill capture for the rest
 /// of the process lifetime — it logs and continues on the next interval.
-fn run_watcher_loop(store: &WorktraceStore, interval: Duration) {
+fn run_watcher_loop(store: &WorktraceStore, app: &AppHandle, interval: Duration) {
     let interval_ms = duration_to_ms(interval);
-    let mut last_tick = Instant::now();
     let mut recording = true;
     watcher_log("watcher started");
 
     loop {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            watcher_tick(store, interval, interval_ms, &mut last_tick, &mut recording)
+            watcher_tick(store, app, interval, interval_ms, &mut recording)
         }));
         if outcome.is_err() {
             watcher_log("PANIC in watcher tick — recovered, continuing");
@@ -80,36 +80,42 @@ fn run_watcher_loop(store: &WorktraceStore, interval: Duration) {
 }
 
 /// A single poll cycle. Records the active window unless the user is idle.
-/// Detects process suspension (App Nap / sleep) via a wall-clock gap and clears
-/// the stale per-PID AX cache on resume. Logs only state transitions and
-/// resume/record failures to keep the log low-noise but diagnosable.
+/// Detects process suspension (sleep / App Nap) via the wall-clock gap since the
+/// previous tick — the monotonic clock can pause during system sleep, so we
+/// compare real timestamps instead. On a long gap we clear the stale per-PID AX
+/// cache and post a "welcome back" notification so the user can classify the
+/// away time even if the window was closed.
 fn watcher_tick(
     store: &WorktraceStore,
+    app: &AppHandle,
     interval: Duration,
     interval_ms: u64,
-    last_tick: &mut Instant,
     recording: &mut bool,
 ) {
     let _ = store.ingest_local_bridge_files();
 
-    let now = Instant::now();
-    let gap_ms = duration_to_ms(now.duration_since(*last_tick));
-    *last_tick = now;
-    if is_resume(gap_ms, interval_ms) {
-        watcher_log(&format!(
-            "resume after {gap_ms}ms gap (sleep/App Nap) — clearing AX cache"
-        ));
-        clear_content_title_cache();
-    }
+    let now_epoch = epoch_ms();
+    // Wall-clock gap since the previous tick (0 on the very first tick).
+    let wall_gap_ms = watcher_heartbeat()
+        .map(|hb| now_epoch.saturating_sub(hb.last_tick_at_ms).max(0))
+        .unwrap_or(0);
 
     let idle_ms = system_idle_ms().unwrap_or(0);
     let trusted = accessibility_trusted();
     // Heartbeat: published every tick so the UI can tell "alive" from "dead".
     update_heartbeat(|hb| {
-        hb.last_tick_at_ms = epoch_ms();
+        hb.last_tick_at_ms = now_epoch;
         hb.last_idle_ms = idle_ms;
         hb.accessibility_trusted = trusted;
     });
+
+    if is_resume(wall_gap_ms as u64, interval_ms) {
+        watcher_log(&format!(
+            "resume after {wall_gap_ms}ms wall-clock gap (sleep/App Nap) — clearing AX cache"
+        ));
+        clear_content_title_cache();
+        maybe_notify_away(app, wall_gap_ms);
+    }
 
     if !should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS) {
         if *recording {
@@ -172,6 +178,45 @@ fn clear_content_title_cache() {
         if let Some(cache) = guard.as_mut() {
             cache.clear();
         }
+    }
+}
+
+/// Minimum away gap before posting a "welcome back" notification.
+const AWAY_NOTIFY_THRESHOLD_MS: i64 = 10 * 60 * 1000;
+
+/// After the process resumes from a long suspension (laptop sleep), post a
+/// native notification so the user can classify the away time — even if
+/// DayTrail's window was closed. Best-effort and non-fatal.
+fn maybe_notify_away(app: &AppHandle, gap_ms: i64) {
+    if gap_ms < AWAY_NOTIFY_THRESHOLD_MS {
+        return;
+    }
+    use tauri_plugin_notification::NotificationExt;
+    let body = format!(
+        "You were away about {}. Open DayTrail to log it as a meeting, break, or offline work.",
+        humanize_duration_ms(gap_ms)
+    );
+    match app
+        .notification()
+        .builder()
+        .title("Welcome back to DayTrail")
+        .body(&body)
+        .show()
+    {
+        Ok(()) => watcher_log(&format!("away notification posted ({gap_ms}ms gap)")),
+        Err(error) => watcher_log(&format!("away notification failed: {error}")),
+    }
+}
+
+/// Humanize a millisecond duration as e.g. "27m" or "1h 34m". Pure for testing.
+fn humanize_duration_ms(ms: i64) -> String {
+    let total_minutes = (ms / 60_000).max(1);
+    let hours = total_minutes / 60;
+    let minutes = total_minutes % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
     }
 }
 
@@ -2627,6 +2672,14 @@ mod tests {
             super::assess_capture_liveness(Some(&hb_no_ax), now, 30_000),
             super::CaptureLiveness::Healthy
         );
+    }
+
+    #[test]
+    fn humanizes_away_durations() {
+        assert_eq!(super::humanize_duration_ms(0), "1m"); // floored to a minimum of 1m
+        assert_eq!(super::humanize_duration_ms(27 * 60_000), "27m");
+        assert_eq!(super::humanize_duration_ms(60 * 60_000), "1h 0m");
+        assert_eq!(super::humanize_duration_ms(94 * 60_000), "1h 34m");
     }
 
     #[test]
