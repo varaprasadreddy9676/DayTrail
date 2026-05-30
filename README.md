@@ -20,6 +20,8 @@ Use it to answer:
 
 [![Windows Build](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/windows-release.yml/badge.svg)](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/windows-release.yml)
 [![macOS Build](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/macos-release.yml/badge.svg)](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/macos-release.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/iamsai)
 
 ## Why Try It
 
@@ -36,56 +38,39 @@ The goal is not surveillance. The goal is a private work memory that helps you
 write better updates, recover context faster, and notice when important work was
 missed.
 
-## Screenshots
+## See it in action
 
-The README expects release screenshots in `docs/screenshots/`. Before publishing
-the public page, add these six PNG files at about 1400px wide.
+### Today — your whole day, reconstructed automatically
 
-### Today Dashboard
+![DayTrail Today dashboard: current work is "Claude · Deep dive into project codebase", with daily stats and a 24-hour timeline](docs/screenshots/01-today.png)
 
-![Today dashboard showing current work, daily stats, selected hour, and timeline](docs/screenshots/01-today.png)
+One glance answers "what did I do today?": what you're on right now (with the real
+document/chat title, not just the app name), time tracked, active apps, AI time,
+and a 24-hour timeline you can drill into hour by hour.
 
-The Today view gives a quick answer to "what happened today": current capture,
-time tracked, active apps, AI time, selected-hour details, and a compact
-24-hour timeline.
+### AI Impact — how much of your work actually flows through AI
 
-### AI Impact
+![AI Impact view showing per-tool usage: ChatGPT, Claude, and Claude Code with durations](docs/screenshots/02-ai-impact.png)
 
-![AI Impact view showing per-tool usage and AI-assisted work](docs/screenshots/02-ai-impact.png)
+DayTrail treats AI tools as first-class work and measures them — which tools
+(ChatGPT, Claude, Codex, Copilot, Cursor…), for how long, and on which projects.
 
-AI Impact separates AI-assisted time from normal app usage, making it easier to
-see when tools like ChatGPT, Claude, Codex, or editor assistants were part of
-the work.
+### Activity — sessions, apps, and projects
 
-### Activity Breakdown
+![Activity view showing a work session broken down by app and AI tool](docs/screenshots/03-activity.png)
 
-![Activity view showing app and context breakdown](docs/screenshots/03-activity.png)
+Every work session is broken down into the apps, projects, and AI tools behind
+it — so a single block of time tells the whole story.
 
-Activity groups the day by app, project, folder, website, and tool so you can
-move from a broad app total into the actual context behind it.
+### Capture Health — it tells you when it breaks
 
-### Timeline And Hour Drilldown
+![Capture Health settings showing all capture sources green and Accessibility granted](docs/screenshots/06-capture-health.png)
 
-![24-hour timeline and hour drilldown showing app-level detail](docs/screenshots/04-timeline.png)
+Most trackers fail silently and you lose a day before noticing. DayTrail watches
+its own capture engine and every source — if a permission is revoked or capture
+stalls, it shows you exactly what's wrong and how to fix it.
 
-The 24-hour timeline supports active-hour filtering, hour drilldown, manual
-meeting / offline work tagging, and app-level details when you need to explain a
-specific block of time.
-
-### Daily Report
-
-![Generated daily report with source-backed summary and export options](docs/screenshots/05-reports.png)
-
-Reports turn captured facts into a practical daily summary that can be copied or
-exported without inventing work that was not captured.
-
-### Capture Health
-
-![Capture health settings showing permission and integration status](docs/screenshots/06-capture-health.png)
-
-Capture Health shows whether app tracking, browser tabs, editor projects,
-terminal folders, AI tools, and privacy settings are working. When something
-breaks, the app should tell you where to fix it.
+> Screenshots use a sample project name; DayTrail keeps all real data on your machine.
 
 ## What It Captures
 
@@ -222,6 +207,16 @@ for the full release checklist, signing notes, and manual verification steps.
 - `docs/functional-requirements.txt`, `docs/technical-requirements.txt`, and
   `docs/design-guide.txt` are product targets and backlog references, not a
   guarantee that every listed item has shipped.
+
+## Support DayTrail
+
+DayTrail is free and open source, built by one developer in the open. If it
+helps you remember your days — or you just want to see it get better — you can
+support development here:
+
+[![Buy me a coffee on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/iamsai)
+
+Stars, issues, and pull requests are just as welcome.
 
 ## License
 
