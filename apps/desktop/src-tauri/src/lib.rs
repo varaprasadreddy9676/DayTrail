@@ -23,6 +23,8 @@ use crate::{
 };
 
 pub fn run() {
+    install_panic_logger();
+
     tauri::Builder::default()
         .setup(|app| {
             let store = WorktraceStore::open_default(app.handle())?;
@@ -64,6 +66,53 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+/// Record every panic to a crash log before the default handler runs, so a
+/// crash in any thread (UI, watcher, scheduler, command) leaves a durable trace
+/// instead of vanishing in a shipped build. The default hook still runs, so
+/// stderr/backtrace behaviour is unchanged for `cargo run`.
+fn install_panic_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
+        write_crash_log(&format!("thread '{thread}' panicked at {location}: {payload}"));
+        default_hook(info);
+    }));
+}
+
+fn write_crash_log(message: &str) {
+    let Some(dir) = dirs::data_local_dir() else {
+        return;
+    };
+    let path = dir.join("ai.daytrail.desktop").join("crash.log");
+    if let Ok(metadata) = std::fs::metadata(&path) {
+        if metadata.len() > 1_000_000 {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let _ = writeln!(file, "{timestamp} {message}");
+    }
 }
 
 /// Periodically apply the data-retention policy so it is enforced on an

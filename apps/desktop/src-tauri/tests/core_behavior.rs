@@ -2661,3 +2661,66 @@ fn detects_most_recent_editor_workspace_storage_when_multiple_projects_are_open(
     assert_eq!(detected.path, recent_project.display().to_string());
     assert_eq!(detected.source, "workspace-storage");
 }
+
+#[test]
+fn today_snapshot_shows_a_new_days_capture_and_excludes_prior_days() {
+    // Guards the original "nothing recorded on a new day" report at the query
+    // layer: a capture stamped on the current local day must surface in today's
+    // snapshot, and a capture from a previous local day must not leak in or mask
+    // it. A timezone/day-boundary regression here would hide a fresh day's data.
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    let now = chrono::Local::now().timestamp_millis();
+    let prior_day = now - 30 * 60 * 60 * 1000; // 30h ago is always a previous local day
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("today-event".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("Code".into()),
+            title: Some("Today work".into()),
+            url: None,
+            workspace_key: Some("/repo/today".into()),
+            started_at: Some(now - 2_000),
+            ended_at: Some(now),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("today event");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("prior-day-event".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("Code".into()),
+            title: Some("Yesterday work".into()),
+            url: None,
+            workspace_key: Some("/repo/yesterday".into()),
+            started_at: Some(prior_day - 2_000),
+            ended_at: Some(prior_day),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("prior day event");
+
+    let today = store.today_snapshot().expect("today snapshot");
+
+    assert!(
+        today.source_events.iter().any(|event| event.id == "today-event"),
+        "a capture stamped today must appear in the new-day snapshot"
+    );
+    assert!(
+        today
+            .source_events
+            .iter()
+            .all(|event| event.id != "prior-day-event"),
+        "a capture from a previous day must not appear in today's snapshot"
+    );
+    assert_eq!(
+        today.local_date,
+        chrono::Local::now().date_naive().format("%Y-%m-%d").to_string()
+    );
+}
