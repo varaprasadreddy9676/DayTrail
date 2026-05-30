@@ -201,14 +201,20 @@ describe("DayTrail command center", () => {
   });
 
   it("shows terminal bridge capability labels as Terminal", async () => {
-    const now = new Date("2026-05-28T09:15:00").getTime();
+    // Use the current local day so the event is treated as "today" — the app
+    // filters the timeline to today's events, so a hard-coded past date makes
+    // this test silently rot (it only passed on 2026-05-28).
+    const base = new Date();
+    base.setHours(9, 15, 0, 0);
+    const now = base.getTime();
+    const localDate = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
     const invoke = vi.fn(async (command: string) => {
       if (command !== "today") {
         return null;
       }
 
       return {
-        localDate: "2026-05-28",
+        localDate,
         tasks: [],
         quickNotes: [],
         commitments: [],
