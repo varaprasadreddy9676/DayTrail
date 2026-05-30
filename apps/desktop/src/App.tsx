@@ -4406,27 +4406,45 @@ function TodayView({
     setSelectedHours([hour]);
   };
   const selectedHourBucket = hourBuckets[activeHour] ?? hourBuckets[new Date().getHours()];
+  // Whole-day idle gaps. The per-hour buckets only detect gaps *within* an hour,
+  // so an away period that crosses an hour boundary — which a laptop sleep almost
+  // always does — would never surface. Detect gaps across the full sorted event
+  // list instead, using the raw (unfiltered) events so a hidden app does not look
+  // like a gap.
+  const dayIdleGaps = useMemo(() => {
+    const IDLE_GAP_THRESHOLD_MS = 5 * 60 * 1000;
+    const sorted = [...sourceEvents].sort((left, right) => left.startedAt - right.startedAt);
+    const gaps: IdleGap[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const curr = sorted[i];
+      const prevEnd = Math.max(prev.endedAt, prev.startedAt + prev.durationMs);
+      const gap = curr.startedAt - prevEnd;
+      if (gap >= IDLE_GAP_THRESHOLD_MS) {
+        gaps.push({ startMs: prevEnd, endMs: curr.startedAt, durationMs: gap });
+      }
+    }
+    return gaps;
+  }, [sourceEvents]);
   const idlePrompt = useMemo(() => {
     const minimumPromptMs = 10 * 60 * 1000;
     const now = Date.now();
-    for (const bucket of hourBuckets) {
-      for (const gap of bucket.idleGaps) {
-        const id = `${gap.startMs}-${gap.endMs}`;
-        const alreadyCovered = manualBlocks.some((block) =>
-          block.classified && rangesOverlap(gap.startMs, gap.endMs, block.startMs, block.endMs),
-        );
-        if (
-          gap.durationMs >= minimumPromptMs &&
-          gap.endMs < now - 60_000 &&
-          !alreadyCovered &&
-          !dismissedIdlePromptIds.has(id)
-        ) {
-          return { ...gap, id };
-        }
+    for (const gap of dayIdleGaps) {
+      const id = `${gap.startMs}-${gap.endMs}`;
+      const alreadyCovered = manualBlocks.some((block) =>
+        block.classified && rangesOverlap(gap.startMs, gap.endMs, block.startMs, block.endMs),
+      );
+      if (
+        gap.durationMs >= minimumPromptMs &&
+        gap.endMs < now - 60_000 &&
+        !alreadyCovered &&
+        !dismissedIdlePromptIds.has(id)
+      ) {
+        return { ...gap, id };
       }
     }
     return null;
-  }, [dismissedIdlePromptIds, hourBuckets, manualBlocks]);
+  }, [dayIdleGaps, dismissedIdlePromptIds, manualBlocks]);
   const inspectedSession =
     sessions.find((session) => session.id === inspectedSessionId) ?? null;
   const inspectedEvents = inspectedSession
