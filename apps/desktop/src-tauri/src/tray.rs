@@ -129,10 +129,10 @@ pub fn setup_tray(app: &tauri::App, store: WorktraceStore) -> tauri::Result<()> 
     Ok(())
 }
 
-/// Periodically reflect real capture health in the tray: the status menu item
-/// text, plus a ⚠ badge in the menu bar (macOS) that is visible even when the
-/// main window is closed — the exact situation where capture tends to die. This
-/// is what turns a silent stop into something the user actually notices.
+/// Periodically reflect real capture health in the tray menu and tooltip.
+/// Keep the macOS menu bar itself to a single DayTrail icon: setting a tray
+/// title renders as separate text beside the icon, which looks like a duplicate
+/// status item and confused users.
 fn spawn_tray_health_updater(
     app: AppHandle,
     store: WorktraceStore,
@@ -144,20 +144,21 @@ fn spawn_tray_health_updater(
     std::thread::spawn(move || loop {
         std::thread::sleep(TRAY_HEALTH_POLL);
 
-        let paused = store.pause_state().map(|state| state.paused).unwrap_or(false);
+        let paused = store
+            .pause_state()
+            .map(|state| state.paused)
+            .unwrap_or(false);
         let heartbeat = watcher_heartbeat();
         let liveness =
             assess_capture_liveness(heartbeat.as_ref(), tray_now_ms(), TRAY_STALE_AFTER_MS);
 
-        let (label, badge): (&str, Option<&str>) = if paused {
-            ("DayTrail: Paused", None)
+        let label: &str = if paused {
+            "DayTrail: Paused"
         } else {
             match liveness {
-                CaptureLiveness::Stalled => ("DayTrail: ⚠ Capture stopped", Some("⚠")),
-                CaptureLiveness::PermissionLost => {
-                    ("DayTrail: ⚠ Accessibility needed", Some("⚠"))
-                }
-                _ => ("DayTrail: Tracking Active", None),
+                CaptureLiveness::Stalled => "DayTrail: Capture stopped",
+                CaptureLiveness::PermissionLost => "DayTrail: Accessibility needed",
+                _ => "DayTrail: Tracking Active",
             }
         };
 
@@ -166,7 +167,8 @@ fn spawn_tray_health_updater(
         // Menu/tray mutations must run on the main thread.
         let _ = app.run_on_main_thread(move || {
             let _ = status_item.set_text(label);
-            let _ = tray.set_title(badge);
+            let _ = tray.set_tooltip(Some(label));
+            let _ = tray.set_title(None::<&str>);
         });
     });
 }
