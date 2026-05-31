@@ -7,6 +7,21 @@ use anyhow::{anyhow, Context, Result};
 
 const SERVICE_NAME: &str = "ai.daytrail.desktop";
 
+/// Build a `Command` that never flashes a console window on Windows. DayTrail is
+/// a GUI/tray app, so any helper process it spawns (git, powershell, reg) must be
+/// windowless — otherwise a cmd window blinks on every poll. No-op on other OSes.
+pub(crate) fn hidden_command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 pub trait KeychainAdapter {
     fn keychain_get(&self, key: &str) -> Result<Option<String>>;
     fn keychain_set(&self, key: &str, value: &str) -> Result<()>;
@@ -163,7 +178,7 @@ fn set_launch_at_login_platform(enabled: bool) -> Result<()> {
     });
 
     if !enabled {
-        let _ = Command::new("reg")
+        let _ = hidden_command("reg")
             .args(["delete", RUN_KEY, "/v", VALUE_NAME, "/f"])
             .status()
             .context("failed to invoke reg.exe to remove startup entry")?;
@@ -182,7 +197,7 @@ fn set_launch_at_login_platform(enabled: bool) -> Result<()> {
         .display()
         .to_string();
     let command = format!("\"{executable}\"");
-    let status = Command::new("reg")
+    let status = hidden_command("reg")
         .args([
             "add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ", "/d", &command, "/f",
         ])

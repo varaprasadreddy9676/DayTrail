@@ -825,7 +825,7 @@ fn extract_ticket_id(text: &str) -> Option<String> {
 }
 
 fn run_git(workspace_path: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let output = crate::platform::hidden_command("git")
         .arg("-C")
         .arg(workspace_path)
         .args(args)
@@ -1752,7 +1752,7 @@ fn terminal_ai_tools_from_processes(app_name: &str, process_id: Option<u32>) -> 
 #[cfg(target_os = "windows")]
 fn windows_process_command_output() -> Option<String> {
     let script = "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId,$_.ParentProcessId,(($_.CommandLine -as [string]) -replace '[\\r\\n]+',' ') }";
-    let output = Command::new("powershell.exe")
+    let output = crate::platform::hidden_command("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
         .ok()?;
