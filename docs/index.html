@@ -1,0 +1,1740 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DayTrail - Private workday memory for macOS</title>
+  <meta
+    name="description"
+    content="DayTrail turns your apps, windows, projects, and AI activity into a clean private timeline so you can retrace your workday without managing timers."
+  />
+  <meta property="og:title" content="DayTrail - Your workday, automatically remembered." />
+  <meta
+    property="og:description"
+    content="Private, local-first workday memory for macOS. See where your time went, what AI helped with, and generate reports from facts."
+  />
+  <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#030712" />
+  <link rel="icon" href="assets/daytrail-icon.png" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --dt-bg-0: #030712;
+      --dt-bg-1: #050b14;
+      --dt-bg-2: #0b1220;
+      --dt-panel: rgba(15, 23, 42, 0.72);
+      --dt-panel-strong: rgba(15, 23, 42, 0.9);
+      --dt-border: rgba(148, 163, 184, 0.18);
+      --dt-border-strong: rgba(148, 163, 184, 0.28);
+      --dt-text: #f8fafc;
+      --dt-soft: #cbd5e1;
+      --dt-muted: #94a3b8;
+      --dt-blue: #3b82f6;
+      --dt-cyan: #22d3ee;
+      --dt-violet: #8b5cf6;
+      --dt-emerald: #22c55e;
+      --dt-amber: #f59e0b;
+      --dt-pink: #ec4899;
+      --dt-max: 1320px;
+      --parallax-x: 0;
+      --parallax-y: 0;
+      --scroll-progress: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+      background: var(--dt-bg-0);
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--dt-text);
+      font-family:
+        ui-sans-serif,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Inter,
+        Roboto,
+        "Helvetica Neue",
+        Arial,
+        sans-serif;
+      background:
+        radial-gradient(circle at 78% 22%, rgba(34, 211, 238, 0.11), transparent 30%),
+        radial-gradient(circle at 22% 76%, rgba(139, 92, 246, 0.12), transparent 36%),
+        radial-gradient(circle at 50% 110%, rgba(59, 130, 246, 0.1), transparent 32%),
+        linear-gradient(180deg, #030712 0%, #07111f 52%, #020617 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -3;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.92), transparent 88%);
+      transform: translate3d(0, calc(var(--scroll-progress) * -18px), 0);
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      opacity: 0.055;
+      background-image:
+        radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px),
+        radial-gradient(circle at 70% 62%, rgba(255, 255, 255, 0.72) 0 1px, transparent 1px);
+      background-size: 38px 42px, 51px 57px;
+      mix-blend-mode: screen;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .page-shell {
+      position: relative;
+      min-height: 100vh;
+      overflow-x: hidden;
+      isolation: isolate;
+    }
+
+    .aurora {
+      position: fixed;
+      top: -22%;
+      right: 0;
+      left: 0;
+      z-index: -1;
+      width: 100%;
+      height: 72vh;
+      pointer-events: none;
+      opacity: 0.56;
+      filter: blur(22px);
+      background:
+        radial-gradient(circle at 72% 18%, rgba(34, 211, 238, 0.2), transparent 26%),
+        radial-gradient(circle at 52% 54%, rgba(139, 92, 246, 0.16), transparent 30%),
+        radial-gradient(circle at 18% 36%, rgba(59, 130, 246, 0.14), transparent 26%);
+      transform-origin: center top;
+      animation: auroraDrift 22s ease-in-out infinite alternate;
+    }
+
+    .landing-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      background: rgba(3, 7, 18, 0.72);
+      backdrop-filter: blur(24px);
+    }
+
+    .header-inner {
+      width: min(var(--dt-max), calc(100% - 40px));
+      min-height: 78px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 auto;
+      border-radius: 12px;
+      object-fit: cover;
+      filter: drop-shadow(0 16px 26px rgba(34, 211, 238, 0.16));
+    }
+
+    .brand-copy {
+      display: block;
+      min-width: 0;
+    }
+
+    .brand strong {
+      display: block;
+      color: var(--dt-text);
+      font-size: 18px;
+      line-height: 1.08;
+      font-weight: 820;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-tagline {
+      display: block;
+      margin-top: 3px;
+      color: var(--dt-muted);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--dt-soft);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .nav-link {
+      border-radius: 999px;
+      padding: 10px 13px;
+      transition: color 180ms ease, background 180ms ease;
+    }
+
+    .nav-link:hover {
+      color: var(--dt-text);
+      background: rgba(148, 163, 184, 0.08);
+    }
+
+    .nav-download {
+      margin-left: 6px;
+      padding: 10px 15px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 13px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--dt-violet), var(--dt-blue) 58%, #13b8ff);
+      box-shadow: 0 14px 34px rgba(59, 130, 246, 0.28);
+    }
+
+    .hero {
+      position: relative;
+      width: min(var(--dt-max), calc(100% - 40px));
+      margin: 0 auto;
+      padding: clamp(54px, 7vw, 94px) 0 36px;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 18px -11vw auto;
+      height: 62vh;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 68% 30%, rgba(34, 211, 238, 0.16), transparent 34%),
+        radial-gradient(circle at 48% 52%, rgba(245, 158, 11, 0.08), transparent 22%);
+      transform: translate3d(0, calc(var(--scroll-progress) * -28px), 0);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(560px, 0.88fr) minmax(630px, 1.12fr);
+      align-items: center;
+      gap: clamp(24px, 3vw, 42px);
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 3;
+      padding-bottom: 16px;
+      transform: translate3d(0, calc(var(--scroll-progress) * -18px), 0);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      width: fit-content;
+      margin: 0 0 24px;
+      padding: 9px 13px;
+      border: 1px solid rgba(59, 130, 246, 0.34);
+      border-radius: 999px;
+      color: #b7e7ff;
+      background: rgba(15, 23, 42, 0.5);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      font-size: 13px;
+      font-weight: 760;
+      letter-spacing: 0.01em;
+      animation: copyIn 720ms ease both 120ms;
+    }
+
+    .eyebrow svg {
+      width: 17px;
+      height: 17px;
+      color: var(--dt-cyan);
+    }
+
+    h1 {
+      max-width: 680px;
+      margin: 0;
+      color: var(--dt-text);
+      font-size: clamp(3.35rem, 5.2vw, 5.35rem);
+      line-height: 0.94;
+      letter-spacing: -0.045em;
+      animation: copyIn 820ms cubic-bezier(0.2, 0.9, 0.2, 1) both 170ms;
+    }
+
+    .headline-accent {
+      background: linear-gradient(92deg, #f8fafc 0%, #8edfff 42%, #9b7cff 72%, #f2b04c 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero-subhead {
+      max-width: 600px;
+      margin: 28px 0 0;
+      color: #d2deea;
+      font-size: clamp(1.04rem, 1.55vw, 1.22rem);
+      line-height: 1.65;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 34px;
+    }
+
+    .button {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 0 22px;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      color: var(--dt-text);
+      background: rgba(15, 23, 42, 0.55);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      font-size: 15px;
+      line-height: 1;
+      font-weight: 780;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .button svg {
+      width: 19px;
+      height: 19px;
+    }
+
+    .button.primary {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: linear-gradient(135deg, #2563eb 0%, #1698ff 54%, #20d6d1 100%);
+      color: #ffffff;
+      box-shadow:
+        0 22px 70px rgba(37, 99, 235, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+
+    .button.secondary {
+      min-height: 48px;
+      padding-inline: 18px;
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(218, 228, 238, 0.9);
+      background: rgba(15, 23, 42, 0.34);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .button.primary::after {
+      content: "";
+      position: absolute;
+      inset: -80% auto -80% -45%;
+      width: 42%;
+      transform: skewX(-16deg);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+      opacity: 0;
+      transition: transform 640ms ease, opacity 220ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      border-color: rgba(34, 211, 238, 0.38);
+      box-shadow:
+        0 18px 50px rgba(34, 211, 238, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .button.primary:hover::after {
+      opacity: 1;
+      transform: translateX(360%) skewX(-16deg);
+    }
+
+    .button:focus-visible,
+    .nav-link:focus-visible,
+    .chip:focus-visible {
+      outline: 3px solid rgba(34, 211, 238, 0.48);
+      outline-offset: 3px;
+    }
+
+    .trust-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 30px;
+    }
+
+    .trust-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 12px;
+      color: #d0dbea;
+      background: rgba(15, 23, 42, 0.44);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .trust-pill svg {
+      width: 16px;
+      height: 16px;
+      color: var(--dt-cyan);
+    }
+
+    .support-line {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      max-width: 560px;
+      margin: 22px 0 0;
+      color: #b5c2d2;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .support-line svg {
+      width: 17px;
+      height: 17px;
+      flex: 0 0 auto;
+      color: #9cc7ff;
+    }
+
+    .hero-scene {
+      position: relative;
+      min-height: 650px;
+      border-radius: 34px;
+      transform: translate3d(0, calc(var(--scroll-progress) * 22px), 0);
+    }
+
+    .hero-scene::before {
+      content: "";
+      position: absolute;
+      inset: 42px 0 36px;
+      border-radius: 34px;
+      background:
+        radial-gradient(circle at 24% 48%, rgba(34, 211, 238, 0.1), transparent 30%),
+        radial-gradient(circle at 72% 56%, rgba(139, 92, 246, 0.11), transparent 34%),
+        rgba(15, 23, 42, 0.16);
+      filter: blur(10px);
+      opacity: 0.95;
+    }
+
+    .hero-parallax-layer {
+      transform:
+        translate3d(
+          calc(var(--parallax-x) * var(--depth-x, 0px)),
+          calc(var(--parallax-y) * var(--depth-y, 0px)),
+          0
+        );
+      transition: transform 80ms linear;
+    }
+
+    .engine-label {
+      position: absolute;
+      top: 44px;
+      right: 92px;
+      color: #8edfff;
+      font-size: 11px;
+      font-weight: 760;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.72;
+      text-shadow: 0 0 22px rgba(34, 211, 238, 0.28);
+    }
+
+    .signal-field {
+      position: absolute;
+      inset: 0;
+      --depth-x: 10px;
+      --depth-y: 8px;
+      z-index: 2;
+    }
+
+    .signal-node {
+      position: absolute;
+      width: 110px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 10px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 15px;
+      background: rgba(15, 23, 42, 0.56);
+      box-shadow:
+        0 14px 34px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      color: var(--dt-soft);
+      font-size: 12px;
+      font-weight: 720;
+      animation: signalDrift 8s ease-in-out infinite alternate;
+    }
+
+    .signal-node::before {
+      content: attr(data-short);
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      flex: 0 0 auto;
+      border-radius: 9px;
+      color: #dff8ff;
+      background:
+        linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(139, 92, 246, 0.22)),
+        rgba(3, 7, 18, 0.72);
+      font-size: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .signal-node:nth-of-type(1) { left: 26px; top: 152px; animation-delay: 0s; }
+    .signal-node:nth-of-type(2) { left: 58px; top: 230px; animation-delay: -1.2s; }
+    .signal-node:nth-of-type(3) { left: 28px; top: 308px; animation-delay: -2.4s; }
+    .signal-node:nth-of-type(4) { left: 64px; top: 386px; animation-delay: -3.2s; }
+    .signal-node:nth-of-type(5) { left: 36px; top: 464px; animation-delay: -0.8s; }
+
+    .connector-lines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.36;
+    }
+
+    .connector-lines path {
+      stroke-dasharray: 5 10;
+      animation: connectorFlow 10s linear infinite;
+    }
+
+    .ribbon-layer {
+      position: absolute;
+      inset: 0;
+      --depth-x: 14px;
+      --depth-y: 10px;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .ribbon-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .ribbon-glow {
+      filter: blur(10px);
+      opacity: 0.44;
+    }
+
+    .ribbon-path {
+      stroke-dasharray: 1120;
+      stroke-dashoffset: 1120;
+      animation: drawRibbon 1.6s cubic-bezier(0.16, 1, 0.3, 1) both 300ms;
+    }
+
+    .ribbon-node {
+      filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.44));
+      animation: nodeWake 700ms ease both;
+    }
+
+    .ribbon-label {
+      fill: #cbd5e1;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0.88;
+    }
+
+    .pulse {
+      position: absolute;
+      width: 13px;
+      height: 13px;
+      border-radius: 999px;
+      background: #dff8ff;
+      box-shadow:
+        0 0 12px rgba(34, 211, 238, 0.78),
+        0 0 28px rgba(59, 130, 246, 0.42);
+      offset-path: path("M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384");
+      offset-rotate: 0deg;
+      animation: pulseTravel 8s linear infinite;
+    }
+
+    .pulse:nth-of-type(2) {
+      animation-delay: -2.7s;
+      background: #bda7ff;
+    }
+
+    .pulse:nth-of-type(3) {
+      animation-delay: -5.2s;
+      background: #ffd28a;
+    }
+
+    .mockup-wrap {
+      position: absolute;
+      right: -18px;
+      top: 116px;
+      width: min(760px, 92%);
+      --depth-x: 18px;
+      --depth-y: 14px;
+      z-index: 4;
+      opacity: 1;
+      animation: mockupFloat 8s ease-in-out infinite alternate 1.2s;
+    }
+
+    .product-mockup {
+      position: relative;
+      min-height: 430px;
+      overflow: hidden;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      border-radius: 24px;
+      background:
+        linear-gradient(145deg, rgba(15, 23, 42, 0.94), rgba(5, 11, 20, 0.96)),
+        var(--dt-panel-strong);
+      box-shadow:
+        0 34px 94px rgba(0, 0, 0, 0.48),
+        0 0 58px rgba(59, 130, 246, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      transform: perspective(1200px) rotateX(3deg) rotateY(-5deg);
+      transform-origin: center;
+    }
+
+    .product-mockup::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.1);
+      background:
+        linear-gradient(110deg, transparent 0 42%, rgba(255, 255, 255, 0.04) 50%, transparent 58%),
+        radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.12), transparent 30%);
+      opacity: 0.9;
+    }
+
+    .mockup-titlebar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+      background: rgba(2, 6, 14, 0.34);
+    }
+
+    .traffic {
+      display: flex;
+      gap: 8px;
+    }
+
+    .traffic i {
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+    }
+
+    .traffic i:nth-child(1) { background: #ff5f57; }
+    .traffic i:nth-child(2) { background: #febc2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+
+    .mockup-titlebar strong {
+      color: #dce9f7;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .mockup-icons {
+      display: flex;
+      gap: 10px;
+      color: #9fb1c7;
+    }
+
+    .mockup-icons svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .mockup-body {
+      padding: 18px;
+    }
+
+    .mockup-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      color: var(--dt-text);
+      font-size: 16px;
+      font-weight: 780;
+    }
+
+    .mockup-heading span {
+      color: var(--dt-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      min-height: 78px;
+      padding: 13px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.56);
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--dt-text);
+      font-size: 25px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .stat span {
+      display: block;
+      margin-top: 8px;
+      color: var(--dt-muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .stat:nth-child(3) {
+      display: none;
+    }
+
+    .timeline-panel {
+      position: relative;
+      padding: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 16px;
+      background: rgba(2, 8, 20, 0.44);
+    }
+
+    .timeline-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      color: var(--dt-soft);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .time-beam {
+      position: absolute;
+      left: 52%;
+      top: 43px;
+      bottom: 128px;
+      width: 2px;
+      border-radius: 99px;
+      background: linear-gradient(180deg, transparent, var(--dt-cyan), transparent);
+      box-shadow: 0 0 22px rgba(34, 211, 238, 0.72);
+      animation: beamPulse 2.8s ease-in-out infinite;
+    }
+
+    .time-badge {
+      position: absolute;
+      left: calc(52% - 30px);
+      top: 33px;
+      z-index: 2;
+      padding: 5px 8px;
+      border-radius: 8px;
+      color: #02131a;
+      background: var(--dt-cyan);
+      box-shadow: 0 0 26px rgba(34, 211, 238, 0.5);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .timeline-track {
+      position: relative;
+      display: grid;
+      grid-template-columns: 0.55fr 0.9fr 1.45fr 0.8fr 0.55fr 0.55fr;
+      gap: 4px;
+      height: 30px;
+      padding: 5px;
+      overflow: hidden;
+      border-radius: 10px;
+      background: rgba(148, 163, 184, 0.1);
+    }
+
+    .segment {
+      border-radius: 7px;
+      transform-origin: left;
+    }
+
+    .segment:nth-child(1) { background: rgba(59, 130, 246, 0.45); }
+    .segment:nth-child(2) { background: #147cff; }
+    .segment:nth-child(3) { background: linear-gradient(90deg, #1188ff, #17cec6); }
+    .segment:nth-child(4) { background: #ff8b3d; }
+    .segment:nth-child(5) { background: #7c5cff; }
+    .segment:nth-child(6) { background: #a855f7; }
+
+    .time-axis {
+      display: flex;
+      justify-content: space-between;
+      margin: 9px 1px 0;
+      color: rgba(203, 213, 225, 0.58);
+      font-size: 10px;
+    }
+
+    .selected-hour {
+      display: grid;
+      grid-template-columns: 1fr 0.95fr;
+      gap: 13px;
+      margin-top: 16px;
+    }
+
+    .hour-card,
+    .context-card {
+      min-height: 152px;
+      padding: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.45);
+    }
+
+    .hour-card h3 {
+      margin: 0 0 6px;
+      color: #91ddff;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+
+    .hour-card p {
+      margin: 0 0 14px;
+      color: var(--dt-soft);
+      font-size: 12px;
+    }
+
+    .app-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 26px;
+      color: var(--dt-soft);
+      font-size: 12px;
+    }
+
+    .app-row span:first-child {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 99px;
+      background: var(--dot, var(--dt-blue));
+      box-shadow: 0 0 16px color-mix(in srgb, var(--dot, var(--dt-blue)) 65%, transparent);
+    }
+
+    .context-card strong {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--dt-text);
+      font-size: 14px;
+    }
+
+    .context-card span {
+      display: block;
+      padding: 8px 0;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      color: var(--dt-soft);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .floating-card {
+      position: absolute;
+      z-index: 5;
+      width: 190px;
+      padding: 13px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.62);
+      backdrop-filter: blur(24px);
+      box-shadow:
+        0 18px 54px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      opacity: 1;
+      animation: cardFloat 7s ease-in-out infinite alternate;
+    }
+
+    .floating-card strong {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--dt-text);
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .floating-card p {
+      margin: 9px 0 0;
+      color: var(--dt-muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .card-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 19px;
+      height: 19px;
+      border-radius: 7px;
+      background: rgba(34, 211, 238, 0.16);
+      color: var(--card-color, var(--dt-cyan));
+    }
+
+    .card-icon svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .card-capture {
+      left: -128px;
+      top: 96px;
+      --depth-x: 24px;
+      --depth-y: 18px;
+      animation-delay: 1.35s, 0s;
+    }
+
+    .card-ai {
+      left: -132px;
+      top: 252px;
+      --depth-x: 24px;
+      --depth-y: 18px;
+      animation-delay: 1.48s, -1.6s;
+    }
+
+    .card-report {
+      left: -126px;
+      bottom: 86px;
+      --depth-x: 22px;
+      --depth-y: 16px;
+      animation-delay: 1.62s, -2.4s;
+    }
+
+    .download-panel {
+      position: relative;
+      margin-top: 36px;
+      padding: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 22px;
+      background: rgba(15, 23, 42, 0.42);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .hero-copy,
+    .hero-copy * {
+      backface-visibility: hidden;
+    }
+
+    .download-panel strong {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--dt-text);
+      font-size: 14px;
+    }
+
+    .download-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .download-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 12px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 12px;
+      color: var(--dt-soft);
+      background: rgba(3, 7, 18, 0.35);
+      font-size: 13px;
+      font-weight: 700;
+      transition: transform 180ms ease, border-color 180ms ease, color 180ms ease;
+    }
+
+    .download-links a:hover {
+      transform: translateY(-1px);
+      border-color: rgba(34, 211, 238, 0.32);
+      color: var(--dt-text);
+    }
+
+    .app-strip {
+      width: min(var(--dt-max), calc(100% - 40px));
+      margin: 8px auto 0;
+      padding: 16px 0 34px;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      text-align: center;
+    }
+
+    .app-strip p {
+      margin: 0 0 16px;
+      color: var(--dt-soft);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 13px;
+      color: var(--dt-soft);
+      background: rgba(15, 23, 42, 0.5);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      font-size: 12px;
+      font-weight: 700;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+    }
+
+    .chip::before {
+      content: attr(data-short);
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      border-radius: 8px;
+      color: #e8f7ff;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(34, 211, 238, 0.18));
+      font-size: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .chip:hover {
+      transform: translateY(-3px);
+      border-color: rgba(34, 211, 238, 0.3);
+      color: var(--dt-text);
+      box-shadow: 0 18px 40px rgba(34, 211, 238, 0.1);
+    }
+
+    .mode-teaser {
+      width: min(var(--dt-max), calc(100% - 40px));
+      margin: 0 auto 62px;
+      display: grid;
+      grid-template-columns: 0.72fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .mode-heading {
+      padding: 22px 0;
+    }
+
+    .mode-heading h2 {
+      max-width: 380px;
+      margin: 0;
+      color: var(--dt-text);
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 1;
+      letter-spacing: -0.045em;
+    }
+
+    .mode-heading p {
+      max-width: 420px;
+      margin: 14px 0 0;
+      color: var(--dt-muted);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .mode-cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .mode-card {
+      padding: 20px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 22px;
+      background: rgba(15, 23, 42, 0.52);
+      box-shadow:
+        0 24px 70px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .mode-card strong {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--dt-text);
+      font-size: 16px;
+    }
+
+    .mode-card span {
+      display: inline-flex;
+      margin: 0 8px 8px 0;
+      padding: 7px 9px;
+      border-radius: 9px;
+      color: var(--dt-soft);
+      background: rgba(148, 163, 184, 0.08);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    @keyframes auroraDrift {
+      from { transform: translate3d(-2%, -1%, 0) scale(1.18); }
+      to { transform: translate3d(2%, 4%, 0) scale(1.24); }
+    }
+
+    @keyframes copyIn {
+      from {
+        opacity: 0;
+        transform: translate3d(0, 18px, 0);
+      }
+      to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+      }
+    }
+
+    @keyframes signalDrift {
+      from { transform: translate3d(0, 0, 0); }
+      to { transform: translate3d(12px, -8px, 0); }
+    }
+
+    @keyframes connectorFlow {
+      to { stroke-dashoffset: -120; }
+    }
+
+    @keyframes drawRibbon {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes nodeWake {
+      from { opacity: 0; transform: scale(0.82); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes pulseTravel {
+      from { offset-distance: 0%; }
+      to { offset-distance: 100%; }
+    }
+
+    @keyframes mockupIn {
+      from {
+        opacity: 0;
+        transform: translate3d(24px, 32px, 0) scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+      }
+    }
+
+    @keyframes mockupFloat {
+      from { translate: 0 0; }
+      to { translate: 0 -9px; }
+    }
+
+    @keyframes segmentReveal {
+      from { opacity: 0; transform: scaleX(0); }
+      to { opacity: 1; transform: scaleX(1); }
+    }
+
+    @keyframes beamPulse {
+      0%, 100% { opacity: 0.58; transform: scaleY(0.92); }
+      50% { opacity: 1; transform: scaleY(1.05); }
+    }
+
+    @keyframes hourIn {
+      from {
+        opacity: 0;
+        transform: translate3d(18px, 0, 0);
+      }
+      to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+      }
+    }
+
+    @keyframes chartDraw {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes cardIn {
+      from {
+        opacity: 0;
+        transform: translate3d(0, 16px, 0) scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+      }
+    }
+
+    @keyframes cardFloat {
+      from { translate: 0 0; }
+      to { translate: 0 -10px; }
+    }
+
+    @keyframes fragmentAssemble {
+      0%, 100% {
+        opacity: 0.42;
+        transform: translate3d(0, 0, 0) scale(0.98);
+      }
+      50% {
+        opacity: 0.95;
+        transform: translate3d(72px, 22px, 0) scale(0.86);
+      }
+    }
+
+    @media (max-width: 1080px) {
+      .hero-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-copy {
+        max-width: 780px;
+      }
+
+      .hero-scene {
+        min-height: 600px;
+      }
+
+      .mockup-wrap {
+        right: 0;
+        width: 72%;
+      }
+
+      .mode-teaser {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .header-inner {
+        width: min(100% - 28px, var(--dt-max));
+        min-height: 70px;
+      }
+
+      .brand-tagline {
+        display: none;
+      }
+
+      .nav-link:not(.nav-download) {
+        display: none;
+      }
+
+      .hero-grid,
+      .hero-copy,
+      .hero-subhead,
+      .hero-actions,
+      .trust-pills,
+      .support-line,
+      .download-panel {
+        min-width: 0;
+        max-width: calc(100vw - 28px);
+      }
+
+      .hero-copy,
+      .hero-subhead,
+      .support-line,
+      .download-panel {
+        width: 100%;
+      }
+
+      .hero-subhead,
+      .support-line {
+        overflow-wrap: break-word;
+      }
+
+      .hero {
+        width: min(100% - 28px, var(--dt-max));
+        padding-top: 40px;
+      }
+
+      h1 {
+        font-size: clamp(2.65rem, 11.2vw, 3rem);
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+        max-width: 100%;
+      }
+
+      .hero-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .trust-pill {
+        flex: 1 1 auto;
+      }
+
+      .support-line {
+        align-items: flex-start;
+      }
+
+      .hero-scene {
+        min-height: 560px;
+        margin-top: 10px;
+        overflow: hidden;
+      }
+
+      .engine-label {
+        left: 14px;
+        right: auto;
+        top: 18px;
+      }
+
+      .signal-node {
+        width: 84px;
+        height: 36px;
+        font-size: 10px;
+      }
+
+      .signal-node:nth-of-type(n+5) {
+        display: none;
+      }
+
+      .signal-node:nth-of-type(1) { left: 4px; top: 76px; }
+      .signal-node:nth-of-type(2) { left: 16px; top: 126px; }
+      .signal-node:nth-of-type(3) { left: 0; top: 176px; }
+      .signal-node:nth-of-type(4) { left: 24px; top: 226px; }
+
+      .mockup-wrap {
+        left: 0;
+        right: 0;
+        top: 176px;
+        width: 100%;
+      }
+
+      .product-mockup {
+        transform: none;
+        border-radius: 20px;
+      }
+
+      .mockup-body {
+        padding: 14px;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .stat {
+        min-height: auto;
+      }
+
+      .selected-hour {
+        grid-template-columns: 1fr;
+      }
+
+      .context-card {
+        display: none;
+      }
+
+      .floating-card {
+        display: none;
+      }
+
+      .ribbon-layer {
+        opacity: 0.78;
+        transform: scale(0.82) translate3d(-90px, -8px, 0);
+        transform-origin: left top;
+      }
+
+      .pulse {
+        display: none;
+      }
+
+      .aurora {
+        inset-inline: 0;
+      }
+
+      .app-strip {
+        width: min(100% - 28px, var(--dt-max));
+      }
+
+      .mode-teaser {
+        width: min(100% - 28px, var(--dt-max));
+        margin-bottom: 40px;
+      }
+
+      .mode-cards {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 430px) {
+      .nav-download {
+        padding-inline: 12px;
+      }
+
+      .brand-mark {
+        width: 40px;
+        height: 40px;
+      }
+
+      .mockup-titlebar strong {
+        display: none;
+      }
+
+      .hour-card h3 {
+        font-size: 15px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+
+      .hero-parallax-layer,
+      .hero-copy,
+      .hero-scene,
+      body::before,
+      .hero::before {
+        transform: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <div class="aurora" aria-hidden="true"></div>
+    <header class="landing-header">
+      <div class="header-inner">
+        <a class="brand" href="#" aria-label="DayTrail home">
+          <img class="brand-mark" src="assets/daytrail-icon.png" alt="" width="44" height="44" />
+          <span class="brand-copy">
+            <strong>DayTrail</strong>
+            <span class="brand-tagline">Retrace your workday.</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Primary navigation">
+          <a class="nav-link" href="#features">Features</a>
+          <a class="nav-link" href="#privacy">Privacy</a>
+          <a class="nav-link nav-download" href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <rect x="5" y="11" width="14" height="10" rx="3" stroke="currentColor" stroke-width="2" />
+              </svg>
+              Private workday memory for macOS
+            </p>
+            <h1 id="hero-title">Your workday,<br><span class="headline-accent">automatically remembered.</span></h1>
+            <p class="hero-subhead">
+              DayTrail turns your apps, windows, projects, and AI activity into a clean private timeline &mdash; so you can retrace your workday without managing timers.
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                Download for macOS
+              </a>
+              <a class="button secondary" href="videos/daytrail-demo.mp4">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+                  <path d="m10 8 6 4-6 4V8Z" fill="currentColor" />
+                </svg>
+                Watch the trail
+              </a>
+            </div>
+            <div class="trust-pills" aria-label="Trust highlights">
+              <span class="trust-pill">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 5 6v6c0 4.2 2.7 7 7 9 4.3-2 7-4.8 7-9V6l-7-3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+                Local-first
+              </span>
+              <span class="trust-pill">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 4 16 16M9 9a3 3 0 0 1 4 4M7.5 7.5 5 10s2.5 5 7 5c1.2 0 2.3-.3 3.2-.8M11 5c.3 0 .7 0 1 0 4.5 0 7 5 7 5a12 12 0 0 1-1.8 2.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                No screenshots
+              </span>
+              <span class="trust-pill">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M5 8h14M7 16h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                Simple + Pro modes
+              </span>
+            </div>
+            <p class="support-line" id="privacy">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 4 7v5c0 4.4 3.1 7.4 8 9 4.9-1.6 8-4.6 8-9V7l-8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+              Metadata-first. No screenshots. No clipboard capture. Local by default. Raw details stay hidden until Pro Mode.
+            </p>
+            <div class="download-panel" id="download">
+              <strong>Download links</strong>
+              <div class="download-links">
+                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Latest macOS release</a>
+                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Windows installers</a>
+                <a href="https://github.com/varaprasadreddy9676/DayTrail">Source on GitHub</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-scene" data-parallax-scene aria-label="Animated DayTrail product preview">
+            <p class="engine-label">Workday Memory Engine</p>
+
+            <div class="signal-field hero-parallax-layer" aria-hidden="true">
+              <svg class="connector-lines" viewBox="0 0 1120 680" preserveAspectRatio="none">
+                <path d="M100 140 C190 160 260 210 360 284" fill="none" stroke="rgba(34,211,238,.42)" stroke-width="1.2" />
+                <path d="M120 212 C205 214 270 246 360 288" fill="none" stroke="rgba(139,92,246,.42)" stroke-width="1.2" />
+                <path d="M105 284 C214 300 274 314 362 303" fill="none" stroke="rgba(59,130,246,.4)" stroke-width="1.2" />
+                <path d="M140 356 C220 344 292 326 384 320" fill="none" stroke="rgba(34,211,238,.38)" stroke-width="1.2" />
+                <path d="M106 426 C222 406 294 362 406 338" fill="none" stroke="rgba(236,72,153,.34)" stroke-width="1.2" />
+                <path d="M164 496 C240 452 322 386 430 354" fill="none" stroke="rgba(245,158,11,.34)" stroke-width="1.2" />
+              </svg>
+              <span class="signal-node" data-short="VS">VS Code</span>
+              <span class="signal-node" data-short="CH">Chrome</span>
+              <span class="signal-node" data-short="TM">Terminal</span>
+              <span class="signal-node" data-short="AI">ChatGPT</span>
+              <span class="signal-node" data-short="SL">Slack</span>
+            </div>
+
+            <div class="ribbon-layer hero-parallax-layer" aria-hidden="true">
+              <svg class="ribbon-svg" viewBox="0 0 1120 680" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="ribbonGradient" x1="88" y1="384" x2="1040" y2="384" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#3b82f6" />
+                    <stop offset="0.42" stop-color="#22d3ee" />
+                    <stop offset="0.72" stop-color="#8b5cf6" />
+                    <stop offset="1" stop-color="#f59e0b" />
+                  </linearGradient>
+                </defs>
+                <path class="ribbon-glow ribbon-path" d="M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384" fill="none" stroke="url(#ribbonGradient)" stroke-width="36" stroke-linecap="round" />
+                <path class="ribbon-path" d="M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384" fill="none" stroke="url(#ribbonGradient)" stroke-width="15" stroke-linecap="round" />
+                <circle class="ribbon-node" cx="118" cy="360" r="8" fill="#3b82f6" style="animation-delay:.8s" />
+                <circle class="ribbon-node" cx="240" cy="286" r="8" fill="#22d3ee" style="animation-delay:.95s" />
+                <circle class="ribbon-node" cx="386" cy="304" r="8" fill="#8b5cf6" style="animation-delay:1.1s" />
+                <circle class="ribbon-node" cx="520" cy="448" r="8" fill="#22c55e" style="animation-delay:1.25s" />
+                <circle class="ribbon-node" cx="706" cy="318" r="8" fill="#22d3ee" style="animation-delay:1.4s" />
+                <circle class="ribbon-node" cx="900" cy="286" r="8" fill="#f59e0b" style="animation-delay:1.55s" />
+                <text class="ribbon-label" x="94" y="336">8 AM Code</text>
+                <text class="ribbon-label" x="340" y="270">10 AM AI</text>
+                <text class="ribbon-label" x="662" y="292">4 PM Review</text>
+                <text class="ribbon-label" x="910" y="326">6 PM Report</text>
+              </svg>
+              <span class="pulse"></span>
+              <span class="pulse"></span>
+              <span class="pulse"></span>
+            </div>
+
+            <div class="mockup-wrap hero-parallax-layer">
+              <div class="product-mockup" role="img" aria-label="DayTrail Simple Mode mockup showing a today timeline and selected hour breakdown">
+                <div class="mockup-titlebar">
+                  <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <strong>DayTrail</strong>
+                  <span class="mockup-icons" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M21 21 16.6 16.6M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                  </span>
+                </div>
+                <div class="mockup-body">
+                  <div class="mockup-heading">Today <span>Simple Mode</span></div>
+                  <div class="stats">
+                    <div class="stat"><strong>7h 42m</strong><span>remembered</span></div>
+                    <div class="stat"><strong>4</strong><span>work sessions</span></div>
+                    <div class="stat"><strong>3</strong><span>AI sessions detected</span></div>
+                  </div>
+                  <div class="timeline-panel">
+                    <div class="timeline-title"><span>24-hour timeline</span><span>AI detected in 3 sessions</span></div>
+                    <span class="time-badge">9:41 AM</span>
+                    <span class="time-beam"></span>
+                    <div class="timeline-track">
+                      <span class="segment"></span>
+                      <span class="segment"></span>
+                      <span class="segment"></span>
+                      <span class="segment"></span>
+                      <span class="segment"></span>
+                      <span class="segment"></span>
+                    </div>
+                    <div class="time-axis"><span>12 AM</span><span>4 AM</span><span>8 AM</span><span>12 PM</span><span>4 PM</span><span>8 PM</span><span>12 AM</span></div>
+                    <div class="selected-hour">
+                      <div class="hour-card">
+                        <h3>9 AM - 10 AM</h3>
+                        <p>Deep work session · 47m</p>
+                        <div class="app-row"><span><i class="dot" style="--dot:#3b82f6"></i>VS Code</span><span>34m</span></div>
+                        <div class="app-row"><span><i class="dot" style="--dot:#8b5cf6"></i>ChatGPT</span><span>8m</span></div>
+                        <div class="app-row"><span><i class="dot" style="--dot:#22d3ee"></i>Terminal</span><span>5m</span></div>
+                      </div>
+                      <div class="context-card">
+                        <strong>What happened</strong>
+                        <span>VS Code · DayTrail repo</span>
+                        <span>ChatGPT used for research</span>
+                        <span>Terminal commands detected</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="floating-card card-capture hero-parallax-layer">
+              <strong><span class="card-icon" style="--card-color:#22c55e"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" fill="currentColor" /></svg></span>Now capturing</strong>
+              <p>VS Code · DayTrail repo<br>42m focused</p>
+            </div>
+            <div class="floating-card card-ai hero-parallax-layer">
+              <strong><span class="card-icon" style="--card-color:#8b5cf6"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 2.2 5.2L20 10.4l-5.8 2.2L12 18l-2.2-5.4L4 10.4l5.8-2.2L12 3Z" fill="currentColor" /></svg></span>AI detected</strong>
+              <p>Codex · ChatGPT · Gemini</p>
+            </div>
+            <div class="floating-card card-report hero-parallax-layer">
+              <strong><span class="card-icon" style="--card-color:#f59e0b"><svg viewBox="0 0 24 24" fill="none"><path d="M6 4h9l3 3v13H6V4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /><path d="M9 13h6M9 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></span>Daily report ready</strong>
+              <p>4 sessions summarized</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="app-strip" id="features" aria-labelledby="apps-title">
+        <p id="apps-title">Works with the apps you already use</p>
+        <div class="chips">
+          <span class="chip" data-short="VS">VS Code</span>
+          <span class="chip" data-short="CH">Chrome</span>
+          <span class="chip" data-short="BR">Brave</span>
+          <span class="chip" data-short="TM">Terminal</span>
+          <span class="chip" data-short="AI">ChatGPT</span>
+          <span class="chip" data-short="SL">Slack</span>
+          <span class="chip" data-short="NT">Notion</span>
+          <span class="chip" data-short="CU">Cursor</span>
+          <span class="chip" data-short="GH">GitHub</span>
+        </div>
+      </section>
+
+      <section class="mode-teaser" aria-labelledby="mode-title">
+        <div class="mode-heading">
+          <h2 id="mode-title">Simple by default. Pro when needed.</h2>
+          <p>Start with a clean daily memory, then reveal sources and confidence only when you need to audit the trail.</p>
+        </div>
+        <div class="mode-cards">
+          <div class="mode-card">
+            <strong>Simple Mode</strong>
+            <span>Timeline</span>
+            <span>Sessions</span>
+            <span>Reports</span>
+          </div>
+          <div class="mode-card">
+            <strong>Pro Mode</strong>
+            <span>Sources</span>
+            <span>Confidence</span>
+            <span>Raw activity</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const scene = document.querySelector("[data-parallax-scene]");
+      if (!scene || reduceMotion.matches) return;
+
+      let targetX = 0;
+      let targetY = 0;
+      let currentX = 0;
+      let currentY = 0;
+      let raf = 0;
+
+      const tick = () => {
+        currentX += (targetX - currentX) * 0.12;
+        currentY += (targetY - currentY) * 0.12;
+        scene.style.setProperty("--parallax-x", currentX.toFixed(4));
+        scene.style.setProperty("--parallax-y", currentY.toFixed(4));
+        raf = requestAnimationFrame(tick);
+      };
+
+      const setPointer = (event) => {
+        if (window.innerWidth < 900) return;
+        const rect = scene.getBoundingClientRect();
+        targetX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+        targetY = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
+      };
+
+      const resetPointer = () => {
+        targetX = 0;
+        targetY = 0;
+      };
+
+      scene.addEventListener("pointermove", setPointer);
+      scene.addEventListener("pointerleave", resetPointer);
+      raf = requestAnimationFrame(tick);
+
+      const setScroll = () => {
+        const progress = Math.min(Math.max(window.scrollY / 520, 0), 1);
+        document.documentElement.style.setProperty("--scroll-progress", progress.toFixed(4));
+      };
+
+      setScroll();
+      window.addEventListener("scroll", setScroll, { passive: true });
+      reduceMotion.addEventListener("change", () => {
+        cancelAnimationFrame(raf);
+        resetPointer();
+        scene.style.setProperty("--parallax-x", "0");
+        scene.style.setProperty("--parallax-y", "0");
+      });
+    })();
+  </script>
+</body>
+</html>
