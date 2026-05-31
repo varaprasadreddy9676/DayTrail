@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DayTrail - Private workday memory for macOS</title>
+  <title>DayTrail - Private workday memory for Mac and Windows</title>
   <meta
     name="description"
     content="DayTrail turns your apps, windows, projects, and AI activity into a clean private timeline so you can retrace your workday without managing timers."
@@ -11,7 +11,7 @@
   <meta property="og:title" content="DayTrail - Your workday, automatically remembered." />
   <meta
     property="og:description"
-    content="Private, local-first workday memory for macOS. See where your time went, what AI helped with, and generate reports from facts."
+    content="Private, local-first workday memory for Mac and Windows. See where your time went, what AI helped with, and generate reports from facts."
   />
   <meta property="og:type" content="website" />
   <meta name="theme-color" content="#030712" />
@@ -348,6 +348,15 @@
         inset 0 1px 0 rgba(255, 255, 255, 0.22);
     }
 
+    .button.platform-secondary {
+      border-color: rgba(34, 211, 238, 0.18);
+      color: rgba(238, 247, 255, 0.94);
+      background: rgba(15, 23, 42, 0.46);
+      box-shadow:
+        0 16px 46px rgba(15, 23, 42, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
     .button.secondary {
       min-height: 46px;
       padding-inline: 17px;
@@ -356,6 +365,10 @@
       background: rgba(15, 23, 42, 0.22);
       box-shadow: none;
       font-size: 14px;
+    }
+
+    .button.secondary.watch-link {
+      min-width: 0;
     }
 
     .button.primary::after {
@@ -1295,11 +1308,6 @@
         max-width: 100%;
       }
 
-      .hero-actions {
-        display: grid;
-        grid-template-columns: 1fr;
-      }
-
       .button {
         width: 100%;
       }
@@ -1471,7 +1479,7 @@
                 <path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 <rect x="5" y="11" width="14" height="10" rx="3" stroke="currentColor" stroke-width="2" />
               </svg>
-              Private workday memory for macOS
+              Private workday memory for Mac and Windows
             </p>
             <h1 id="hero-title">Your workday,<br><span class="headline-accent">automatically remembered.</span></h1>
             <p class="hero-subhead">
@@ -1482,9 +1490,15 @@
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
-                Download for macOS
+                Download for Mac
               </a>
-              <a class="button secondary" href="videos/daytrail-demo.mp4">
+              <a class="button platform-secondary" href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 5h16v14H4V5Zm0 7h16M12 5v14" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                </svg>
+                Download for Windows
+              </a>
+              <a class="button secondary watch-link" href="videos/daytrail-demo.mp4">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
                   <path d="m10 8 6 4-6 4V8Z" fill="currentColor" />
@@ -1513,8 +1527,8 @@
             <div class="download-panel" id="download">
               <strong>Download links</strong>
               <div class="download-links">
-                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Latest macOS release</a>
-                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Windows installers</a>
+                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Download for Mac</a>
+                <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">Download for Windows</a>
                 <a href="https://github.com/varaprasadreddy9676/DayTrail">Source on GitHub</a>
               </div>
             </div>
