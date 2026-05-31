@@ -330,6 +330,74 @@ describe("DayTrail command center", () => {
     expect(screen.getByText(/openai compatible ready/i)).toBeInTheDocument();
   });
 
+  it("saves launch-at-login from capture settings", async () => {
+    const user = userEvent.setup();
+    const settings = {
+      browserBridgeEnabled: true,
+      excludedDomains: [],
+      aiProvider: "Ollama Local",
+      aiModel: "llama3.1",
+      aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      aiRedactSecrets: true,
+      fullClipboardHistory: false,
+      launchAtLogin: true,
+    };
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-05-23",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          workSessions: [],
+          parallelStreams: [],
+          sourceEvents: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings,
+          projectContext: null,
+        };
+      }
+
+      if (command === "update_settings") {
+        expect(args).toEqual({ patch: { launchAtLogin: false } });
+        return { ...settings, launchAtLogin: false };
+      }
+
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText(/waiting for captured activity/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /capture health/i }));
+    expect(screen.getByText(/keeps tracking in tray/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: /launch at login/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_settings", {
+        patch: { launchAtLogin: false },
+      }),
+    );
+    expect(await screen.findByText(/manual start/i)).toBeInTheDocument();
+  });
+
   it("keeps reports generic and generates a daily report", async () => {
     const user = userEvent.setup();
 

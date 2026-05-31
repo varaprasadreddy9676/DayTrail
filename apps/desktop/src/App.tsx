@@ -2947,7 +2947,6 @@ export default function App() {
         aiProvider: draftAiConfig.provider,
         aiModel: draftAiConfig.model,
         aiEndpoint: draftAiConfig.endpoint,
-        launchAtLogin: draftLaunchAtLogin,
         aiRedactSecrets: draftAiConfig.redactSecrets,
         fullClipboardHistory: false,
       },
@@ -3010,6 +3009,44 @@ export default function App() {
     );
     setSaveState("Settings saved");
     addToast("success", "Display mode updated");
+  }
+
+  async function saveLaunchAtLogin(value: boolean) {
+    const previousValue = draftLaunchAtLogin;
+    setDraftLaunchAtLogin(value);
+
+    if (!hasTauriRuntime()) {
+      setTodaySnapshot((previous) =>
+        previous
+          ? { ...previous, settings: { ...previous.settings, launchAtLogin: value } }
+          : previous,
+      );
+      setSaveState(value ? "Launch at login enabled" : "Launch at login disabled");
+      addToast("success", value ? "DayTrail will start at login" : "Launch at login disabled");
+      return;
+    }
+
+    setSaveState(value ? "Enabling launch at login..." : "Disabling launch at login...");
+    const savedSettings = await invokeTauri<BackendSettings>("update_settings", {
+      patch: { launchAtLogin: value },
+    });
+
+    if (!savedSettings) {
+      setDraftLaunchAtLogin(previousValue);
+      setSaveState("Save failed");
+      addToast("error", "Background setting not saved", "Could not update launch at login.");
+      return;
+    }
+
+    const savedValue = savedSettings.launchAtLogin ?? value;
+    setDraftLaunchAtLogin(savedValue);
+    setTodaySnapshot((previous) =>
+      previous
+        ? { ...previous, settings: { ...previous.settings, ...savedSettings } }
+        : previous,
+    );
+    setSaveState(savedValue ? "Launch at login enabled" : "Launch at login disabled");
+    addToast("success", savedValue ? "DayTrail will start at login" : "Launch at login disabled");
   }
 
   async function submitOfflineBlock(e: FormEvent<HTMLFormElement>) {
@@ -3815,6 +3852,7 @@ export default function App() {
               onRestoreDatabase={restoreDatabase}
               onSaveRetentionDays={saveRetentionDays}
               onSaveExperienceSettings={saveExperienceSettings}
+              onSaveLaunchAtLogin={saveLaunchAtLogin}
               permissionStatus={permissionStatus}
               permissionSummary={permissionSummary}
               saveAiConfig={saveAiConfig}
@@ -3824,7 +3862,6 @@ export default function App() {
               setDatabaseRestorePath={setDatabaseRestorePath}
               setSettingsConfigJson={setSettingsConfigJson}
               setSaveState={setSaveState}
-              setLaunchAtLogin={setDraftLaunchAtLogin}
               settings={todaySnapshot?.settings}
               settingsConfigJson={settingsConfigJson}
               storageInfo={storageInfo}
@@ -8028,6 +8065,7 @@ function SettingsView({
   onRestartApp,
   onRestoreDatabase,
   onSaveExperienceSettings,
+  onSaveLaunchAtLogin,
   onSaveRetentionDays,
   onTriggerBrowserAutomation,
   permissionStatus,
@@ -8039,7 +8077,6 @@ function SettingsView({
   setDatabaseRestorePath,
   setSettingsConfigJson,
   setSaveState,
-  setLaunchAtLogin,
   settings,
   settingsConfigJson,
   storageInfo,
@@ -8067,6 +8104,7 @@ function SettingsView({
   onRestartApp: () => void;
   onRestoreDatabase: () => void;
   onSaveExperienceSettings: (patch: Partial<BackendSettings>) => Promise<void>;
+  onSaveLaunchAtLogin: (value: boolean) => void;
   onSaveRetentionDays: (days: number) => void;
   onTriggerBrowserAutomation: () => void;
   permissionStatus: string;
@@ -8078,7 +8116,6 @@ function SettingsView({
   setDatabaseRestorePath: (value: string) => void;
   setSettingsConfigJson: (value: string) => void;
   setSaveState: (value: string) => void;
-  setLaunchAtLogin: (value: boolean) => void;
   settings?: BackendSettings;
   settingsConfigJson: string;
   storageInfo: BackendStorageLocationInfo | null;
@@ -8270,6 +8307,36 @@ function SettingsView({
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
+                    <span>Background capture</span>
+                    <h2>Keep DayTrail working</h2>
+                  </div>
+                  <strong>{launchAtLogin ? "Starts at login" : "Manual start"}</strong>
+                </div>
+                <div className="status-matrix">
+                  <label className="settings-toggle-row">
+                    <span>
+                      <strong>Launch at login</strong>
+                      <em>Start DayTrail automatically when you sign in so capture is ready after restart.</em>
+                    </span>
+                    <input
+                      checked={launchAtLogin}
+                      onChange={(event) => onSaveLaunchAtLogin(event.target.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+                  <div className="status-row" data-state="ok">
+                    <span>When the window is closed</span>
+                    <strong>Keeps tracking in tray</strong>
+                  </div>
+                  <div className="status-row" data-state="muted">
+                    <span>To stop DayTrail completely</span>
+                    <strong>Use Quit DayTrail</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
                     <span>First-run permissions</span>
                     <h2>OS capture access</h2>
                   </div>
@@ -8348,17 +8415,6 @@ function SettingsView({
                 <strong>{saveState}</strong>
               </div>
               <form className="settings-form" onSubmit={saveAiConfig}>
-                <label className="settings-toggle-row">
-                  <span>
-                    <strong>Launch at login</strong>
-                    <em>Start DayTrail automatically when you sign in so capture is ready after restart.</em>
-                  </span>
-                  <input
-                    checked={launchAtLogin}
-                    onChange={(event) => setLaunchAtLogin(event.target.checked)}
-                    type="checkbox"
-                  />
-                </label>
                 <label className="settings-field" htmlFor="provider">
                   <span>Provider</span>
                   <select
