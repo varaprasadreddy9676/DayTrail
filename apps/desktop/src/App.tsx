@@ -3644,6 +3644,8 @@ export default function App() {
           </button>
         </div>
 
+        <FocusMode />
+
         <footer className="sidebar-footer">
           <button
             className="status-toggle"
@@ -9052,6 +9054,179 @@ function UpdateChecker() {
           ) : (
             <span>You're on the latest version.</span>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type FocusStatus = {
+  active: boolean;
+  label: string;
+  startedAtMs: number;
+  endsAtMs?: number | null;
+  focusSecs: number;
+  offTaskSecs: number;
+  nudgeCount: number;
+  snoozedUntilMs?: number | null;
+};
+
+type FocusSummary = {
+  label: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  totalSecs: number;
+  focusSecs: number;
+  offTaskSecs: number;
+  nudgeCount: number;
+};
+
+function formatClock(totalSecs: number): string {
+  const s = Math.max(0, Math.floor(totalSecs));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+function FocusMode() {
+  const [status, setStatus] = useState<FocusStatus | null>(null);
+  const [summary, setSummary] = useState<FocusSummary | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [label, setLabel] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await invokeTauri<FocusStatus | null>("get_focus_session");
+      setStatus(next ?? null);
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+      void refresh();
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [refresh]);
+
+  const start = async () => {
+    try {
+      const next = await invokeTauri<FocusStatus>("start_focus_session", {
+        input: {
+          label: label.trim() || null,
+          durationMinutes: durationMinutes || null,
+        },
+      });
+      setStatus(next);
+      setSummary(null);
+      setComposing(false);
+      setLabel("");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const end = async () => {
+    try {
+      const result = await invokeTauri<FocusSummary | null>("end_focus_session");
+      setSummary(result ?? null);
+    } catch {
+      /* ignore */
+    }
+    setStatus(null);
+  };
+
+  const snooze = async () => {
+    try {
+      const next = await invokeTauri<FocusStatus | null>("snooze_focus_session", { minutes: 5 });
+      setStatus(next ?? null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (status?.active) {
+    const elapsed = Math.floor((nowMs - status.startedAtMs) / 1000);
+    const snoozed = Boolean(status.snoozedUntilMs && status.snoozedUntilMs > nowMs);
+    return (
+      <div className="focus-card focus-card-active">
+        <div className="focus-card-head">
+          <span className="focus-dot" />
+          <strong>Focus</strong>
+          <span className="focus-elapsed">{formatClock(elapsed)}</span>
+        </div>
+        <div className="focus-label" title={status.label}>{status.label}</div>
+        <div className="focus-meta">
+          {formatClock(status.offTaskSecs)} off-task · {status.nudgeCount} nudge
+          {status.nudgeCount === 1 ? "" : "s"}
+          {snoozed ? " · snoozed" : ""}
+        </div>
+        <div className="focus-actions">
+          <button className="button compact ghost" type="button" onClick={snooze} disabled={snoozed}>
+            Snooze 5m
+          </button>
+          <button className="button compact" type="button" onClick={end}>
+            End focus
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (composing) {
+    return (
+      <div className="focus-card">
+        <input
+          className="focus-input"
+          placeholder="What are you focusing on?"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+        />
+        <select
+          className="focus-input"
+          value={durationMinutes}
+          onChange={(e) => setDurationMinutes(Number(e.target.value))}
+        >
+          <option value={0}>Open-ended</option>
+          <option value={25}>25 minutes</option>
+          <option value={50}>50 minutes</option>
+          <option value={90}>90 minutes</option>
+        </select>
+        <div className="focus-actions">
+          <button className="button compact ghost" type="button" onClick={() => setComposing(false)}>
+            Cancel
+          </button>
+          <button className="button compact" type="button" onClick={start}>
+            Start
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="focus-card">
+      <button className="button compact sidebar-log-offline" type="button" onClick={() => setComposing(true)}>
+        ◎ Start focus
+      </button>
+      {summary && (
+        <div className="focus-summary">
+          <strong>{formatClock(summary.focusSecs)} focused</strong>
+          <span>
+            {formatClock(summary.offTaskSecs)} off-task · {summary.nudgeCount} nudge
+            {summary.nudgeCount === 1 ? "" : "s"}
+          </span>
+          <button className="focus-summary-dismiss" type="button" onClick={() => setSummary(null)}>
+            Dismiss
+          </button>
         </div>
       )}
     </div>

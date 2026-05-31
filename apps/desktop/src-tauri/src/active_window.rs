@@ -155,6 +155,10 @@ fn watcher_tick(
             });
         }
     }
+
+    // Focus Mode: nudge if the user has drifted onto a distraction. No-op unless
+    // a focus session is active.
+    crate::focus::evaluate(app, &info);
 }
 
 fn duration_to_ms(duration: Duration) -> u64 {

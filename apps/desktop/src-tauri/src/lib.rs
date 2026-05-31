@@ -2,6 +2,7 @@ pub mod active_window;
 pub mod app_icons;
 pub mod commands;
 pub mod error;
+pub mod focus;
 pub mod llm;
 pub mod models;
 pub mod native_messaging;

@@ -3,6 +3,7 @@ pub mod bridge;
 pub mod commitments;
 pub mod context;
 pub mod export;
+pub mod focus;
 pub mod inbox;
 pub mod offline;
 pub mod outputs;
@@ -93,6 +94,10 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         review::list_sessions_for_review,
         review::export_timesheet_markdown,
         updates::check_for_updates,
-        updates::app_version
+        updates::app_version,
+        focus::start_focus_session,
+        focus::end_focus_session,
+        focus::get_focus_session,
+        focus::snooze_focus_session
     ]
 }
