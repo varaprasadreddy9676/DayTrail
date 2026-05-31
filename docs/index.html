@@ -67,9 +67,9 @@
         Arial,
         sans-serif;
       background:
-        radial-gradient(circle at 78% 22%, rgba(34, 211, 238, 0.11), transparent 30%),
-        radial-gradient(circle at 22% 76%, rgba(139, 92, 246, 0.12), transparent 36%),
-        radial-gradient(circle at 50% 110%, rgba(59, 130, 246, 0.1), transparent 32%),
+        radial-gradient(circle at 78% 22%, rgba(34, 211, 238, 0.065), transparent 31%),
+        radial-gradient(circle at 22% 76%, rgba(139, 92, 246, 0.07), transparent 38%),
+        radial-gradient(circle at 50% 110%, rgba(59, 130, 246, 0.06), transparent 34%),
         linear-gradient(180deg, #030712 0%, #07111f 52%, #020617 100%);
     }
 
@@ -80,9 +80,9 @@
       z-index: -3;
       pointer-events: none;
       background:
-        linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
-      background-size: 72px 72px;
+        linear-gradient(rgba(148, 163, 184, 0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.022) 1px, transparent 1px);
+      background-size: 92px 92px;
       mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.92), transparent 88%);
       transform: translate3d(0, calc(var(--scroll-progress) * -18px), 0);
     }
@@ -93,11 +93,11 @@
       inset: 0;
       z-index: -2;
       pointer-events: none;
-      opacity: 0.055;
+      opacity: 0.028;
       background-image:
         radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px),
         radial-gradient(circle at 70% 62%, rgba(255, 255, 255, 0.72) 0 1px, transparent 1px);
-      background-size: 38px 42px, 51px 57px;
+      background-size: 58px 62px, 76px 82px;
       mix-blend-mode: screen;
     }
 
@@ -127,12 +127,12 @@
       width: 100%;
       height: 72vh;
       pointer-events: none;
-      opacity: 0.56;
-      filter: blur(22px);
+      opacity: 0.34;
+      filter: blur(28px);
       background:
-        radial-gradient(circle at 72% 18%, rgba(34, 211, 238, 0.2), transparent 26%),
-        radial-gradient(circle at 52% 54%, rgba(139, 92, 246, 0.16), transparent 30%),
-        radial-gradient(circle at 18% 36%, rgba(59, 130, 246, 0.14), transparent 26%);
+        radial-gradient(circle at 72% 18%, rgba(34, 211, 238, 0.13), transparent 28%),
+        radial-gradient(circle at 52% 54%, rgba(139, 92, 246, 0.095), transparent 32%),
+        radial-gradient(circle at 18% 36%, rgba(59, 130, 246, 0.09), transparent 28%);
       transform-origin: center top;
       animation: auroraDrift 22s ease-in-out infinite alternate;
     }
@@ -239,8 +239,8 @@
       z-index: -1;
       pointer-events: none;
       background:
-        radial-gradient(circle at 68% 30%, rgba(34, 211, 238, 0.16), transparent 34%),
-        radial-gradient(circle at 48% 52%, rgba(245, 158, 11, 0.08), transparent 22%);
+        radial-gradient(circle at 68% 30%, rgba(34, 211, 238, 0.09), transparent 36%),
+        radial-gradient(circle at 48% 52%, rgba(245, 158, 11, 0.045), transparent 24%);
       transform: translate3d(0, calc(var(--scroll-progress) * -28px), 0);
     }
 
@@ -349,12 +349,13 @@
     }
 
     .button.secondary {
-      min-height: 48px;
-      padding-inline: 18px;
-      border-color: rgba(148, 163, 184, 0.16);
-      color: rgba(218, 228, 238, 0.9);
-      background: rgba(15, 23, 42, 0.34);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      min-height: 46px;
+      padding-inline: 17px;
+      border-color: rgba(148, 163, 184, 0.11);
+      color: rgba(203, 213, 225, 0.84);
+      background: rgba(15, 23, 42, 0.22);
+      box-shadow: none;
+      font-size: 14px;
     }
 
     .button.primary::after {
@@ -379,6 +380,12 @@
     .button.primary:hover::after {
       opacity: 1;
       transform: translateX(360%) skewX(-16deg);
+    }
+
+    .button.secondary:hover {
+      border-color: rgba(148, 163, 184, 0.18);
+      box-shadow: none;
+      color: rgba(248, 250, 252, 0.92);
     }
 
     .button:focus-visible,
@@ -422,7 +429,7 @@
       gap: 9px;
       max-width: 560px;
       margin: 22px 0 0;
-      color: #b5c2d2;
+      color: #bec9d8;
       font-size: 14px;
       line-height: 1.55;
     }
@@ -436,7 +443,7 @@
 
     .hero-scene {
       position: relative;
-      min-height: 650px;
+      min-height: 690px;
       border-radius: 34px;
       transform: translate3d(0, calc(var(--scroll-progress) * 22px), 0);
     }
@@ -447,11 +454,11 @@
       inset: 42px 0 36px;
       border-radius: 34px;
       background:
-        radial-gradient(circle at 24% 48%, rgba(34, 211, 238, 0.1), transparent 30%),
-        radial-gradient(circle at 72% 56%, rgba(139, 92, 246, 0.11), transparent 34%),
-        rgba(15, 23, 42, 0.16);
-      filter: blur(10px);
-      opacity: 0.95;
+        radial-gradient(circle at 24% 48%, rgba(34, 211, 238, 0.055), transparent 31%),
+        radial-gradient(circle at 72% 56%, rgba(139, 92, 246, 0.06), transparent 36%),
+        rgba(15, 23, 42, 0.1);
+      filter: blur(14px);
+      opacity: 0.78;
     }
 
     .hero-parallax-layer {
@@ -469,19 +476,19 @@
       top: 44px;
       right: 92px;
       color: #8edfff;
-      font-size: 11px;
-      font-weight: 760;
-      letter-spacing: 0.08em;
+      font-size: 10px;
+      font-weight: 720;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      opacity: 0.72;
-      text-shadow: 0 0 22px rgba(34, 211, 238, 0.28);
+      opacity: 0.46;
+      text-shadow: none;
     }
 
     .signal-field {
       position: absolute;
       inset: 0;
-      --depth-x: 10px;
-      --depth-y: 8px;
+      --depth-x: 7px;
+      --depth-y: 6px;
       z-index: 2;
     }
 
@@ -497,28 +504,23 @@
       border-radius: 15px;
       background: rgba(15, 23, 42, 0.56);
       box-shadow:
-        0 14px 34px rgba(0, 0, 0, 0.2),
+        0 12px 30px rgba(0, 0, 0, 0.16),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
       color: var(--dt-soft);
       font-size: 12px;
       font-weight: 720;
-      animation: signalDrift 8s ease-in-out infinite alternate;
+      animation: signalFlow 9s ease-in-out infinite alternate;
     }
 
-    .signal-node::before {
-      content: attr(data-short);
-      display: grid;
-      place-items: center;
+    .signal-node img {
+      display: block;
       width: 26px;
       height: 26px;
       flex: 0 0 auto;
-      border-radius: 9px;
-      color: #dff8ff;
-      background:
-        linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(139, 92, 246, 0.22)),
-        rgba(3, 7, 18, 0.72);
-      font-size: 10px;
-      letter-spacing: -0.02em;
+      border-radius: 8px;
+      object-fit: cover;
+      background: rgba(3, 7, 18, 0.72);
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.14);
     }
 
     .signal-node:nth-of-type(1) { left: 26px; top: 152px; animation-delay: 0s; }
@@ -532,7 +534,7 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      opacity: 0.36;
+      opacity: 0.24;
     }
 
     .connector-lines path {
@@ -543,8 +545,8 @@
     .ribbon-layer {
       position: absolute;
       inset: 0;
-      --depth-x: 14px;
-      --depth-y: 10px;
+      --depth-x: 10px;
+      --depth-y: 7px;
       z-index: 3;
       pointer-events: none;
     }
@@ -558,8 +560,8 @@
     }
 
     .ribbon-glow {
-      filter: blur(10px);
-      opacity: 0.44;
+      filter: blur(13px);
+      opacity: 0.26;
     }
 
     .ribbon-path {
@@ -570,14 +572,8 @@
 
     .ribbon-node {
       filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.44));
+      opacity: 0.82;
       animation: nodeWake 700ms ease both;
-    }
-
-    .ribbon-label {
-      fill: #cbd5e1;
-      font-size: 11px;
-      font-weight: 700;
-      opacity: 0.88;
     }
 
     .pulse {
@@ -587,11 +583,11 @@
       border-radius: 999px;
       background: #dff8ff;
       box-shadow:
-        0 0 12px rgba(34, 211, 238, 0.78),
-        0 0 28px rgba(59, 130, 246, 0.42);
-      offset-path: path("M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384");
+        0 0 10px rgba(34, 211, 238, 0.46),
+        0 0 22px rgba(59, 130, 246, 0.26);
+      offset-path: path("M88 392 C206 318 312 282 406 322 C516 370 584 456 724 424 C842 398 918 330 1040 330");
       offset-rotate: 0deg;
-      animation: pulseTravel 8s linear infinite;
+      animation: pulseTravel 11s linear infinite;
     }
 
     .pulse:nth-of-type(2) {
@@ -601,19 +597,19 @@
 
     .pulse:nth-of-type(3) {
       animation-delay: -5.2s;
-      background: #ffd28a;
+      background: #9fb7ff;
     }
 
     .mockup-wrap {
       position: absolute;
-      right: -18px;
-      top: 116px;
-      width: min(760px, 92%);
-      --depth-x: 18px;
-      --depth-y: 14px;
+      right: -10px;
+      top: 94px;
+      width: min(860px, 108%);
+      --depth-x: 13px;
+      --depth-y: 10px;
       z-index: 4;
       opacity: 1;
-      animation: mockupFloat 8s ease-in-out infinite alternate 1.2s;
+      animation: mockupFloat 9s ease-in-out infinite alternate 1.2s;
     }
 
     .product-mockup {
@@ -626,10 +622,10 @@
         linear-gradient(145deg, rgba(15, 23, 42, 0.94), rgba(5, 11, 20, 0.96)),
         var(--dt-panel-strong);
       box-shadow:
-        0 34px 94px rgba(0, 0, 0, 0.48),
-        0 0 58px rgba(59, 130, 246, 0.14),
+        0 32px 84px rgba(0, 0, 0, 0.44),
+        0 0 42px rgba(59, 130, 246, 0.09),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      transform: perspective(1200px) rotateX(3deg) rotateY(-5deg);
+      transform: perspective(1200px) rotateX(2.5deg) rotateY(-4deg);
       transform-origin: center;
     }
 
@@ -641,9 +637,9 @@
       border-radius: inherit;
       box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.1);
       background:
-        linear-gradient(110deg, transparent 0 42%, rgba(255, 255, 255, 0.04) 50%, transparent 58%),
-        radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.12), transparent 30%);
-      opacity: 0.9;
+        linear-gradient(110deg, transparent 0 42%, rgba(255, 255, 255, 0.032) 50%, transparent 58%),
+        radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.075), transparent 31%);
+      opacity: 0.78;
     }
 
     .mockup-titlebar {
@@ -689,7 +685,7 @@
     }
 
     .mockup-body {
-      padding: 18px;
+      padding: 20px;
     }
 
     .mockup-heading {
@@ -698,13 +694,13 @@
       justify-content: space-between;
       margin-bottom: 14px;
       color: var(--dt-text);
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 780;
     }
 
     .mockup-heading span {
       color: var(--dt-muted);
-      font-size: 12px;
+      font-size: 12.5px;
       font-weight: 650;
     }
 
@@ -717,7 +713,7 @@
 
     .stat {
       min-height: 78px;
-      padding: 13px;
+      padding: 14px;
       border: 1px solid rgba(148, 163, 184, 0.15);
       border-radius: 14px;
       background: rgba(15, 23, 42, 0.56);
@@ -726,7 +722,7 @@
     .stat strong {
       display: block;
       color: var(--dt-text);
-      font-size: 25px;
+      font-size: 29px;
       line-height: 1;
       letter-spacing: -0.04em;
     }
@@ -735,7 +731,7 @@
       display: block;
       margin-top: 8px;
       color: var(--dt-muted);
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.35;
     }
 
@@ -745,7 +741,7 @@
 
     .timeline-panel {
       position: relative;
-      padding: 14px;
+      padding: 16px;
       border: 1px solid rgba(148, 163, 184, 0.15);
       border-radius: 16px;
       background: rgba(2, 8, 20, 0.44);
@@ -757,7 +753,7 @@
       justify-content: space-between;
       margin-bottom: 14px;
       color: var(--dt-soft);
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 760;
     }
 
@@ -769,7 +765,7 @@
       width: 2px;
       border-radius: 99px;
       background: linear-gradient(180deg, transparent, var(--dt-cyan), transparent);
-      box-shadow: 0 0 22px rgba(34, 211, 238, 0.72);
+      box-shadow: 0 0 18px rgba(34, 211, 238, 0.44);
       animation: beamPulse 2.8s ease-in-out infinite;
     }
 
@@ -782,7 +778,7 @@
       border-radius: 8px;
       color: #02131a;
       background: var(--dt-cyan);
-      box-shadow: 0 0 26px rgba(34, 211, 238, 0.5);
+      box-shadow: 0 0 18px rgba(34, 211, 238, 0.32);
       font-size: 10px;
       font-weight: 850;
     }
@@ -802,14 +798,15 @@
     .segment {
       border-radius: 7px;
       transform-origin: left;
+      animation: segmentReveal 720ms cubic-bezier(0.18, 0.9, 0.2, 1) both;
     }
 
-    .segment:nth-child(1) { background: rgba(59, 130, 246, 0.45); }
-    .segment:nth-child(2) { background: #147cff; }
-    .segment:nth-child(3) { background: linear-gradient(90deg, #1188ff, #17cec6); }
-    .segment:nth-child(4) { background: #ff8b3d; }
-    .segment:nth-child(5) { background: #7c5cff; }
-    .segment:nth-child(6) { background: #a855f7; }
+    .segment:nth-child(1) { background: rgba(59, 130, 246, 0.42); animation-delay: 0.72s; }
+    .segment:nth-child(2) { background: #147cff; animation-delay: 0.8s; }
+    .segment:nth-child(3) { background: linear-gradient(90deg, #1188ff, #17cec6); animation-delay: 0.88s; }
+    .segment:nth-child(4) { background: #6d74ff; animation-delay: 0.96s; }
+    .segment:nth-child(5) { background: #7c5cff; animation-delay: 1.04s; }
+    .segment:nth-child(6) { background: #8b5cf6; animation-delay: 1.12s; }
 
     .time-axis {
       display: flex;
@@ -824,12 +821,13 @@
       grid-template-columns: 1fr 0.95fr;
       gap: 13px;
       margin-top: 16px;
+      animation: hourIn 680ms cubic-bezier(0.18, 0.9, 0.2, 1) both 1.24s;
     }
 
     .hour-card,
     .context-card {
       min-height: 152px;
-      padding: 14px;
+      padding: 15px;
       border: 1px solid rgba(148, 163, 184, 0.15);
       border-radius: 16px;
       background: rgba(15, 23, 42, 0.45);
@@ -838,14 +836,14 @@
     .hour-card h3 {
       margin: 0 0 6px;
       color: #91ddff;
-      font-size: 17px;
+      font-size: 18px;
       letter-spacing: -0.02em;
     }
 
     .hour-card p {
       margin: 0 0 14px;
       color: var(--dt-soft);
-      font-size: 12px;
+      font-size: 12.5px;
     }
 
     .app-row {
@@ -855,7 +853,7 @@
       gap: 12px;
       min-height: 26px;
       color: var(--dt-soft);
-      font-size: 12px;
+      font-size: 12.5px;
     }
 
     .app-row span:first-child {
@@ -864,19 +862,19 @@
       gap: 8px;
     }
 
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 99px;
-      background: var(--dot, var(--dt-blue));
-      box-shadow: 0 0 16px color-mix(in srgb, var(--dot, var(--dt-blue)) 65%, transparent);
+    .row-icon {
+      width: 17px;
+      height: 17px;
+      border-radius: 5px;
+      object-fit: cover;
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16);
     }
 
     .context-card strong {
       display: block;
       margin-bottom: 10px;
       color: var(--dt-text);
-      font-size: 14px;
+      font-size: 15px;
     }
 
     .context-card span {
@@ -898,10 +896,12 @@
       background: rgba(15, 23, 42, 0.62);
       backdrop-filter: blur(24px);
       box-shadow:
-        0 18px 54px rgba(0, 0, 0, 0.28),
+        0 16px 42px rgba(0, 0, 0, 0.24),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
-      opacity: 1;
-      animation: cardFloat 7s ease-in-out infinite alternate;
+      opacity: 0;
+      animation:
+        cardIn 620ms cubic-bezier(0.18, 0.9, 0.2, 1) both var(--card-in-delay, 1.4s),
+        cardFloat 8s ease-in-out infinite alternate var(--card-float-delay, 0s);
     }
 
     .floating-card strong {
@@ -930,33 +930,47 @@
       color: var(--card-color, var(--dt-cyan));
     }
 
+    .card-app-icon {
+      display: block;
+      width: 19px;
+      height: 19px;
+      border-radius: 6px;
+      object-fit: cover;
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.16);
+    }
+
     .card-icon svg {
       width: 13px;
       height: 13px;
     }
 
     .card-capture {
-      left: -128px;
-      top: 96px;
-      --depth-x: 24px;
-      --depth-y: 18px;
-      animation-delay: 1.35s, 0s;
+      left: 12px;
+      top: 66px;
+      --depth-x: 17px;
+      --depth-y: 13px;
+      --card-in-delay: 1.35s;
+      --card-float-delay: 2.1s;
     }
 
     .card-ai {
-      left: -132px;
-      top: 252px;
-      --depth-x: 24px;
-      --depth-y: 18px;
-      animation-delay: 1.48s, -1.6s;
+      right: 16px;
+      left: auto;
+      top: 82px;
+      --depth-x: 17px;
+      --depth-y: 13px;
+      --card-in-delay: 1.5s;
+      --card-float-delay: 2.3s;
     }
 
     .card-report {
-      left: -126px;
-      bottom: 86px;
-      --depth-x: 22px;
-      --depth-y: 16px;
-      animation-delay: 1.62s, -2.4s;
+      right: 42px;
+      left: auto;
+      bottom: 24px;
+      --depth-x: 15px;
+      --depth-y: 12px;
+      --card-in-delay: 1.65s;
+      --card-float-delay: 2.5s;
     }
 
     .download-panel {
@@ -1011,15 +1025,16 @@
     .app-strip {
       width: min(var(--dt-max), calc(100% - 40px));
       margin: 8px auto 0;
-      padding: 16px 0 34px;
-      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      padding: 12px 0 30px;
+      border-top: 1px solid rgba(148, 163, 184, 0.085);
       text-align: center;
+      opacity: 0.84;
     }
 
     .app-strip p {
       margin: 0 0 16px;
-      color: var(--dt-soft);
-      font-size: 13px;
+      color: rgba(203, 213, 225, 0.76);
+      font-size: 12px;
       font-weight: 650;
     }
 
@@ -1027,43 +1042,40 @@
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
-      gap: 10px;
+      gap: 8px;
     }
 
     .chip {
       display: inline-flex;
       align-items: center;
-      gap: 9px;
-      min-height: 42px;
-      padding: 0 12px;
-      border: 1px solid rgba(148, 163, 184, 0.16);
-      border-radius: 13px;
-      color: var(--dt-soft);
-      background: rgba(15, 23, 42, 0.5);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-      font-size: 12px;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 10px;
+      border: 1px solid rgba(148, 163, 184, 0.11);
+      border-radius: 11px;
+      color: rgba(203, 213, 225, 0.78);
+      background: rgba(15, 23, 42, 0.34);
+      box-shadow: none;
+      font-size: 11.5px;
       font-weight: 700;
       transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
     }
 
-    .chip::before {
-      content: attr(data-short);
-      display: grid;
-      place-items: center;
-      width: 25px;
-      height: 25px;
-      border-radius: 8px;
-      color: #e8f7ff;
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(34, 211, 238, 0.18));
-      font-size: 10px;
-      letter-spacing: -0.02em;
+    .chip img {
+      display: block;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: rgba(3, 7, 18, 0.62);
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.1);
     }
 
     .chip:hover {
       transform: translateY(-3px);
-      border-color: rgba(34, 211, 238, 0.3);
+      border-color: rgba(34, 211, 238, 0.22);
       color: var(--dt-text);
-      box-shadow: 0 18px 40px rgba(34, 211, 238, 0.1);
+      box-shadow: none;
     }
 
     .mode-teaser {
@@ -1146,9 +1158,9 @@
       }
     }
 
-    @keyframes signalDrift {
+    @keyframes signalFlow {
       from { transform: translate3d(0, 0, 0); }
-      to { transform: translate3d(12px, -8px, 0); }
+      to { transform: translate3d(12px, 5px, 0); }
     }
 
     @keyframes connectorFlow {
@@ -1167,17 +1179,6 @@
     @keyframes pulseTravel {
       from { offset-distance: 0%; }
       to { offset-distance: 100%; }
-    }
-
-    @keyframes mockupIn {
-      from {
-        opacity: 0;
-        transform: translate3d(24px, 32px, 0) scale(0.96);
-      }
-      to {
-        opacity: 1;
-        transform: translate3d(0, 0, 0) scale(1);
-      }
     }
 
     @keyframes mockupFloat {
@@ -1206,35 +1207,20 @@
       }
     }
 
-    @keyframes chartDraw {
-      to { stroke-dashoffset: 0; }
-    }
-
     @keyframes cardIn {
       from {
         opacity: 0;
-        transform: translate3d(0, 16px, 0) scale(0.96);
+        filter: blur(6px);
       }
       to {
         opacity: 1;
-        transform: translate3d(0, 0, 0) scale(1);
+        filter: blur(0);
       }
     }
 
     @keyframes cardFloat {
       from { translate: 0 0; }
       to { translate: 0 -10px; }
-    }
-
-    @keyframes fragmentAssemble {
-      0%, 100% {
-        opacity: 0.42;
-        transform: translate3d(0, 0, 0) scale(0.98);
-      }
-      50% {
-        opacity: 0.95;
-        transform: translate3d(72px, 22px, 0) scale(0.86);
-      }
     }
 
     @media (max-width: 1080px) {
@@ -1327,7 +1313,7 @@
       }
 
       .hero-scene {
-        min-height: 560px;
+        min-height: 820px;
         margin-top: 10px;
         overflow: hidden;
       }
@@ -1513,7 +1499,7 @@
               </span>
               <span class="trust-pill">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 4 16 16M9 9a3 3 0 0 1 4 4M7.5 7.5 5 10s2.5 5 7 5c1.2 0 2.3-.3 3.2-.8M11 5c.3 0 .7 0 1 0 4.5 0 7 5 7 5a12 12 0 0 1-1.8 2.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-                No screenshots
+                No screenshots by default
               </span>
               <span class="trust-pill">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M5 8h14M7 16h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
@@ -1522,7 +1508,7 @@
             </div>
             <p class="support-line" id="privacy">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 4 7v5c0 4.4 3.1 7.4 8 9 4.9-1.6 8-4.6 8-9V7l-8-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
-              Metadata-first. No screenshots. No clipboard capture. Local by default. Raw details stay hidden until Pro Mode.
+              Metadata-first. No screenshots. No clipboard capture. Raw details stay hidden until Pro Mode.
             </p>
             <div class="download-panel" id="download">
               <strong>Download links</strong>
@@ -1535,22 +1521,19 @@
           </div>
 
           <div class="hero-scene" data-parallax-scene aria-label="Animated DayTrail product preview">
-            <p class="engine-label">Workday Memory Engine</p>
+            <p class="engine-label">Memory engine</p>
 
             <div class="signal-field hero-parallax-layer" aria-hidden="true">
               <svg class="connector-lines" viewBox="0 0 1120 680" preserveAspectRatio="none">
-                <path d="M100 140 C190 160 260 210 360 284" fill="none" stroke="rgba(34,211,238,.42)" stroke-width="1.2" />
-                <path d="M120 212 C205 214 270 246 360 288" fill="none" stroke="rgba(139,92,246,.42)" stroke-width="1.2" />
-                <path d="M105 284 C214 300 274 314 362 303" fill="none" stroke="rgba(59,130,246,.4)" stroke-width="1.2" />
-                <path d="M140 356 C220 344 292 326 384 320" fill="none" stroke="rgba(34,211,238,.38)" stroke-width="1.2" />
-                <path d="M106 426 C222 406 294 362 406 338" fill="none" stroke="rgba(236,72,153,.34)" stroke-width="1.2" />
-                <path d="M164 496 C240 452 322 386 430 354" fill="none" stroke="rgba(245,158,11,.34)" stroke-width="1.2" />
+                <path d="M118 162 C224 196 310 246 414 322" fill="none" stroke="rgba(34,211,238,.34)" stroke-width="1.1" />
+                <path d="M104 292 C220 302 306 318 420 336" fill="none" stroke="rgba(59,130,246,.3)" stroke-width="1.1" />
+                <path d="M126 430 C238 402 326 374 438 352" fill="none" stroke="rgba(139,92,246,.28)" stroke-width="1.1" />
               </svg>
-              <span class="signal-node" data-short="VS">VS Code</span>
-              <span class="signal-node" data-short="CH">Chrome</span>
-              <span class="signal-node" data-short="TM">Terminal</span>
-              <span class="signal-node" data-short="AI">ChatGPT</span>
-              <span class="signal-node" data-short="SL">Slack</span>
+              <span class="signal-node"><img src="assets/app-icons/vscode.png" alt="" loading="eager" />VS Code</span>
+              <span class="signal-node"><img src="assets/app-icons/chrome.png" alt="" loading="eager" />Chrome</span>
+              <span class="signal-node"><img src="assets/app-icons/terminal.png" alt="" loading="eager" />Terminal</span>
+              <span class="signal-node"><img src="assets/app-icons/chatgpt.png" alt="" loading="eager" />ChatGPT</span>
+              <span class="signal-node"><img src="assets/app-icons/slack.svg" alt="" loading="eager" />Slack</span>
             </div>
 
             <div class="ribbon-layer hero-parallax-layer" aria-hidden="true">
@@ -1558,23 +1541,17 @@
                 <defs>
                   <linearGradient id="ribbonGradient" x1="88" y1="384" x2="1040" y2="384" gradientUnits="userSpaceOnUse">
                     <stop stop-color="#3b82f6" />
-                    <stop offset="0.42" stop-color="#22d3ee" />
-                    <stop offset="0.72" stop-color="#8b5cf6" />
-                    <stop offset="1" stop-color="#f59e0b" />
+                    <stop offset="0.46" stop-color="#22d3ee" />
+                    <stop offset="0.76" stop-color="#8b5cf6" />
+                    <stop offset="1" stop-color="#9fb7ff" />
                   </linearGradient>
                 </defs>
-                <path class="ribbon-glow ribbon-path" d="M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384" fill="none" stroke="url(#ribbonGradient)" stroke-width="36" stroke-linecap="round" />
-                <path class="ribbon-path" d="M88 384 C190 280 276 238 358 282 C435 324 417 430 512 448 C612 468 672 332 770 292 C874 248 964 286 1040 384" fill="none" stroke="url(#ribbonGradient)" stroke-width="15" stroke-linecap="round" />
-                <circle class="ribbon-node" cx="118" cy="360" r="8" fill="#3b82f6" style="animation-delay:.8s" />
-                <circle class="ribbon-node" cx="240" cy="286" r="8" fill="#22d3ee" style="animation-delay:.95s" />
-                <circle class="ribbon-node" cx="386" cy="304" r="8" fill="#8b5cf6" style="animation-delay:1.1s" />
-                <circle class="ribbon-node" cx="520" cy="448" r="8" fill="#22c55e" style="animation-delay:1.25s" />
-                <circle class="ribbon-node" cx="706" cy="318" r="8" fill="#22d3ee" style="animation-delay:1.4s" />
-                <circle class="ribbon-node" cx="900" cy="286" r="8" fill="#f59e0b" style="animation-delay:1.55s" />
-                <text class="ribbon-label" x="94" y="336">8 AM Code</text>
-                <text class="ribbon-label" x="340" y="270">10 AM AI</text>
-                <text class="ribbon-label" x="662" y="292">4 PM Review</text>
-                <text class="ribbon-label" x="910" y="326">6 PM Report</text>
+                <path class="ribbon-glow ribbon-path" d="M88 392 C206 318 312 282 406 322 C516 370 584 456 724 424 C842 398 918 330 1040 330" fill="none" stroke="url(#ribbonGradient)" stroke-width="30" stroke-linecap="round" />
+                <path class="ribbon-path" d="M88 392 C206 318 312 282 406 322 C516 370 584 456 724 424 C842 398 918 330 1040 330" fill="none" stroke="url(#ribbonGradient)" stroke-width="11" stroke-linecap="round" />
+                <circle class="ribbon-node" cx="126" cy="370" r="6" fill="#3b82f6" style="animation-delay:.8s" />
+                <circle class="ribbon-node" cx="410" cy="322" r="6" fill="#22d3ee" style="animation-delay:1s" />
+                <circle class="ribbon-node" cx="724" cy="424" r="6" fill="#8b5cf6" style="animation-delay:1.2s" />
+                <circle class="ribbon-node" cx="978" cy="334" r="6" fill="#9fb7ff" style="animation-delay:1.4s" />
               </svg>
               <span class="pulse"></span>
               <span class="pulse"></span>
@@ -1595,7 +1572,7 @@
                   <div class="mockup-heading">Today <span>Simple Mode</span></div>
                   <div class="stats">
                     <div class="stat"><strong>7h 42m</strong><span>remembered</span></div>
-                    <div class="stat"><strong>4</strong><span>work sessions</span></div>
+                    <div class="stat"><strong>Ready</strong><span>daily report</span></div>
                     <div class="stat"><strong>3</strong><span>AI sessions detected</span></div>
                   </div>
                   <div class="timeline-panel">
@@ -1615,15 +1592,15 @@
                       <div class="hour-card">
                         <h3>9 AM - 10 AM</h3>
                         <p>Deep work session · 47m</p>
-                        <div class="app-row"><span><i class="dot" style="--dot:#3b82f6"></i>VS Code</span><span>34m</span></div>
-                        <div class="app-row"><span><i class="dot" style="--dot:#8b5cf6"></i>ChatGPT</span><span>8m</span></div>
-                        <div class="app-row"><span><i class="dot" style="--dot:#22d3ee"></i>Terminal</span><span>5m</span></div>
+                        <div class="app-row"><span><img class="row-icon" src="assets/app-icons/vscode.png" alt="" loading="lazy" />VS Code</span><span>34m</span></div>
+                        <div class="app-row"><span><img class="row-icon" src="assets/app-icons/chatgpt.png" alt="" loading="lazy" />ChatGPT</span><span>8m</span></div>
+                        <div class="app-row"><span><img class="row-icon" src="assets/app-icons/terminal.png" alt="" loading="lazy" />Terminal</span><span>5m</span></div>
                       </div>
                       <div class="context-card">
-                        <strong>What happened</strong>
+                        <strong>Daily report ready</strong>
                         <span>VS Code · DayTrail repo</span>
-                        <span>ChatGPT used for research</span>
-                        <span>Terminal commands detected</span>
+                        <span>ChatGPT research captured</span>
+                        <span>Terminal commands included</span>
                       </div>
                     </div>
                   </div>
@@ -1632,11 +1609,11 @@
             </div>
 
             <div class="floating-card card-capture hero-parallax-layer">
-              <strong><span class="card-icon" style="--card-color:#22c55e"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" fill="currentColor" /></svg></span>Now capturing</strong>
+              <strong><img class="card-app-icon" src="assets/app-icons/vscode.png" alt="" loading="lazy" />Now capturing</strong>
               <p>VS Code · DayTrail repo<br>42m focused</p>
             </div>
             <div class="floating-card card-ai hero-parallax-layer">
-              <strong><span class="card-icon" style="--card-color:#8b5cf6"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 2.2 5.2L20 10.4l-5.8 2.2L12 18l-2.2-5.4L4 10.4l5.8-2.2L12 3Z" fill="currentColor" /></svg></span>AI detected</strong>
+              <strong><img class="card-app-icon" src="assets/app-icons/chatgpt.png" alt="" loading="lazy" />AI detected</strong>
               <p>Codex · ChatGPT · Gemini</p>
             </div>
             <div class="floating-card card-report hero-parallax-layer">
@@ -1650,15 +1627,15 @@
       <section class="app-strip" id="features" aria-labelledby="apps-title">
         <p id="apps-title">Works with the apps you already use</p>
         <div class="chips">
-          <span class="chip" data-short="VS">VS Code</span>
-          <span class="chip" data-short="CH">Chrome</span>
-          <span class="chip" data-short="BR">Brave</span>
-          <span class="chip" data-short="TM">Terminal</span>
-          <span class="chip" data-short="AI">ChatGPT</span>
-          <span class="chip" data-short="SL">Slack</span>
-          <span class="chip" data-short="NT">Notion</span>
-          <span class="chip" data-short="CU">Cursor</span>
-          <span class="chip" data-short="GH">GitHub</span>
+          <span class="chip"><img src="assets/app-icons/vscode.png" alt="" loading="lazy" />VS Code</span>
+          <span class="chip"><img src="assets/app-icons/chrome.png" alt="" loading="lazy" />Chrome</span>
+          <span class="chip"><img src="assets/app-icons/brave.png" alt="" loading="lazy" />Brave</span>
+          <span class="chip"><img src="assets/app-icons/terminal.png" alt="" loading="lazy" />Terminal</span>
+          <span class="chip"><img src="assets/app-icons/chatgpt.png" alt="" loading="lazy" />ChatGPT</span>
+          <span class="chip"><img src="assets/app-icons/slack.svg" alt="" loading="lazy" />Slack</span>
+          <span class="chip"><img src="assets/app-icons/notion.png" alt="" loading="lazy" />Notion</span>
+          <span class="chip"><img src="assets/app-icons/cursor.png" alt="" loading="lazy" />Cursor</span>
+          <span class="chip"><img src="assets/app-icons/github.png" alt="" loading="lazy" />GitHub</span>
         </div>
       </section>
 
