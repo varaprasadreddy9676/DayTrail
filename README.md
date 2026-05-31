@@ -13,6 +13,8 @@ It helps you answer questions like:
   hour on YouTube you'd have sworn was deep work.
 - **What's eating my time?** Spot recurring distractions and time-sinks so you
   can actually cut them.
+- **Can I stay focused right now?** Start a focus block and get a gentle native
+  nudge if you drift into WhatsApp, YouTube, Reddit, or other distractions.
 - **How much of my work runs through AI** (ChatGPT, Claude, Codex, Copilot…) —
   and on which projects?
 - **What did I do this week** for my standup, client update, or OSS changelog?
@@ -30,6 +32,14 @@ the dashboard defaults to today, but the whole history is yours to slice.
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Download for macOS](https://img.shields.io/github/v/release/varaprasadreddy9676/DayTrail?label=Download%20macOS&color=2ea44f&logo=apple)](https://github.com/varaprasadreddy9676/DayTrail/releases/latest)
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/iamsai)
+
+## Lightweight By Design
+
+DayTrail is built with Tauri + Rust, so it does not ship a bundled Chromium
+runtime like Electron apps. Current release artifacts are tiny for a desktop
+work tracker: the macOS Apple Silicon DMG is about **9.8 MB**, and Windows CI
+produces installers under **6 MB** (`.exe` about **4.5 MB**, `.msi` about
+**5.9 MB** in the latest measured build).
 
 ## Download
 
@@ -96,6 +106,8 @@ day with DayTrail it's obvious — "I thought I shipped features all morning, bu
 90 minutes went to email and an hour to YouTube." Now you can:
 
 - **Cut the time-sinks** you didn't realize were so big (YouTube, inbox, doom-scrolling).
+- **Catch drift while it is happening** with Focus Mode nudges instead of only
+  discovering the damage at the end of the day.
 - **Separate day-job work from side-project work** without two timers.
 - **Find the routines** you repeat every day and decide what to automate or drop.
 - **Back your standup / invoice / changelog with facts**, not memory.
@@ -114,6 +126,15 @@ local memory of your own work** that only you can see.
 One glance answers "what did I do today?": what you're on right now (with the real
 document/chat title, not just the app name), time tracked, active apps, AI time,
 and a 24-hour timeline you can drill into hour by hour.
+
+### Focus Mode — a gentle nudge before a distraction becomes an hour
+
+![Focus Mode sidebar controls with focus label and duration choices](docs/screenshots/07-focus-mode.png)
+
+Start an open-ended, 25-minute, 50-minute, or 90-minute focus block from the
+sidebar. DayTrail keeps watching the same local foreground-window metadata it
+already captures and sends a native notification if you spend too long on known
+distractions. It reminds you; it never blocks apps or sends data anywhere.
 
 ### AI Impact — how much of your work actually flows through AI
 
@@ -155,6 +176,8 @@ work without storing private content unnecessarily.
   agents.
 - Manual context: meetings, offline work, client / project / task labels, and
   billable flags.
+- Focus Mode: active focus label, duration choice, off-task time, nudge count,
+  and distraction nudges based on local foreground-window metadata.
 
 ## What It Avoids
 
@@ -175,7 +198,9 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
 3. DayTrail groups events into sessions, hours, apps, projects, sites, and AI
    usage.
 4. You can tag gaps, meetings, or current work context manually.
-5. Reports summarize the captured facts and keep the source trail visible.
+5. Focus Mode can nudge you during an active focus block when a distraction
+   pattern is detected.
+6. Reports summarize the captured facts and keep the source trail visible.
 
 ## Setup For A Real Trial
 
@@ -185,8 +210,9 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    domains.
 4. Install editor and terminal integrations if you want project, file, folder,
    and command context.
-5. Add an optional AI provider in Settings if you want generated reports.
-6. Leave DayTrail running from startup so the day is captured automatically.
+5. Allow notifications if you want Focus Mode and away-time nudges.
+6. Add an optional AI provider in Settings if you want generated reports.
+7. Leave DayTrail running from startup so the day is captured automatically.
 
 DayTrail is most useful after one full workday of capture.
 

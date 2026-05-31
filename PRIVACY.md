@@ -10,6 +10,10 @@ DayTrail is designed as a local-first, metadata-first work memory app.
 - Editor capture: app, workspace/project, active file metadata, and optional content hash only when enabled by the editor bridge.
 - Terminal capture: current directory and redacted command metadata.
 - AI capture: observed tool/provider usage and source-backed output records when detectable.
+- Focus Mode: local foreground app/title/url metadata is compared against
+  distraction rules during an active focus session. Nudges are local
+  notifications; DayTrail does not block apps or send focus activity anywhere by
+  default.
 
 ## Data Location
 
@@ -19,6 +23,9 @@ The desktop app stores data in a local SQLite database in the OS application dat
 
 AI analysis runs only when the user asks for reports or analysis. API keys are stored in the OS keychain where supported. Before AI execution, DayTrail applies configured redaction to context sent to the provider.
 
+Focus Mode does not require an AI provider. Its current distraction detection is
+local and rule-based.
+
 ## What Not To Store
 
 Do not use DayTrail to capture secrets, regulated personal data, passwords, tokens, private keys, or confidential content unless your organization has explicitly approved that capture policy.
@@ -26,4 +33,3 @@ Do not use DayTrail to capture secrets, regulated personal data, passwords, toke
 ## Exports
 
 Exports may include app names, window titles, project paths, domains, redacted URLs, timestamps, notes, and AI usage evidence. Review exports before sharing them outside your organization.
-

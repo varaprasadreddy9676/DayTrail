@@ -6,6 +6,7 @@ data is shown.
 
 In use:
 - `01-today.png`          — Today dashboard (current work, daily stats, timeline)
+- `07-focus-mode.png`     — Focus Mode (sidebar controls and focus setup)
 - `02-ai-impact.png`      — AI Impact (per-tool usage)
 - `03-activity.png`       — Activity (session → app/AI breakdown)
 - `06-capture-health.png` — Settings → Capture Health (self-monitoring)

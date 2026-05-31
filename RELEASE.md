@@ -22,9 +22,12 @@ Also verify the installed desktop app manually:
 ## Public README And Screenshots
 
 - Root `README.md` explains the product clearly for a first-time user.
-- All six files in `docs/screenshots/` exist and render in the README:
-  `01-today.png`, `02-ai-impact.png`, `03-activity.png`,
-  `04-timeline.png`, `05-reports.png`, and `06-capture-health.png`.
+- All screenshots referenced by the README exist and render:
+  `01-today.png`, `07-focus-mode.png`, `02-ai-impact.png`,
+  `03-activity.png`, and `06-capture-health.png`.
+- Focus Mode is documented with its current behavior: local distraction nudges,
+  native notifications, duration choices, snooze/end controls, and no app
+  blocking.
 - Screenshots use realistic demo data and do not expose secrets, private
   customers, private email addresses, internal IPs, or local-only paths.
 - Platform status and known limitations are accurate for the release being
@@ -50,6 +53,9 @@ Also verify the installed desktop app manually:
 
 ## Release Artifacts
 
+- Check artifact size before publishing. Current targets are roughly:
+  macOS DMG under 10 MB, Windows NSIS `.exe` under 5 MB, and Windows MSI under
+  6 MB.
 - Include checksums for every installer/archive.
 - Attach release notes listing supported OS status and known limitations.
 - Do not publish local databases, generated test output, or unsigned artifacts as production builds.
