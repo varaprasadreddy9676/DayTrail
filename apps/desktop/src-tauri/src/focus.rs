@@ -20,25 +20,31 @@ use tauri::AppHandle;
 
 use crate::active_window::ActiveWindowInfo;
 
-const DEFAULT_GRACE_SECS: i64 = 60;
-const DEFAULT_COOLDOWN_SECS: i64 = 300;
+const DEFAULT_GRACE_SECS: i64 = 45;
+const DEFAULT_COOLDOWN_SECS: i64 = 180;
 
-/// Domains/app keywords treated as distractions by default. Lowercase, matched
-/// as substrings against the app name, window title, and URL.
+/// Distraction keywords matched (lowercase, as substrings) against the app name,
+/// window title, AND url — so it works whether or not the browser URL was
+/// captured. Bare brand names catch window titles like "… - YouTube".
 const DEFAULT_DISTRACTIONS: &[&str] = &[
-    "youtube.com",
+    "youtube",
     "youtu.be",
-    "netflix.com",
-    "twitch.tv",
-    "reddit.com",
+    "netflix",
+    "twitch",
+    "reddit",
     "twitter.com",
     "x.com",
-    "instagram.com",
-    "facebook.com",
-    "tiktok.com",
-    "primevideo.com",
-    "hotstar.com",
-    "9gag.com",
+    "instagram",
+    "facebook",
+    "tiktok",
+    "primevideo",
+    "prime video",
+    "hotstar",
+    "9gag",
+    "linkedin",
+    "whatsapp",
+    "telegram",
+    "discord",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -112,6 +118,23 @@ pub struct FocusSummary {
     pub focus_secs: i64,
     pub off_task_secs: i64,
     pub nudge_count: u32,
+}
+
+/// Append a line to the same diagnostics log the watcher uses, so Focus Mode
+/// behaviour is debuggable in shipped builds. Best-effort.
+fn focus_log(message: &str) {
+    let Some(dir) = dirs::data_local_dir() else {
+        return;
+    };
+    let path = dir.join("ai.daytrail.desktop").join("watcher.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{} [focus] {message}", chrono::Utc::now().to_rfc3339());
+    }
 }
 
 fn now_ms() -> i64 {
@@ -247,6 +270,13 @@ pub fn end() -> Option<FocusSummary> {
     })
 }
 
+/// Cheap check for whether a focus session is running, so the watcher can decide
+/// to keep evaluating Focus Mode even when the user looks "idle" (e.g. passively
+/// watching a video — the exact moment a nudge matters most).
+pub fn is_active() -> bool {
+    SESSION.lock().map(|guard| guard.is_some()).unwrap_or(false)
+}
+
 pub fn snapshot() -> Option<FocusStatus> {
     let guard = SESSION.lock().ok()?;
     guard.as_ref().map(status_of)
@@ -335,6 +365,7 @@ pub fn evaluate(app: &AppHandle, info: &ActiveWindowInfo) {
 
     if let Some((title, body)) = nudge {
         use tauri_plugin_notification::NotificationExt;
+        focus_log(&format!("nudge: {body}"));
         let _ = app
             .notification()
             .builder()

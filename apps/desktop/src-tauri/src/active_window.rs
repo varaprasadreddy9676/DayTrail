@@ -117,14 +117,20 @@ fn watcher_tick(
         maybe_notify_away(app, wall_gap_ms);
     }
 
-    if !should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS) {
+    let can_record = should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS);
+    // Keep evaluating Focus Mode even when the user looks "idle" — passively
+    // watching a video produces no keyboard/mouse input, which is exactly when a
+    // focus nudge matters most. We just don't write those ticks to the timeline.
+    let focus_active = crate::focus::is_active();
+    if !can_record {
         if *recording {
             watcher_log(&format!("capture paused — user idle {idle_ms}ms"));
             *recording = false;
         }
-        return;
-    }
-    if !*recording {
+        if !focus_active {
+            return;
+        }
+    } else if !*recording {
         watcher_log("capture resumed — user active");
         *recording = true;
     }
@@ -135,24 +141,27 @@ fn watcher_tick(
     if is_self_app(&info.app_name) {
         return;
     }
-    let metadata = serde_json::to_string(&info).ok();
-    match store.record_active_window_context(
-        &info.app_name,
-        info.window_title.as_deref(),
-        info.url.as_deref(),
-        info.workspace_key.as_deref(),
-        metadata.as_deref(),
-        Some(interval),
-    ) {
-        Ok(()) => update_heartbeat(|hb| {
-            hb.last_capture_at_ms = Some(epoch_ms());
-            hb.consecutive_record_errors = 0;
-        }),
-        Err(error) => {
-            watcher_log(&format!("record_active_window_context failed: {error}"));
-            update_heartbeat(|hb| {
-                hb.consecutive_record_errors = hb.consecutive_record_errors.saturating_add(1);
-            });
+
+    if can_record {
+        let metadata = serde_json::to_string(&info).ok();
+        match store.record_active_window_context(
+            &info.app_name,
+            info.window_title.as_deref(),
+            info.url.as_deref(),
+            info.workspace_key.as_deref(),
+            metadata.as_deref(),
+            Some(interval),
+        ) {
+            Ok(()) => update_heartbeat(|hb| {
+                hb.last_capture_at_ms = Some(epoch_ms());
+                hb.consecutive_record_errors = 0;
+            }),
+            Err(error) => {
+                watcher_log(&format!("record_active_window_context failed: {error}"));
+                update_heartbeat(|hb| {
+                    hb.consecutive_record_errors = hb.consecutive_record_errors.saturating_add(1);
+                });
+            }
         }
     }
 
