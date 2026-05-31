@@ -6701,3 +6701,25 @@ textarea {
 }
 
 .review-edit-btn:hover { background: var(--bg-control); color: var(--text-main); }
+
+.settings-about-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.settings-about-version {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.settings-about-result {
+  font-size: 12px;
+  opacity: 0.85;
+}

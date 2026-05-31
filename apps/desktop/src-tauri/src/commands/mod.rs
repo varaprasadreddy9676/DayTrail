@@ -17,6 +17,7 @@ pub mod settings;
 pub mod tasks;
 pub mod today;
 pub mod tracking;
+pub mod updates;
 pub mod work_context;
 pub mod work_memory;
 
@@ -90,6 +91,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         work_context::clear_active_work_context,
         review::review_session,
         review::list_sessions_for_review,
-        review::export_timesheet_markdown
+        review::export_timesheet_markdown,
+        updates::check_for_updates,
+        updates::app_version
     ]
 }

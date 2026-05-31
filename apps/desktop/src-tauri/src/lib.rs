@@ -27,6 +27,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let store = WorktraceStore::open_default(app.handle())?;
             if let Err(error) = store.ensure_default_launch_at_login() {

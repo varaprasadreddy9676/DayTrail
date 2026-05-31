@@ -8171,6 +8171,7 @@ function SettingsView({
             <strong>Need help?</strong>
             <span>DayTrail stores metadata locally and does not keep clipboard text or file contents by default.</span>
           </div>
+          <UpdateChecker />
         </aside>
 
         <section className="settings-pro-content">
@@ -8929,6 +8930,74 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="metric-cell">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+type UpdateCheckResult = {
+  currentVersion: string;
+  latestVersion?: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  error?: string | null;
+};
+
+function UpdateChecker() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "checking" | "result">("idle");
+  const [result, setResult] = useState<UpdateCheckResult | null>(null);
+
+  useEffect(() => {
+    void invokeTauri<string>("app_version")
+      .then((v) => setVersion(v))
+      .catch(() => setVersion(null));
+  }, []);
+
+  const checkNow = async () => {
+    setStatus("checking");
+    try {
+      const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
+      setResult(info);
+    } catch {
+      setResult(null);
+    }
+    setStatus("result");
+  };
+
+  const openReleases = (url: string) => {
+    void invokeTauri("plugin:opener|open_url", { url });
+  };
+
+  return (
+    <div className="settings-about-card">
+      <span className="settings-about-version">
+        DayTrail{version ? ` v${version}` : ""}
+      </span>
+      <button
+        className="button compact ghost"
+        type="button"
+        onClick={checkNow}
+        disabled={status === "checking"}
+      >
+        {status === "checking" ? "Checking…" : "Check for updates"}
+      </button>
+      {status === "result" && result && (
+        <div className="settings-about-result">
+          {result.error ? (
+            <span>Couldn't check right now.</span>
+          ) : result.updateAvailable ? (
+            <button
+              className="button compact"
+              type="button"
+              onClick={() => openReleases(result.releaseUrl)}
+            >
+              Update available: v{result.latestVersion} — Download
+            </button>
+          ) : (
+            <span>You're on the latest version.</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
