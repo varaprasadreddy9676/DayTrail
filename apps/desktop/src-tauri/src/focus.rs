@@ -335,7 +335,13 @@ pub fn evaluate(app: &AppHandle, info: &ActiveWindowInfo) {
 
     if let Some((title, body)) = nudge {
         use tauri_plugin_notification::NotificationExt;
-        let _ = app.notification().builder().title(title).body(body).show();
+        let _ = app
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .sound(crate::platform::notification_sound())
+            .show();
     }
 }
 

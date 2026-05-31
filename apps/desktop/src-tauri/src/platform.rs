@@ -10,6 +10,25 @@ const SERVICE_NAME: &str = "ai.daytrail.desktop";
 /// Build a `Command` that never flashes a console window on Windows. DayTrail is
 /// a GUI/tray app, so any helper process it spawns (git, powershell, reg) must be
 /// windowless — otherwise a cmd window blinks on every poll. No-op on other OSes.
+/// A tasteful, consistent notification chime per platform — DayTrail's "signature
+/// sound" so a nudge feels intentional, not like a silent system blip. macOS
+/// "Glass" is a crisp, premium-feeling chime; Windows/Linux use their pleasant
+/// default notification sound.
+pub(crate) fn notification_sound() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        return "Glass";
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return "Default";
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "message-new-instant"
+    }
+}
+
 pub(crate) fn hidden_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);

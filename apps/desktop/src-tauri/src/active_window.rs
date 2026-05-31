@@ -205,6 +205,7 @@ fn maybe_notify_away(app: &AppHandle, gap_ms: i64) {
         .builder()
         .title("Welcome back to DayTrail")
         .body(&body)
+        .sound(crate::platform::notification_sound())
         .show()
     {
         Ok(()) => watcher_log(&format!("away notification posted ({gap_ms}ms gap)")),
