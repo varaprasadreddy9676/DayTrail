@@ -53,6 +53,37 @@ the dashboard defaults to today, but the whole history is yours to slice.
 **Windows:** download the `.msi`/`.exe` installer from the same Releases page
 (built by CI). **Other Macs / build from source:** see [Try it](#try-it-build-from-source) below.
 
+## Troubleshooting
+
+<details open>
+<summary><b>macOS: "DayTrail.app is damaged and can't be opened. You should move it to the Trash."</b></summary>
+
+It is **not** damaged. Because the app isn't notarized (no paid Apple Developer
+ID), macOS quarantines the download and shows this scary message. Fix it once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/DayTrail.app
+```
+
+Then open DayTrail normally. (Drag it into **Applications** first if you haven't.
+If you downloaded with a non-Safari browser, this is the expected behavior.)
+</details>
+
+<details>
+<summary><b>Windows: "Windows protected your PC" (SmartScreen)</b></summary>
+
+The installer isn't code-signed yet, so SmartScreen warns on first run. Click
+**More info → Run anyway**.
+</details>
+
+<details>
+<summary><b>macOS: capture stopped / titles show only the app name</b></summary>
+
+DayTrail needs **Accessibility** permission to read app/window titles. Open
+**Settings → Capture Health** in the app — if Accessibility shows as missing,
+use **Fix accessibility** to re-grant it (a macOS update can reset this).
+</details>
+
 ## Who it's for
 
 DayTrail is for people whose work sprawls across too many places to remember —
