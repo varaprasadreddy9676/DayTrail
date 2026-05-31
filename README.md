@@ -2,17 +2,24 @@
 
 Local-first work memory for the modern desktop.
 
-DayTrail records lightweight metadata from your apps, browser tabs, editors,
-terminal sessions, and AI tools so you can reconstruct the day without running
-a timer or writing status notes from memory.
+You sit down at 6pm sure you coded all day — but where did the time *actually*
+go? DayTrail quietly records lightweight metadata from your apps, browser tabs,
+editors, terminals, and AI tools, then shows you the honest answer. No timers to
+start, no notes to write, and nothing ever leaves your machine.
 
-Use it to answer:
+It helps you answer questions like:
 
-- What did I work on today?
-- Which app, project, site, file, or chat took time?
-- Where did AI tools help?
-- What should go into my daily update, client note, or review summary?
-- Is capture healthy, or did a permission / integration break?
+- **Where did my day really go?** You'll see the 90 minutes in email and the
+  hour on YouTube you'd have sworn was deep work.
+- **What's eating my time?** Spot recurring distractions and time-sinks so you
+  can actually cut them.
+- **How much of my work runs through AI** (ChatGPT, Claude, Codex, Copilot…) —
+  and on which projects?
+- **What did I do this week** for my standup, client update, or OSS changelog?
+- **What routines do I repeat daily** that might be worth streamlining?
+
+Look at **today, yesterday, the last 7 days, this month, or any custom range** —
+the dashboard defaults to today, but the whole history is yours to slice.
 
 > Status: pre-1.0. macOS has been exercised manually. Windows installers build
 > in CI and pass automated checks, but a real Windows smoke test is still
@@ -21,22 +28,45 @@ Use it to answer:
 [![Windows Build](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/windows-release.yml/badge.svg)](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/windows-release.yml)
 [![macOS Build](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/macos-release.yml/badge.svg)](https://github.com/varaprasadreddy9676/DayTrail/actions/workflows/macos-release.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Download for macOS](https://img.shields.io/github/v/release/varaprasadreddy9676/DayTrail?label=Download%20macOS&color=2ea44f&logo=apple)](https://github.com/varaprasadreddy9676/DayTrail/releases/latest)
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/iamsai)
 
-## Why Try It
+## Download
 
-DayTrail is for people whose work moves across too many places to remember
-cleanly at the end of the day: IDEs, browser tabs, terminals, Slack, meetings,
-AI chats, issue trackers, documents, and internal tools.
+**macOS (Apple Silicon):** grab the latest `.dmg` from the
+[**Releases page**](https://github.com/varaprasadreddy9676/DayTrail/releases/latest).
 
-Instead of asking you to manually start and stop timers, DayTrail builds a local
-activity trail from system metadata. You can inspect a 24-hour timeline, drill
-into an hour, tag meetings or offline work, review AI usage, and generate a
-source-backed daily report.
+> ⚠️ The build is **not notarized** (no paid Apple Developer ID yet), so macOS
+> blocks a normal double-click. It's a one-time step:
+>
+> 1. Open the DMG, drag **DayTrail** to **Applications**.
+> 2. **Right-click** DayTrail → **Open** → **Open** (or run
+>    `xattr -dr com.apple.quarantine /Applications/DayTrail.app`).
+> 3. Grant **Accessibility** and **Allow notifications** on first launch.
 
-The goal is not surveillance. The goal is a private work memory that helps you
-write better updates, recover context faster, and notice when important work was
-missed.
+**Windows:** download the `.msi`/`.exe` installer from the same Releases page
+(built by CI). **Other Macs / build from source:** see [Try it](#try-it-build-from-source) below.
+
+## Who it's for
+
+DayTrail is for people whose work sprawls across too many places to remember —
+IDEs, browser tabs, terminals, Slack, meetings, AI chats, issue trackers, docs,
+and internal tools — and who suspect their time isn't going where they think.
+
+**A real example (the kind of person who built this):** a developer with a day
+job *and* open-source side projects, losing track of where the hours go. After a
+day with DayTrail it's obvious — "I thought I shipped features all morning, but
+90 minutes went to email and an hour to YouTube." Now you can:
+
+- **Cut the time-sinks** you didn't realize were so big (YouTube, inbox, doom-scrolling).
+- **Separate day-job work from side-project work** without two timers.
+- **Find the routines** you repeat every day and decide what to automate or drop.
+- **Back your standup / invoice / changelog with facts**, not memory.
+
+Instead of starting and stopping timers, DayTrail builds the trail automatically
+from system metadata: a timeline you can drill into by the hour, app/project/AI
+breakdowns, and source-backed reports. It's not surveillance — it's a **private,
+local memory of your own work** that only you can see.
 
 ## See it in action
 
