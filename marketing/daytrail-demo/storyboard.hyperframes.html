@@ -1,0 +1,341 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1920,height=1080,initial-scale=1" />
+  <title>DayTrail Demo HyperFrames</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111d;
+      --panel: #0f2131;
+      --ink: #f7fbff;
+      --muted: #b3c1cf;
+      --blue: #1d8cff;
+      --cyan: #18d2c4;
+      --line: rgba(159, 190, 220, 0.22);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .frame { position: absolute; inset: 0; display: none; overflow: hidden; background:
+      radial-gradient(circle at 78% 18%, rgba(29, 140, 255, 0.22), transparent 32%),
+      linear-gradient(135deg, #06101b 0%, #091827 46%, #050b12 100%); }
+    .frame.active { display: block; }
+    .product-shot { position: absolute; right: 86px; top: 118px; width: 1280px; max-height: 765px; object-fit: contain; border-radius: 22px; border: 1px solid var(--line); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.55); filter: saturate(1.06) contrast(1.04); }
+    .shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(4, 10, 18, 0.98) 0%, rgba(4, 10, 18, 0.88) 31%, rgba(4, 10, 18, 0.25) 64%, rgba(4, 10, 18, 0.64) 100%); }
+    .hook .shade, .trust .shade, .cta .shade { background: linear-gradient(135deg, rgba(5, 12, 20, 0.98), rgba(6, 20, 34, 0.94)); }
+    .copy { position: absolute; z-index: 3; left: 116px; top: 146px; width: 760px; }
+    .hook .copy, .trust .copy, .cta .copy { width: 1120px; top: 205px; }
+    .eyebrow { margin: 0 0 28px; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.14em; font-size: 28px; font-weight: 800; }
+    h1 { margin: 0; color: var(--ink); font-size: 88px; line-height: 0.94; letter-spacing: 0; max-width: 1120px; text-wrap: balance; }
+    .hook h1, .trust h1, .cta h1 { font-size: 118px; max-width: 1260px; }
+    .body { margin: 36px 0 0; color: var(--muted); font-size: 38px; line-height: 1.28; max-width: 840px; }
+    .range-chips, .trust-grid { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 44px; max-width: 900px; }
+    .range-chips span, .trust-grid span { border: 1px solid rgba(29, 140, 255, 0.42); background: rgba(29, 140, 255, 0.15); color: #ddecff; border-radius: 14px; padding: 18px 24px; font-size: 28px; font-weight: 750; }
+    .brand { position: absolute; z-index: 4; left: 116px; bottom: 74px; display: flex; align-items: center; gap: 18px; color: var(--ink); font-size: 30px; }
+    .mark { width: 60px; height: 60px; flex: 0 0 auto; filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.32)); }
+    .progress { position: absolute; z-index: 5; left: 116px; right: 116px; bottom: 42px; height: 5px; background: rgba(255, 255, 255, 0.12); border-radius: 999px; overflow: hidden; }
+    .progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+    .scanline { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.09; background-image: linear-gradient(rgba(255,255,255,.11) 1px, transparent 1px); background-size: 100% 8px; }
+    .hook::after, .trust::after, .cta::after { content: ""; position: absolute; right: 150px; top: 176px; width: 520px; height: 520px; border-radius: 999px; border: 1px solid rgba(29, 140, 255, .35); box-shadow: inset 0 0 70px rgba(29, 140, 255, .18), 0 0 100px rgba(24, 210, 196, .18); }
+    .cta .body { color: #d9e7f5; }
+  </style>
+</head>
+<body>
+<section class="frame hook" data-frame="0">
+  <div class="scanline"></div>
+  
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">For knowledge workers</p>
+    <h1>Your memory is not a timesheet.</h1>
+    <p class="body">DayTrail shows where your workday actually went.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:12.5%"></span></div>
+  <!-- frame:1 duration:6000 transition:fade -->
+</section>
+<section class="frame product" data-frame="1">
+  <div class="scanline"></div>
+  <img class="product-shot" src="../../docs/screenshots/01-today.png" alt="" />
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Today, reconstructed</p>
+    <h1>See the day hour by hour.</h1>
+    <p class="body">Apps, tabs, editors, terminals, and AI tools become one private timeline.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:25%"></span></div>
+  <!-- frame:2 duration:8000 transition:fade -->
+</section>
+<section class="frame product" data-frame="2">
+  <div class="scanline"></div>
+  <img class="product-shot" src="../../docs/screenshots/01-today.png" alt="" />
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Any day, any range</p>
+    <h1>Yesterday. Last week. This month.</h1>
+    <p class="body">Switch from today to any date range when memory is fuzzy.</p>
+    <div class="range-chips"><span>Today</span><span>Yesterday</span><span>Last 7 days</span><span>This month</span><span>Custom range</span></div>
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:37.5%"></span></div>
+  <!-- frame:3 duration:7000 transition:fade -->
+</section>
+<section class="frame product" data-frame="3">
+  <div class="scanline"></div>
+  <img class="product-shot" src="../../docs/screenshots/02-ai-impact.png" alt="" />
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">AI Impact</p>
+    <h1>Know how much work runs through AI.</h1>
+    <p class="body">ChatGPT, Claude, Codex, Copilot, and local tools are measured honestly.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:50%"></span></div>
+  <!-- frame:4 duration:8000 transition:fade -->
+</section>
+<section class="frame product" data-frame="4">
+  <div class="scanline"></div>
+  <img class="product-shot" src="../../docs/screenshots/03-activity.png" alt="" />
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Source-backed sessions</p>
+    <h1>Standups and reports from facts.</h1>
+    <p class="body">Every session keeps the apps, projects, and evidence behind it.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:62.5%"></span></div>
+  <!-- frame:5 duration:8000 transition:fade -->
+</section>
+<section class="frame product" data-frame="5">
+  <div class="scanline"></div>
+  <img class="product-shot" src="../../docs/screenshots/06-capture-health.png" alt="" />
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Trust the capture</p>
+    <h1>If recording breaks, DayTrail tells you.</h1>
+    <p class="body">No more discovering at 6 PM that your tracker silently stopped.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:75%"></span></div>
+  <!-- frame:6 duration:8000 transition:fade -->
+</section>
+<section class="frame trust" data-frame="6">
+  <div class="scanline"></div>
+  
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Local-first</p>
+    <h1>No timers. No surveillance.</h1>
+    <p class="body">Metadata-first capture stays on your machine and keeps the trail useful.</p>
+    
+    <div class="trust-grid"><span>Local data</span><span>Redacted URLs</span><span>Optional bridges</span></div>
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:87.5%"></span></div>
+  <!-- frame:7 duration:7000 transition:fade -->
+</section>
+<section class="frame cta" data-frame="7">
+  <div class="scanline"></div>
+  
+  <div class="shade"></div>
+  <div class="copy">
+    <p class="eyebrow">Try DayTrail</p>
+    <h1>Find out where your time really goes.</h1>
+    <p class="body">Download the latest build and let one real workday tell the truth.</p>
+    
+    
+  </div>
+  <div class="brand"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+  <defs>
+    <linearGradient id="markBg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13283b"/>
+      <stop offset="1" stop-color="#081421"/>
+    </linearGradient>
+    <linearGradient id="markTrail" x1="12" y1="44" x2="53" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18d2c4"/>
+      <stop offset="0.55" stop-color="#1d8cff"/>
+      <stop offset="1" stop-color="#7a6dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#markBg)" />
+  <rect x="3.5" y="3.5" width="57" height="57" rx="16.5" fill="none" stroke="rgba(255,255,255,0.16)" />
+  <path d="M13 43c7-15 17-19 29-12 5 3 8 2 10-7" fill="none" stroke="url(#markTrail)" stroke-width="5.8" stroke-linecap="round" />
+  <path d="M32 18v15l10 7" fill="none" stroke="#f7fbff" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="32" cy="33" r="4.8" fill="#f7fbff" />
+  <circle cx="13" cy="43" r="4.5" fill="#18d2c4" />
+  <circle cx="52" cy="24" r="4.5" fill="#7a6dff" />
+</svg><strong>DayTrail</strong></div>
+  <div class="progress"><span style="width:100%"></span></div>
+  <!-- frame:8 duration:7000 transition:fade -->
+</section>
+<script>
+  const frames = [...document.querySelectorAll('.frame')];
+  const params = new URLSearchParams(location.search);
+  let current = Number(params.get('frame') ?? 0);
+  const show = (index) => frames.forEach((frame, i) => frame.classList.toggle('active', i === index));
+  show(current);
+  if (!params.has('frame')) {
+    setInterval(() => {
+      current = (current + 1) % frames.length;
+      show(current);
+    }, 3000);
+    addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowRight') current = (current + 1) % frames.length;
+      if (event.key === 'ArrowLeft') current = (current - 1 + frames.length) % frames.length;
+      show(current);
+    });
+    addEventListener('click', () => {
+      current = (current + 1) % frames.length;
+      show(current);
+    });
+  }
+</script>
+<!-- HYPERFRAMES_META: [{"frame":1,"durationMs":6000,"transition":"fade","sceneSummary":"For knowledge workers: Your memory is not a timesheet."},{"frame":2,"durationMs":8000,"transition":"fade","sceneSummary":"Today, reconstructed: See the day hour by hour."},{"frame":3,"durationMs":7000,"transition":"fade","sceneSummary":"Any day, any range: Yesterday. Last week. This month."},{"frame":4,"durationMs":8000,"transition":"fade","sceneSummary":"AI Impact: Know how much work runs through AI."},{"frame":5,"durationMs":8000,"transition":"fade","sceneSummary":"Source-backed sessions: Standups and reports from facts."},{"frame":6,"durationMs":8000,"transition":"fade","sceneSummary":"Trust the capture: If recording breaks, DayTrail tells you."},{"frame":7,"durationMs":7000,"transition":"fade","sceneSummary":"Local-first: No timers. No surveillance."},{"frame":8,"durationMs":7000,"transition":"fade","sceneSummary":"Try DayTrail: Find out where your time really goes."}] -->
+</body>
+</html>

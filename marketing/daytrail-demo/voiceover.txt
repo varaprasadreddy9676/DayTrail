@@ -1,0 +1,11 @@
+At the end of a busy day, memory lies.
+You remember the big task, not the ten context switches, hidden AI work, or lost hour in a browser.
+DayTrail builds a private timeline automatically from your apps, tabs, editors, terminals, and AI tools.
+Open Today and see what happened, hour by hour.
+Look at yesterday, last week, this month, or any custom range.
+AI Impact shows which tools helped, where they showed up, and what still needs review.
+Activity turns scattered windows into sessions and projects, so standups and reports come from facts, not guesses.
+And if capture breaks, DayTrail tells you before you lose the day.
+Local-first. No timer. No surveillance.
+Just your workday, finally visible.
+Try DayTrail and find out where your time really goes.
