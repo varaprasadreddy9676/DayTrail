@@ -4995,6 +4995,28 @@ function TodayView({
           ? "What happened yesterday"
           : `What happened on ${formatLocalDateHeading(rangeFromDate)}`
         : rangePresetLabel(rangePreset);
+  const scopeTitle =
+    rangePreset === "today"
+      ? currentContext
+      : isSingleDayRange
+        ? rangePreset === "yesterday"
+          ? "Yesterday"
+          : formatLocalDateHeading(rangeFromDate)
+        : rangePresetLabel(rangePreset);
+  const scopeSummary =
+    rangePreset === "today"
+      ? currentSummary
+      : [
+          `${simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration)} tracked`,
+          sessions.length
+            ? `${sessions.length} session${sessions.length === 1 ? "" : "s"}`
+            : null,
+          simpleToday.appCount || appCount
+            ? `${simpleToday.appCount || appCount} app${(simpleToday.appCount || appCount) === 1 ? "" : "s"}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" - ") || "No captured activity in this selection.";
   const stats = [
     { label: "Time tracked", value: simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration), detail: detailScope },
     {
@@ -5016,7 +5038,7 @@ function TodayView({
         <div className="zone-heading">
           <div>
             <span>{rangePreset === "today" ? "Now" : isSingleDayRange ? "Selected day" : "Selected range"}</span>
-            <h2>{currentContext}</h2>
+            <h2>{scopeTitle}</h2>
           </div>
         </div>
 
@@ -5043,7 +5065,7 @@ function TodayView({
                       ? "Capture stopped"
                       : "Capturing"}
             </span>
-            <p>{currentSummary}</p>
+            <p>{scopeSummary}</p>
           </div>
         </section>
         {captureBroken && rangePreset === "today" && !isPaused && (

@@ -423,12 +423,22 @@ describe("DayTrail command center", () => {
       ),
     );
     expect(await screen.findByRole("heading", { name: /what happened yesterday/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /^yesterday$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: /vs code/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /24-hour timeline/i })).toBeInTheDocument();
     expect(await screen.findByText(/showing 1 active hour/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/selected range summary/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/smart recovery/i)).toBeInTheDocument();
     expect(screen.queryByText(/range summary/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /take break/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /app range last 7 days/i }));
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("heading", { level: 2, name: /^last 7 days$/i }).length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByRole("heading", { level: 2, name: /vs code/i })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText(/selected range summary/i)).toBeInTheDocument();
   });
 
   it("shows terminal bridge capability labels as Terminal", async () => {
