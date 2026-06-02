@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::{
     error::CommandError,
-    models::{Task, TaskInput, TaskStatus},
+    models::{PrivacyDeleteSummary, Task, TaskInput, TaskStatus},
     store::WorktraceStore,
 };
 
@@ -25,4 +25,21 @@ pub fn create_task(
 #[tauri::command]
 pub fn complete_task(store: State<'_, WorktraceStore>, id: i64) -> Result<Task, CommandError> {
     store.complete_task(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn snooze_task(
+    store: State<'_, WorktraceStore>,
+    id: i64,
+    due_at: i64,
+) -> Result<Task, CommandError> {
+    store.snooze_task(id, due_at).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn delete_task(
+    store: State<'_, WorktraceStore>,
+    id: i64,
+) -> Result<PrivacyDeleteSummary, CommandError> {
+    store.delete_task(id).map_err(Into::into)
 }

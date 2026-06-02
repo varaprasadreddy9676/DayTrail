@@ -35,8 +35,14 @@ pub struct Task {
     pub title: String,
     pub status: TaskStatus,
     pub due_date: Option<String>,
+    pub due_at: Option<i64>,
+    pub notes: Option<String>,
+    pub priority: Option<String>,
     pub source: Option<String>,
     pub project_path: Option<String>,
+    pub client_label: Option<String>,
+    pub project_label: Option<String>,
+    pub reminder_sent_at: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -46,8 +52,13 @@ pub struct Task {
 pub struct TaskInput {
     pub title: String,
     pub due_date: Option<String>,
+    pub due_at: Option<i64>,
+    pub notes: Option<String>,
+    pub priority: Option<String>,
     pub source: Option<String>,
     pub project_path: Option<String>,
+    pub client_label: Option<String>,
+    pub project_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

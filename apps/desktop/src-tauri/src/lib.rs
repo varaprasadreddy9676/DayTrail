@@ -41,6 +41,11 @@ pub fn run() {
             app.manage(store.clone());
             setup_tray(app, store.clone())?;
             spawn_active_window_watcher(store.clone(), app.handle().clone(), Duration::from_secs(2));
+            spawn_task_reminder_scheduler(
+                store.clone(),
+                app.handle().clone(),
+                Duration::from_secs(60),
+            );
             // Enforce the data-retention policy on a daily schedule. Without this
             // it would only run at startup — and DayTrail is built to never quit,
             // so on an always-on machine the DB would grow unbounded. This is a
@@ -82,6 +87,40 @@ fn ensure_notification_permission(app: &tauri::AppHandle) {
             let _ = app.notification().request_permission();
         }
     }
+}
+
+fn spawn_task_reminder_scheduler(
+    store: WorktraceStore,
+    app: tauri::AppHandle,
+    interval: Duration,
+) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(interval);
+        let now = chrono::Utc::now().timestamp_millis();
+        let Ok(tasks) = store.list_due_task_reminders(now) else {
+            continue;
+        };
+        for task in tasks {
+            post_task_reminder(&app, &task.title);
+            let _ = store.mark_task_reminder_sent(task.id, now);
+        }
+    });
+}
+
+fn post_task_reminder(app: &tauri::AppHandle, title: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let body = if title.trim().is_empty() {
+        "A task reminder is due.".to_string()
+    } else {
+        title.trim().to_string()
+    };
+    let _ = app
+        .notification()
+        .builder()
+        .title("Task reminder")
+        .body(body)
+        .sound(crate::platform::notification_sound())
+        .show();
 }
 
 /// Record every panic to a crash log before the default handler runs, so a

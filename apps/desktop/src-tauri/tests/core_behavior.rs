@@ -351,11 +351,19 @@ fn stores_tasks_notes_settings_and_exports_them() {
         .create_task(TaskInput {
             title: "Prepare daily summary".into(),
             due_date: Some("2026-05-23".into()),
+            due_at: Some(1_716_454_800_000),
+            notes: Some("Include blockers and follow-ups".into()),
+            priority: Some("high".into()),
             source: Some("test".into()),
             project_path: Some("/repo/worktrace".into()),
+            client_label: Some("Internal".into()),
+            project_label: Some("DayTrail".into()),
         })
         .expect("create task");
     assert_eq!(task.status, TaskStatus::Open);
+    assert_eq!(task.notes.as_deref(), Some("Include blockers and follow-ups"));
+    assert_eq!(task.priority.as_deref(), Some("high"));
+    assert_eq!(task.due_at, Some(1_716_454_800_000));
 
     let note = store
         .add_quick_note(
@@ -407,6 +415,7 @@ fn stores_tasks_notes_settings_and_exports_them() {
 
     let today = store.today_snapshot().expect("today");
     assert_eq!(today.tasks.len(), 1);
+    assert_eq!(today.tasks[0].project_label.as_deref(), Some("DayTrail"));
     assert_eq!(today.quick_notes.len(), 1);
     assert_eq!(today.commitments.len(), 1);
     assert_eq!(today.pending_replies.len(), 1);
@@ -426,6 +435,7 @@ fn stores_tasks_notes_settings_and_exports_them() {
 
     let export = store.export_data().expect("export");
     assert_eq!(export.tasks.len(), 1);
+    assert_eq!(export.tasks[0].notes.as_deref(), Some("Include blockers and follow-ups"));
     assert_eq!(export.quick_notes[0].id, note.id);
     assert_eq!(export.commitments[0].id, "commitment-1");
     assert_eq!(export.pending_replies[0].id, "mail-thread-1");
@@ -438,6 +448,62 @@ fn stores_tasks_notes_settings_and_exports_them() {
     assert!(report.body_markdown.contains("Follow up on browser bridge"));
     assert!(report.body_markdown.contains("Send Oval MoM by EOD"));
     assert!(report.body_markdown.contains("Oval MoM confirmation"));
+}
+
+#[test]
+fn manages_tasks_and_reminders_lifecycle() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    let task = store
+        .create_task(TaskInput {
+            title: "Renew test certificate".into(),
+            due_date: None,
+            due_at: Some(1_800_000),
+            notes: Some("Check staging first".into()),
+            priority: Some("high".into()),
+            source: Some("manual".into()),
+            project_path: None,
+            client_label: Some("Ops".into()),
+            project_label: Some("Infrastructure".into()),
+        })
+        .expect("create task");
+
+    assert_eq!(task.status, TaskStatus::Open);
+    assert_eq!(task.due_date.as_deref(), Some("1970-01-01"));
+    assert_eq!(task.due_at, Some(1_800_000));
+    assert_eq!(task.notes.as_deref(), Some("Check staging first"));
+    assert_eq!(task.priority.as_deref(), Some("high"));
+
+    let due = store
+        .list_due_task_reminders(2_000_000)
+        .expect("due reminders");
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].id, task.id);
+
+    store
+        .mark_task_reminder_sent(task.id, 2_000_000)
+        .expect("mark reminder sent");
+    assert!(store
+        .list_due_task_reminders(2_100_000)
+        .expect("due reminders after mark")
+        .is_empty());
+
+    let snoozed = store
+        .snooze_task(task.id, 3_600_000)
+        .expect("snooze task");
+    assert_eq!(snoozed.status, TaskStatus::Open);
+    assert_eq!(snoozed.due_at, Some(3_600_000));
+    assert!(snoozed.reminder_sent_at.is_none());
+
+    let completed = store.complete_task(task.id).expect("complete task");
+    assert_eq!(completed.status, TaskStatus::Done);
+    assert!(store.list_tasks(Some(TaskStatus::Open)).expect("open tasks").is_empty());
+
+    let deleted = store.delete_task(task.id).expect("delete task");
+    assert_eq!(deleted.deleted_rows, 1);
+    assert!(store.list_tasks(None).expect("all tasks").is_empty());
 }
 
 #[test]
@@ -647,8 +713,13 @@ fn backs_up_and_restores_sqlite_database_with_integrity_check() {
         .create_task(TaskInput {
             title: "Task preserved in backup".into(),
             due_date: None,
+            due_at: None,
+            notes: None,
+            priority: None,
             source: Some("test".into()),
             project_path: Some("/repo/daytrail".into()),
+            client_label: None,
+            project_label: None,
         })
         .expect("create initial task");
 
@@ -668,8 +739,13 @@ fn backs_up_and_restores_sqlite_database_with_integrity_check() {
         .create_task(TaskInput {
             title: "Task created after backup".into(),
             due_date: None,
+            due_at: None,
+            notes: None,
+            priority: None,
             source: Some("test".into()),
             project_path: Some("/repo/daytrail".into()),
+            client_label: None,
+            project_label: None,
         })
         .expect("create post-backup task");
     assert_eq!(
@@ -718,8 +794,13 @@ fn generates_plans_weekly_reviews_and_searches_work_memory() {
         .create_task(TaskInput {
             title: "Close Oval billing validation".into(),
             due_date: Some(today),
+            due_at: None,
+            notes: None,
+            priority: None,
             source: Some("Jira".into()),
             project_path: Some("/repo/billing".into()),
+            client_label: None,
+            project_label: None,
         })
         .expect("create due task");
     store
@@ -877,8 +958,13 @@ fn migrates_legacy_text_id_tasks_table_before_creating_indexes() {
         .create_task(TaskInput {
             title: "New task after migration".into(),
             due_date: None,
+            due_at: None,
+            notes: None,
+            priority: None,
             source: None,
             project_path: None,
+            client_label: None,
+            project_label: None,
         })
         .expect("create task after migration");
     assert!(created.id > tasks[0].id);
@@ -1332,8 +1418,13 @@ fn privacy_admin_controls_delete_contexts_clipboard_and_captured_data() {
         .create_task(TaskInput {
             title: "Temporary task".into(),
             due_date: None,
+            due_at: None,
+            notes: None,
+            priority: None,
             source: None,
             project_path: None,
+            client_label: None,
+            project_label: None,
         })
         .expect("task");
     assert!(

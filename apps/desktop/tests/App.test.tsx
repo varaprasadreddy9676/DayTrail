@@ -79,6 +79,107 @@ describe("DayTrail command center", () => {
     expect(screen.getAllByText(/today timeline/i).length).toBeGreaterThan(0);
   });
 
+  it("manages overall tasks and reminders from Today", async () => {
+    const user = userEvent.setup();
+    const settings = { browserBridgeEnabled: true, excludedDomains: [] };
+    const openTask = {
+      id: 42,
+      title: "Renew vendor contract",
+      status: "open",
+      dueDate: "2026-06-02",
+      dueAt: new Date("2026-06-02T15:30:00").getTime(),
+      notes: "Confirm budget owner first",
+      priority: "high",
+      source: "manual",
+      projectPath: null,
+      clientLabel: "Ops",
+      projectLabel: "Vendors",
+      reminderSentAt: null,
+      createdAt: "2026-06-02T09:00:00Z",
+      updatedAt: "2026-06-02T09:00:00Z",
+    };
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [openTask],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings,
+          projectContext: null,
+        };
+      }
+      if (command === "create_task") {
+        return { ...openTask, id: 43, title: (args?.input as { title: string }).title };
+      }
+      if (command === "complete_task") {
+        return { ...openTask, status: "done" };
+      }
+      if (command === "snooze_task") {
+        return { ...openTask, dueAt: args?.dueAt as number };
+      }
+      if (command === "delete_task") {
+        return { deletedRows: 1 };
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /tasks & reminders/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add task/i }));
+    await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");
+    await user.type(screen.getByLabelText(/^notes$/i), "Ask whether PO is approved");
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: "2026-06-03" } });
+    fireEvent.change(screen.getByLabelText(/due time/i), { target: { value: "10:15" } });
+    await user.click(screen.getByRole("button", { name: /save task/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("create_task", {
+        input: expect.objectContaining({
+          title: "Send invoice follow-up",
+          notes: "Ask whether PO is approved",
+          priority: "medium",
+          source: "manual",
+        }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /complete renew vendor contract/i }));
+    expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
+
+    await user.click(screen.getByRole("button", { name: /snooze renew vendor contract/i }));
+    expect(invoke).toHaveBeenCalledWith("snooze_task", {
+      id: 42,
+      dueAt: expect.any(Number),
+    });
+
+    await user.click(screen.getByRole("button", { name: /delete renew vendor contract/i }));
+    expect(invoke).toHaveBeenCalledWith("delete_task", { id: 42 });
+  });
+
   it("shows the 24-hour timeline for a selected single-day range", async () => {
     const user = userEvent.setup();
     const settings = {

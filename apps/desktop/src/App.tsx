@@ -184,7 +184,7 @@ type BackendCapturePermissionCheck = {
 
 type BackendTodaySnapshot = {
   localDate: string;
-  tasks: Array<{ id: number; title: string; source?: string | null; projectPath?: string | null }>;
+  tasks: BackendTask[];
   quickNotes: BackendQuickNote[];
   commitments: Array<{ id: string; title: string; source?: string | null; dueAt?: number | null }>;
   pendingReplies: Array<{ id: string; subject: string; latestSender?: string | null }>;
@@ -244,6 +244,33 @@ type BackendTodaySnapshot = {
   settings: BackendSettings;
   projectContext?: { path: string; source: string } | null;
   activeWorkContext?: BackendActiveWorkContext | null;
+};
+
+type BackendTask = {
+  id: number;
+  title: string;
+  status: "open" | "done";
+  dueDate?: string | null;
+  dueAt?: number | null;
+  notes?: string | null;
+  priority?: "high" | "medium" | "low" | string | null;
+  source?: string | null;
+  projectPath?: string | null;
+  clientLabel?: string | null;
+  projectLabel?: string | null;
+  reminderSentAt?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type TaskForm = {
+  title: string;
+  notes: string;
+  dueDate: string;
+  dueTime: string;
+  priority: "high" | "medium" | "low";
+  clientLabel: string;
+  projectLabel: string;
 };
 
 type BackendCalendarEvent = {
@@ -1984,6 +2011,14 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       primaryAction: "Mark done",
       state: "open" as const,
     })),
+    ...snapshot.tasks.slice(0, 4).map((task) => ({
+      id: `task-${task.id}`,
+      title: task.title,
+      source: taskContextLabel(task),
+      reason: `${taskDueLabel(task)} · ${formatLoopLabel(task.priority || "medium")} priority`,
+      primaryAction: "Mark done",
+      state: "open" as const,
+    })),
     ...snapshot.aiOutputs
       .filter((output) => output.status === "drafted" || output.status === "needs_review")
       .slice(0, 2)
@@ -2279,6 +2314,32 @@ function defaultCalendarBlockForm(date = formatLocalDateInput(new Date())): Cale
   };
 }
 
+function defaultTaskForm(): TaskForm {
+  return {
+    title: "",
+    notes: "",
+    dueDate: "",
+    dueTime: "",
+    priority: "medium",
+    clientLabel: "",
+    projectLabel: "",
+  };
+}
+
+function taskDueLabel(task: BackendTask) {
+  if (task.dueAt) {
+    return `Due ${formatTime(task.dueAt)}`;
+  }
+  if (task.dueDate) {
+    return `Due ${task.dueDate}`;
+  }
+  return "No due date";
+}
+
+function taskContextLabel(task: BackendTask) {
+  return [task.clientLabel, task.projectLabel].filter(Boolean).join(" · ") || task.source || "Backlog";
+}
+
 // ── Work Context Editor ───────────────────────────────────────────────────────
 
 interface WorkContextForm {
@@ -2495,6 +2556,8 @@ export default function App() {
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
   const [calendarBlockOpen, setCalendarBlockOpen] = useState(false);
   const [calendarBlockForm, setCalendarBlockForm] = useState<CalendarBlockForm>(() => defaultCalendarBlockForm());
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskForm, setTaskForm] = useState<TaskForm>(() => defaultTaskForm());
   const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
 
   // Review / timesheet state
@@ -3238,6 +3301,87 @@ export default function App() {
     }
   }
 
+  function openTaskModal() {
+    setTaskForm(defaultTaskForm());
+    setTaskModalOpen(true);
+  }
+
+  async function submitTask(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const title = taskForm.title.trim();
+    if (!title) {
+      addToast("error", "Missing title", "Add a short task title.");
+      return;
+    }
+
+    const dueAt = taskForm.dueDate && taskForm.dueTime
+      ? new Date(`${taskForm.dueDate}T${taskForm.dueTime}:00`).getTime()
+      : null;
+    if (taskForm.dueDate && taskForm.dueTime && Number.isNaN(dueAt)) {
+      addToast("error", "Invalid due time", "Choose a valid date and time.");
+      return;
+    }
+
+    const result = await invokeTauri<BackendTask>("create_task", {
+      input: {
+        title,
+        dueDate: taskForm.dueDate || null,
+        dueAt,
+        notes: taskForm.notes.trim() || null,
+        priority: taskForm.priority,
+        source: "manual",
+        projectPath: null,
+        clientLabel: taskForm.clientLabel.trim() || null,
+        projectLabel: taskForm.projectLabel.trim() || null,
+      },
+    });
+
+    if (result) {
+      setTaskModalOpen(false);
+      setTaskForm(defaultTaskForm());
+      addToast("success", "Task added", title);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Could not add task", "Backend unavailable.");
+    }
+  }
+
+  async function completeTask(task: BackendTask) {
+    const result = await invokeTauri<BackendTask>("complete_task", { id: task.id });
+    if (result) {
+      addToast("success", "Task completed", task.title);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Task not completed", "Could not update the task.");
+    }
+  }
+
+  async function snoozeTask(task: BackendTask) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const result = await invokeTauri<BackendTask>("snooze_task", {
+      id: task.id,
+      dueAt: tomorrow.getTime(),
+    });
+    if (result) {
+      addToast("success", "Task snoozed", "Reminder moved to tomorrow morning.");
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Task not snoozed", "Could not update the reminder.");
+    }
+  }
+
+  async function deleteTask(task: BackendTask) {
+    const result = await invokeTauri<BackendPrivacyDeleteSummary>("delete_task", { id: task.id });
+    if (result) {
+      addToast("success", "Task deleted", task.title);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Task not deleted", "Could not remove the task.");
+    }
+  }
+
   async function saveWorkContext(form: WorkContextForm) {
     if (form.startMs !== undefined && form.endMs !== undefined) {
       await saveManualTimeBlock(form);
@@ -3973,6 +4117,10 @@ export default function App() {
               onGenerateReport={generateDailyReport}
               onGenerateWeeklyReport={generateWeeklyReport}
               onOpenCalendarBlock={openCalendarBlockModal}
+              onOpenTaskModal={openTaskModal}
+              onCompleteTask={completeTask}
+              onSnoozeTask={snoozeTask}
+              onDeleteTask={deleteTask}
               onStartFocus={startFocusTimer}
               onStopFocus={stopFocusTimer}
               onIgnoreIdleBlock={ignoreIdleBlock}
@@ -4274,6 +4422,86 @@ export default function App() {
             <div className="offline-modal-actions">
               <button className="button" type="submit">Save planned block</button>
               <button className="button ghost" onClick={() => setCalendarBlockOpen(false)} type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {taskModalOpen && (
+        <div className="offline-modal-backdrop" onClick={() => setTaskModalOpen(false)}>
+          <form
+            className="offline-modal task-modal"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={submitTask}
+          >
+            <h3>Add task</h3>
+            <p>Capture a backlog item or reminder that is not tied to current work.</p>
+            <label className="offline-modal-full">
+              Title
+              <input
+                required
+                type="text"
+                value={taskForm.title}
+                onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))}
+              />
+            </label>
+            <label className="offline-modal-full">
+              Notes
+              <textarea
+                value={taskForm.notes}
+                onChange={(e) => setTaskForm((prev) => ({ ...prev, notes: e.target.value }))}
+              />
+            </label>
+            <div className="offline-modal-row">
+              <label>
+                Due date
+                <input
+                  type="date"
+                  value={taskForm.dueDate}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                />
+              </label>
+              <label>
+                Due time
+                <input
+                  type="time"
+                  value={taskForm.dueTime}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, dueTime: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="offline-modal-full">
+              Priority
+              <select
+                value={taskForm.priority}
+                onChange={(e) => setTaskForm((prev) => ({ ...prev, priority: e.target.value as TaskForm["priority"] }))}
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <div className="offline-modal-row">
+              <label>
+                Client
+                <input
+                  type="text"
+                  value={taskForm.clientLabel}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, clientLabel: e.target.value }))}
+                />
+              </label>
+              <label>
+                Project
+                <input
+                  type="text"
+                  value={taskForm.projectLabel}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, projectLabel: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="offline-modal-actions">
+              <button className="button" type="submit">Save task</button>
+              <button className="button ghost" onClick={() => setTaskModalOpen(false)} type="button">Cancel</button>
             </div>
           </form>
         </div>
@@ -4668,6 +4896,10 @@ function TodayView({
   onGenerateReport,
   onGenerateWeeklyReport,
   onOpenCalendarBlock,
+  onOpenTaskModal,
+  onCompleteTask,
+  onSnoozeTask,
+  onDeleteTask,
   onIgnoreIdleBlock,
   onStartFocus,
   onStopFocus,
@@ -4699,6 +4931,10 @@ function TodayView({
   onGenerateReport: () => void;
   onGenerateWeeklyReport: () => void;
   onOpenCalendarBlock: () => void;
+  onOpenTaskModal: () => void;
+  onCompleteTask: (task: BackendTask) => void | Promise<void>;
+  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
+  onDeleteTask: (task: BackendTask) => void | Promise<void>;
   onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
   onStartFocus: () => void;
   onStopFocus: () => void;
@@ -5015,6 +5251,14 @@ function TodayView({
           onAddCalendarBlock={onOpenCalendarBlock}
           onStartFocus={onStartFocus}
           onStopFocus={onStopFocus}
+        />
+
+        <TasksReminderPanel
+          onAddTask={onOpenTaskModal}
+          onCompleteTask={onCompleteTask}
+          onDeleteTask={onDeleteTask}
+          onSnoozeTask={onSnoozeTask}
+          tasks={snapshot?.tasks ?? []}
         />
       </section>
 
@@ -5516,6 +5760,90 @@ function CalendarFocusPanel({
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+function TasksReminderPanel({
+  tasks,
+  onAddTask,
+  onCompleteTask,
+  onSnoozeTask,
+  onDeleteTask,
+}: {
+  tasks: BackendTask[];
+  onAddTask: () => void;
+  onCompleteTask: (task: BackendTask) => void | Promise<void>;
+  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
+  onDeleteTask: (task: BackendTask) => void | Promise<void>;
+}) {
+  const openTasks = tasks.filter((task) => task.status !== "done").slice(0, 6);
+  const highCount = openTasks.filter((task) => task.priority === "high").length;
+
+  return (
+    <section className="panel-block tasks-reminder-panel" aria-label="Tasks and reminders">
+      <div className="tasks-reminder-head">
+        <div>
+          <span>Backlog</span>
+          <h2>Tasks &amp; Reminders</h2>
+        </div>
+        <div className="tasks-reminder-actions">
+          <strong>{openTasks.length} open</strong>
+          {highCount > 0 && <em>{highCount} high</em>}
+          <button className="button compact primary" type="button" onClick={onAddTask}>
+            <Icon name="plus" />
+            Add task
+          </button>
+        </div>
+      </div>
+
+      {openTasks.length === 0 ? (
+        <div className="tasks-empty">
+          <strong>No pending tasks</strong>
+          <span>Add reminders, backlog items, or follow-ups that are not tied to current work.</span>
+        </div>
+      ) : (
+        <div className="tasks-list">
+          {openTasks.map((task) => (
+            <article className="task-row" data-priority={task.priority ?? "medium"} key={task.id}>
+              <div className="task-main">
+                <strong>{task.title}</strong>
+                <span>{task.notes || taskContextLabel(task)}</span>
+                <em>{taskDueLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
+              </div>
+              <div className="task-actions">
+                <button
+                  aria-label={`Complete ${task.title}`}
+                  className="icon-button"
+                  onClick={() => void onCompleteTask(task)}
+                  title="Complete task"
+                  type="button"
+                >
+                  <Icon name="check" />
+                </button>
+                <button
+                  aria-label={`Snooze ${task.title}`}
+                  className="icon-button"
+                  onClick={() => void onSnoozeTask(task)}
+                  title="Snooze to tomorrow"
+                  type="button"
+                >
+                  <Icon name="sync" />
+                </button>
+                <button
+                  aria-label={`Delete ${task.title}`}
+                  className="icon-button danger"
+                  onClick={() => void onDeleteTask(task)}
+                  title="Delete task"
+                  type="button"
+                >
+                  <Icon name="x" />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

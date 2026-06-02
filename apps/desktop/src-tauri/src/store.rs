@@ -116,8 +116,14 @@ impl WorktraceStore {
                 title TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
                 due_date TEXT,
+                due_at INTEGER,
+                notes TEXT,
+                priority TEXT,
                 source TEXT,
                 project_path TEXT,
+                client_label TEXT,
+                project_label TEXT,
+                reminder_sent_at INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -513,6 +519,12 @@ impl WorktraceStore {
         )?;
 
         Self::migrate_tasks_schema(&conn)?;
+        Self::ensure_column(&conn, "tasks", "due_at", "INTEGER")?;
+        Self::ensure_column(&conn, "tasks", "notes", "TEXT")?;
+        Self::ensure_column(&conn, "tasks", "priority", "TEXT")?;
+        Self::ensure_column(&conn, "tasks", "client_label", "TEXT")?;
+        Self::ensure_column(&conn, "tasks", "project_label", "TEXT")?;
+        Self::ensure_column(&conn, "tasks", "reminder_sent_at", "INTEGER")?;
         Self::migrate_quick_notes_schema(&conn)?;
         Self::migrate_legacy_compatible_columns(&conn)?;
         Self::migrate_url_redactions(&conn)?;
@@ -521,6 +533,8 @@ impl WorktraceStore {
             r#"
             CREATE INDEX IF NOT EXISTS idx_tasks_status_due_date
                 ON tasks(status, due_date);
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_due_at
+                ON tasks(status, due_at);
             CREATE INDEX IF NOT EXISTS idx_activity_created_at
                 ON activity_events(created_at);
             CREATE INDEX IF NOT EXISTS idx_source_events_time
@@ -1036,19 +1050,31 @@ impl WorktraceStore {
     pub fn create_task(&self, input: TaskInput) -> Result<Task> {
         let title = input.title.trim();
         anyhow::ensure!(!title.is_empty(), "task title is required");
+        let due_date = input
+            .due_date
+            .or_else(|| input.due_at.and_then(epoch_ms_to_local_date));
+        let priority = input.priority.as_deref().map(normalize_task_priority);
 
         let now = now_utc();
         let conn = self.lock()?;
         conn.execute(
             r#"
-            INSERT INTO tasks (title, status, due_date, source, project_path, created_at, updated_at)
-            VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?5)
+            INSERT INTO tasks (
+                title, status, due_date, due_at, notes, priority, source, project_path,
+                client_label, project_label, reminder_sent_at, created_at, updated_at
+            )
+            VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10)
             "#,
             params![
                 title,
-                input.due_date,
+                due_date,
+                input.due_at,
+                input.notes.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                priority,
                 input.source,
                 input.project_path,
+                input.client_label,
+                input.project_label,
                 now
             ],
         )?;
@@ -1063,10 +1089,16 @@ impl WorktraceStore {
             Some(status) => {
                 let mut stmt = conn.prepare(
                     r#"
-                    SELECT id, title, status, due_date, source, project_path, created_at, updated_at
+                    SELECT id, title, status, due_date, due_at, notes, priority, source,
+                           project_path, client_label, project_label, reminder_sent_at,
+                           created_at, updated_at
                     FROM tasks
                     WHERE status = ?1
-                    ORDER BY COALESCE(due_date, '9999-12-31'), created_at DESC
+                    ORDER BY
+                        CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+                        due_at,
+                        COALESCE(due_date, '9999-12-31'),
+                        created_at DESC
                     "#,
                 )?;
                 for task in stmt.query_map(params![status.as_db_value()], Self::task_from_row)? {
@@ -1076,9 +1108,15 @@ impl WorktraceStore {
             None => {
                 let mut stmt = conn.prepare(
                     r#"
-                    SELECT id, title, status, due_date, source, project_path, created_at, updated_at
+                    SELECT id, title, status, due_date, due_at, notes, priority, source,
+                           project_path, client_label, project_label, reminder_sent_at,
+                           created_at, updated_at
                     FROM tasks
-                    ORDER BY COALESCE(due_date, '9999-12-31'), created_at DESC
+                    ORDER BY
+                        CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+                        due_at,
+                        COALESCE(due_date, '9999-12-31'),
+                        created_at DESC
                     "#,
                 )?;
                 for task in stmt.query_map([], Self::task_from_row)? {
@@ -1095,6 +1133,62 @@ impl WorktraceStore {
         conn.execute(
             "UPDATE tasks SET status = 'done', updated_at = ?1 WHERE id = ?2",
             params![now, id],
+        )?;
+        Self::get_task_locked(&conn, id)
+    }
+
+    pub fn snooze_task(&self, id: i64, due_at: i64) -> Result<Task> {
+        anyhow::ensure!(due_at > 0, "task due time is required");
+        let due_date = epoch_ms_to_local_date(due_at);
+        let now = now_utc();
+        let conn = self.lock()?;
+        conn.execute(
+            r#"
+            UPDATE tasks
+            SET status = 'open', due_at = ?1, due_date = ?2, reminder_sent_at = NULL, updated_at = ?3
+            WHERE id = ?4
+            "#,
+            params![due_at, due_date, now, id],
+        )?;
+        Self::get_task_locked(&conn, id)
+    }
+
+    pub fn delete_task(&self, id: i64) -> Result<PrivacyDeleteSummary> {
+        let conn = self.lock()?;
+        let deleted_rows = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+        Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
+    pub fn list_due_task_reminders(&self, now: i64) -> Result<Vec<Task>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, title, status, due_date, due_at, notes, priority, source,
+                   project_path, client_label, project_label, reminder_sent_at,
+                   created_at, updated_at
+            FROM tasks
+            WHERE status = 'open'
+              AND due_at IS NOT NULL
+              AND due_at <= ?1
+              AND reminder_sent_at IS NULL
+            ORDER BY due_at
+            LIMIT 20
+            "#,
+        )?;
+        let rows = stmt.query_map(params![now], Self::task_from_row)?;
+        let mut tasks = Vec::new();
+        for task in rows {
+            tasks.push(task?);
+        }
+        Ok(tasks)
+    }
+
+    pub fn mark_task_reminder_sent(&self, id: i64, sent_at: i64) -> Result<Task> {
+        let now = now_utc();
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE tasks SET reminder_sent_at = ?1, updated_at = ?2 WHERE id = ?3",
+            params![sent_at, now, id],
         )?;
         Self::get_task_locked(&conn, id)
     }
@@ -1856,13 +1950,20 @@ impl WorktraceStore {
         let conn = self.lock()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, title, status, due_date, source, project_path, created_at, updated_at
+            SELECT id, title, status, due_date, due_at, notes, priority, source,
+                   project_path, client_label, project_label, reminder_sent_at,
+                   created_at, updated_at
             FROM tasks
-            WHERE status = 'open' AND (due_date IS NULL OR due_date <= ?1)
-            ORDER BY COALESCE(due_date, '9999-12-31'), created_at DESC
+            WHERE status = 'open'
+            ORDER BY
+                CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+                due_at,
+                COALESCE(due_date, '9999-12-31'),
+                created_at DESC
+            LIMIT 20
             "#,
         )?;
-        let rows = stmt.query_map(params![local_date.clone()], Self::task_from_row)?;
+        let rows = stmt.query_map([], Self::task_from_row)?;
         let mut tasks = Vec::new();
         for row in rows {
             tasks.push(row?);
@@ -1927,6 +2028,7 @@ impl WorktraceStore {
             watcher_heartbeat.as_ref(),
         );
         let unclosed_loop_inbox = build_unclosed_loop_inbox(
+            &tasks,
             &pending_replies,
             &commitments,
             &ai_outputs,
@@ -2515,6 +2617,7 @@ impl WorktraceStore {
             build_ai_contribution_rows(&source_events, &ai_outputs, &ai_usage);
         let hidden_loop_ids = self.hidden_loop_ids()?;
         let unclosed_loop_inbox = build_unclosed_loop_inbox(
+            &tasks,
             &pending_replies,
             &commitments,
             &ai_outputs,
@@ -2739,25 +2842,24 @@ impl WorktraceStore {
         for task in &snapshot.tasks {
             let item = PlanningItem {
                 title: task.title.clone(),
-                source: task.source.clone().unwrap_or_else(|| "task".into()),
-                reason: task
-                    .due_date
-                    .as_ref()
-                    .map(|date| format!("Due {date}"))
-                    .unwrap_or_else(|| "Open task without a due date".into()),
-                due_at: task.due_date.as_deref().and_then(local_date_to_epoch_ms),
-                priority: if task
+                source: task
+                    .project_label
+                    .clone()
+                    .or_else(|| task.source.clone())
+                    .unwrap_or_else(|| "task".into()),
+                reason: task_due_reason(task),
+                due_at: task.due_at.or_else(|| task.due_date.as_deref().and_then(local_date_to_epoch_ms)),
+                priority: task_priority_rank(task),
+            };
+
+            if item.due_at.is_some_and(|due_at| due_at <= now_ms())
+                || task
                     .due_date
                     .as_deref()
                     .is_some_and(|date| date_is_on_or_before(date, today))
-                {
-                    1
-                } else {
-                    3
-                },
-            };
-
-            if task
+            {
+                must_close.push(item.clone());
+            } else if task
                 .due_date
                 .as_deref()
                 .is_some_and(|date| date_is_on_or_before(date, end_date))
@@ -4985,24 +5087,37 @@ impl WorktraceStore {
             }));
         }
 
-        if let Some((id, title, due_date)) = conn
+        if let Some((id, title, due_date, due_at, priority)) = conn
             .query_row(
                 r#"
-                SELECT id, title, due_date
+                SELECT id, title, due_date, due_at, priority
                 FROM tasks
                 WHERE status = 'open'
                 ORDER BY
-                    CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
+                    CASE
+                        WHEN due_at IS NOT NULL AND due_at <= ?1 THEN 0
+                        WHEN due_at IS NOT NULL THEN 1
+                        ELSE 2
+                    END,
+                    CASE priority
+                        WHEN 'high' THEN 0
+                        WHEN 'medium' THEN 1
+                        WHEN 'low' THEN 2
+                        ELSE 3
+                    END,
+                    due_at,
                     due_date,
                     created_at DESC
                 LIMIT 1
                 "#,
-                [],
+                params![now],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
@@ -5010,8 +5125,15 @@ impl WorktraceStore {
         {
             return Ok(Some(NextBestAction {
                 title,
-                reason: due_date
-                    .map(|date| format!("Open task is due on {date}"))
+                reason: due_at
+                    .map(|value| format!("Task reminder is due {}", format_task_due_at_label(value)))
+                    .or_else(|| due_date.map(|date| format!("Open task is due on {date}")))
+                    .map(|base| {
+                        priority
+                            .as_deref()
+                            .map(|priority| format!("{base} · {priority} priority"))
+                            .unwrap_or(base)
+                    })
                     .unwrap_or_else(|| "Open task is waiting for closure".to_string()),
                 source_type: "task".to_string(),
                 source_id: id.to_string(),
@@ -5549,7 +5671,9 @@ impl WorktraceStore {
     fn get_task_locked(conn: &Connection, id: i64) -> Result<Task> {
         conn.query_row(
             r#"
-            SELECT id, title, status, due_date, source, project_path, created_at, updated_at
+            SELECT id, title, status, due_date, due_at, notes, priority, source,
+                   project_path, client_label, project_label, reminder_sent_at,
+                   created_at, updated_at
             FROM tasks
             WHERE id = ?1
             "#,
@@ -6263,10 +6387,16 @@ impl WorktraceStore {
             title: row.get(1)?,
             status,
             due_date: row.get(3)?,
-            source: row.get(4)?,
-            project_path: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            due_at: row.get(4)?,
+            notes: row.get(5)?,
+            priority: row.get(6)?,
+            source: row.get(7)?,
+            project_path: row.get(8)?,
+            client_label: row.get(9)?,
+            project_label: row.get(10)?,
+            reminder_sent_at: row.get(11)?,
+            created_at: row.get(12)?,
+            updated_at: row.get(13)?,
         })
     }
 
@@ -8141,6 +8271,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn build_unclosed_loop_inbox(
+    tasks: &[Task],
     pending_replies: &[EmailThread],
     commitments: &[Commitment],
     ai_outputs: &[WorkOutput],
@@ -8152,6 +8283,37 @@ fn build_unclosed_loop_inbox(
 ) -> Vec<UnclosedLoopItem> {
     let mut items = Vec::new();
     let mut seen = HashSet::new();
+
+    for task in tasks.iter().take(8) {
+        let id = format!("task-{}", task.id);
+        if hidden_loop_ids.contains(&id) {
+            continue;
+        }
+        push_unclosed_loop(
+            &mut items,
+            &mut seen,
+            UnclosedLoopItem {
+                id,
+                category: "Task".to_string(),
+                title: task.title.clone(),
+                detail: task
+                    .notes
+                    .clone()
+                    .or_else(|| task.project_label.clone())
+                    .or_else(|| task.source.clone())
+                    .unwrap_or_else(|| task_due_reason(task)),
+                source: "Tasks & Reminders".to_string(),
+                risk: match task.priority.as_deref() {
+                    Some("high") => "high".to_string(),
+                    Some("low") => "low".to_string(),
+                    _ => "medium".to_string(),
+                },
+                status: task.status.as_db_value().to_string(),
+                primary_action: "Complete, snooze, or delete".to_string(),
+                evidence_ids: Vec::new(),
+            },
+        );
+    }
 
     for reply in pending_replies.iter().take(8) {
         let id = format!("reply-{}", reply.id);
@@ -9646,6 +9808,89 @@ fn local_date_to_epoch_ms(value: &str) -> Option<i64> {
         .map(|date_time| date_time.timestamp_millis())
 }
 
+fn epoch_ms_to_local_date(value: i64) -> Option<String> {
+    Local
+        .timestamp_millis_opt(value)
+        .single()
+        .or_else(|| Local.timestamp_millis_opt(value).earliest())
+        .map(|date_time| date_time.format("%Y-%m-%d").to_string())
+}
+
+fn normalize_task_priority(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "high" => "high".to_string(),
+        "low" => "low".to_string(),
+        _ => "medium".to_string(),
+    }
+}
+
+fn task_priority_rank(task: &Task) -> i64 {
+    match task.priority.as_deref() {
+        Some("high") => 1,
+        Some("medium") => 2,
+        Some("low") => 3,
+        _ => 3,
+    }
+}
+
+fn task_due_reason(task: &Task) -> String {
+    if let Some(due_at) = task.due_at {
+        return format!("Due {}", format_task_due_at_label(due_at));
+    }
+    task.due_date
+        .as_ref()
+        .map(|date| format!("Due {date}"))
+        .unwrap_or_else(|| "Open task without a due date".into())
+}
+
+fn format_task_due_at_label(due_at: i64) -> String {
+    Local
+        .timestamp_millis_opt(due_at)
+        .single()
+        .or_else(|| Local.timestamp_millis_opt(due_at).earliest())
+        .map(|date_time| date_time.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| due_at.to_string())
+}
+
+fn format_task_report_line(task: &Task) -> String {
+    let marker = if task.status == TaskStatus::Done {
+        "x"
+    } else {
+        " "
+    };
+    let mut details = Vec::new();
+
+    if let Some(due_at) = task.due_at {
+        details.push(format!("due {}", format_task_due_at_label(due_at)));
+    } else if let Some(due_date) = task.due_date.as_deref() {
+        details.push(format!("due {}", clean_report_text(due_date)));
+    }
+
+    if let Some(priority) = task.priority.as_deref().filter(|value| !value.is_empty()) {
+        details.push(format!("priority {}", clean_report_text(priority)));
+    }
+
+    let context = [task.client_label.as_deref(), task.project_label.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .map(clean_report_text)
+        .collect::<Vec<_>>();
+    if !context.is_empty() {
+        details.push(context.join(" / "));
+    }
+
+    let mut line = format!("- [{}] {}", marker, clean_report_text(&task.title));
+    if !details.is_empty() {
+        line.push_str(&format!(" ({})", details.join("; ")));
+    }
+    line.push('\n');
+    if let Some(notes) = task.notes.as_deref().filter(|value| !value.trim().is_empty()) {
+        line.push_str(&format!("  - Notes: {}\n", clean_report_text(notes)));
+    }
+    line
+}
+
 fn date_is_on_or_before(value: &str, boundary: NaiveDate) -> bool {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok_and(|date| date <= boundary)
 }
@@ -10096,16 +10341,7 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
         markdown.push_str("- No tasks captured.\n");
     } else {
         for task in &snapshot.tasks {
-            let marker = if task.status == TaskStatus::Done {
-                "x"
-            } else {
-                " "
-            };
-            markdown.push_str(&format!(
-                "- [{}] {}\n",
-                marker,
-                clean_report_text(&task.title)
-            ));
+            markdown.push_str(&format_task_report_line(task));
         }
     }
     if snapshot.commitments.is_empty() {
