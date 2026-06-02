@@ -1,19 +1,15 @@
 name: Auto-tag release
 
-# When a push to main bumps the desktop version in tauri.conf.json,
-# create and push the matching vX.Y.Z tag. The tag push then triggers
-# macos-release.yml and windows-release.yml, which build the artifacts
-# and publish a new GitHub Release.
+# Every product push to main should become a desktop release. If the push
+# already includes a new desktop version, this workflow tags that version. If
+# the current version already has a tag, it bumps the patch version, commits
+# that metadata change back to main, tags it, and dispatches platform builds.
 #
-# If the version is unchanged (or the tag already exists), this is a no-op.
+# Generated github-actions[bot] pushes are skipped to avoid release loops.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/desktop/src-tauri/tauri.conf.json"
-      - "apps/desktop/package.json"
-      - "apps/desktop/src-tauri/Cargo.toml"
 
 concurrency:
   group: auto-tag-${{ github.ref }}
@@ -25,6 +21,7 @@ permissions:
 
 jobs:
   tag:
+    if: github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,8 +30,8 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read desktop version
-        id: version
+      - name: Resolve release version
+        id: release_version
         run: |
           set -euo pipefail
           version="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
@@ -42,50 +39,88 @@ jobs:
             echo "Version is not semver: $version" >&2
             exit 1
           fi
-          tag="v$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Desktop version: $version (tag: $tag)"
 
-      - name: Verify all version files agree
-        env:
-          EXPECTED: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          v_pkg="$(node -p "require('./apps/desktop/package.json').version")"
-          v_cargo="$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
-          fail=0
-          if [ "$v_pkg" != "$EXPECTED" ]; then
-            echo "::error::apps/desktop/package.json version ($v_pkg) does not match tauri.conf.json ($EXPECTED)"
-            fail=1
+          target_version="$version"
+          bumped="false"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            IFS=. read -r major minor patch <<< "$version"
+            target_version="$major.$minor.$((patch + 1))"
+            bumped="true"
+            echo "Current desktop version v$version is already tagged; auto-bumping to v$target_version."
+          else
+            echo "Desktop version v$version is not tagged yet; using explicit version from this push."
           fi
-          if [ "$v_cargo" != "$EXPECTED" ]; then
-            echo "::error::apps/desktop/src-tauri/Cargo.toml version ($v_cargo) does not match tauri.conf.json ($EXPECTED)"
-            fail=1
-          fi
-          if [ "$fail" = "1" ]; then
-            echo "Refusing to tag with mismatched versions. Use scripts/release.sh to bump consistently." >&2
+
+          if git rev-parse -q --verify "refs/tags/v$target_version" >/dev/null; then
+            echo "::error::Resolved release tag v$target_version already exists."
             exit 1
           fi
 
-      - name: Check whether tag already exists
-        id: check
+          echo "version=$target_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$target_version" >> "$GITHUB_OUTPUT"
+          echo "bumped=$bumped" >> "$GITHUB_OUTPUT"
+          echo "Release target: v$target_version"
+
+      - name: Auto-bump desktop version
+        if: steps.release_version.outputs.bumped == 'true'
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.release_version.outputs.version }}
         run: |
           set -euo pipefail
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG already exists. Nothing to do."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Tag $TAG does not exist yet."
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+          node scripts/bump-desktop-version.mjs "$VERSION"
+
+      - name: Verify version metadata
+        env:
+          EXPECTED: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          v_pkg="$(node -p "require('./apps/desktop/package.json').version")"
+          v_lock="$(node -p "require('./apps/desktop/package-lock.json').version")"
+          v_tauri="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          v_cargo="$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          fail=0
+          if [ "$v_pkg" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/package.json version ($v_pkg) does not match release target ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$v_lock" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/package-lock.json version ($v_lock) does not match release target ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$v_tauri" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/src-tauri/tauri.conf.json version ($v_tauri) does not match release target ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$v_cargo" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/src-tauri/Cargo.toml version ($v_cargo) does not match release target ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$fail" = "1" ]; then
+            echo "Refusing to release with mismatched version metadata." >&2
+            exit 1
           fi
 
-      - name: Create and push tag
-        if: steps.check.outputs.exists == 'false'
+      - name: Commit automatic version bump
+        if: steps.release_version.outputs.bumped == 'true'
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ steps.release_version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/desktop/package.json \
+            apps/desktop/package-lock.json \
+            apps/desktop/src-tauri/tauri.conf.json \
+            apps/desktop/src-tauri/Cargo.toml \
+            apps/desktop/src-tauri/Cargo.lock
+          git commit -m "chore(release): $TAG"
+          git push origin HEAD:main
+          echo "Pushed release metadata commit for $TAG."
+
+      - name: Create and push tag
+        env:
+          TAG: ${{ steps.release_version.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -98,10 +133,9 @@ jobs:
       # workflows (GitHub's anti-recursion guard). Dispatch the release
       # builds explicitly so they pick up the new tag.
       - name: Trigger release builds
-        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ steps.release_version.outputs.tag }}
         run: |
           set -euo pipefail
           gh workflow run macos-release.yml --ref "$TAG" -f release_tag="$TAG"

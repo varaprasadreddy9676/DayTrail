@@ -10,9 +10,10 @@
 #   2. Updates the canonical version in:
 #        - apps/desktop/package.json
 #        - apps/desktop/src-tauri/tauri.conf.json
+#        - apps/desktop/package-lock.json
 #        - apps/desktop/src-tauri/Cargo.toml
 #        - apps/desktop/src-tauri/Cargo.lock (daytrail-desktop entry)
-#   3. Verifies all four files agree on the new version.
+#   3. Verifies all version files agree on the new version.
 #   4. Commits as "chore(release): vX.Y.Z".
 #   5. Tags vX.Y.Z and pushes the commit + tag to origin.
 #
@@ -86,50 +87,23 @@ if [ "$CURRENT" = "$VERSION" ]; then
   exit 1
 fi
 
-bump_file() {
-  local file="$1" pattern="$2" replacement="$3"
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "[dry-run] would update $file"
-    return
-  fi
-  # Use perl for portable in-place edit (BSD/GNU sed differ on -i).
-  perl -i -pe "s|$pattern|$replacement|" "$file"
-}
-
-# 1. apps/desktop/package.json
-bump_file "apps/desktop/package.json" \
-  "\"version\": \"$CURRENT\"" \
-  "\"version\": \"$VERSION\""
-
-# 2. apps/desktop/src-tauri/tauri.conf.json
-bump_file "apps/desktop/src-tauri/tauri.conf.json" \
-  "\"version\": \"$CURRENT\"" \
-  "\"version\": \"$VERSION\""
-
-# 3. apps/desktop/src-tauri/Cargo.toml (only the [package] version line)
-if [ "$DRY_RUN" != "1" ]; then
-  perl -i -pe "BEGIN{\$n=0} if (/^name = \"daytrail-desktop\"/) {\$n=1} elsif (\$n && s|^version = \"$CURRENT\"|version = \"$VERSION\"|) {\$n=0}" \
-    apps/desktop/src-tauri/Cargo.toml
-fi
-
-# 4. apps/desktop/src-tauri/Cargo.lock (daytrail-desktop entry)
-if [ "$DRY_RUN" != "1" ]; then
-  perl -i -pe "BEGIN{\$n=0} if (/^name = \"daytrail-desktop\"/) {\$n=1} elsif (\$n && s|^version = \"$CURRENT\"|version = \"$VERSION\"|) {\$n=0}" \
-    apps/desktop/src-tauri/Cargo.lock
-fi
-
 if [ "$DRY_RUN" = "1" ]; then
+  echo "[dry-run] would update desktop version metadata to $VERSION"
   echo "[dry-run] skipping commit/tag/push."
   exit 0
 fi
 
+node scripts/bump-desktop-version.mjs "$VERSION"
+
 # Verify all files agree.
 v_pkg="$(node -p "require('./apps/desktop/package.json').version")"
+v_lock="$(node -p "require('./apps/desktop/package-lock.json').version")"
 v_tauri="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
 v_cargo="$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
-if [ "$v_pkg" != "$VERSION" ] || [ "$v_tauri" != "$VERSION" ] || [ "$v_cargo" != "$VERSION" ]; then
+if [ "$v_pkg" != "$VERSION" ] || [ "$v_lock" != "$VERSION" ] || [ "$v_tauri" != "$VERSION" ] || [ "$v_cargo" != "$VERSION" ]; then
   echo "Version mismatch after bump:" >&2
   echo "  package.json     = $v_pkg" >&2
+  echo "  package-lock.json = $v_lock" >&2
   echo "  tauri.conf.json  = $v_tauri" >&2
   echo "  Cargo.toml       = $v_cargo" >&2
   exit 1
@@ -138,16 +112,17 @@ fi
 echo "Bumped to $VERSION. Committing and tagging..."
 git add \
   apps/desktop/package.json \
+  apps/desktop/package-lock.json \
   apps/desktop/src-tauri/tauri.conf.json \
   apps/desktop/src-tauri/Cargo.toml \
-  apps/desktop/src-tauri/Cargo.lock
+  apps/desktop/src-tauri/Cargo.lock \
+  scripts/bump-desktop-version.mjs
 
 git commit -m "chore(release): $TAG"
 git tag -a "$TAG" -m "DayTrail $TAG"
 
 echo "Pushing commit and tag to origin..."
-git push origin main
-git push origin "$TAG"
+git push origin main "$TAG"
 
 echo
 echo "Done. GitHub Actions will build and publish $TAG release."

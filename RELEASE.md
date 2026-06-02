@@ -8,6 +8,19 @@ Use this checklist before publishing a public release.
 npm run release:check
 ```
 
+## Versioning
+
+Every non-release push to `main` is release-oriented. The `Auto-tag release`
+workflow uses an explicit version bump when one is present; otherwise, if the
+current desktop version is already tagged, it bumps the patch version,
+commits the metadata update, creates the next `vX.Y.Z` tag, and dispatches the
+macOS and Windows release builds.
+
+For a deliberate manual version, run `scripts/release.sh <version>` from a
+clean `main` branch. That script updates all desktop version metadata,
+commits `chore(release): vX.Y.Z`, pushes the commit and tag together, and the
+release workflows build the installer assets.
+
 Also verify the installed desktop app manually:
 
 - App launches and hides to tray instead of exiting on close.

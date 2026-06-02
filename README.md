@@ -340,6 +340,17 @@ npm run desktop:windows
 The Windows CI workflow also builds installer artifacts. See [RELEASE.md](RELEASE.md)
 for the full release checklist, signing notes, and manual verification steps.
 
+## Release Automation
+
+Every non-release push to `main` creates a desktop release candidate. If the
+commit already bumps the desktop version, GitHub Actions tags that version. If
+the current version is already tagged, Actions bumps the patch version, commits
+the metadata update, tags it, and dispatches the macOS and Windows release
+builds.
+
+Use `scripts/release.sh <version>` only when you need to cut a specific version
+manually.
+
 ## Documentation
 
 - [PRIVACY.md](PRIVACY.md) explains local storage, metadata capture, redaction,

@@ -21,12 +21,23 @@ struct TestKeychain {
     values: Mutex<HashMap<String, String>>,
 }
 
+fn test_today_noon_ms() -> i64 {
+    chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(12, 0, 0)
+        .expect("valid local noon")
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .expect("local noon timestamp")
+        .timestamp_millis()
+}
+
 #[test]
 fn calendar_events_reconcile_planned_vs_actual_work() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Local::now().timestamp_millis();
+    let now = test_today_noon_ms();
     let meeting_start = now - 90 * 60_000;
     let meeting_end = meeting_start + 60 * 60_000;
     let missed_start = now - 4 * 60 * 60_000;
@@ -104,7 +115,7 @@ fn focus_sessions_measure_drift_from_the_declared_context() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 40 * 60_000;
+    let start = test_today_noon_ms() - 40 * 60_000;
     let end = start + 30 * 60_000;
 
     store
@@ -174,7 +185,7 @@ fn smart_breaks_score_long_work_and_logged_breaks() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 90 * 60_000;
+    let start = test_today_noon_ms() - 90 * 60_000;
     let first_end = start + 32 * 60_000;
     let second_start = first_end;
     let second_end = second_start + 24 * 60_000;
@@ -261,7 +272,7 @@ fn weekly_review_includes_smart_breaks() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 2 * 60 * 60_000;
+    let start = test_today_noon_ms() - 2 * 60 * 60_000;
     let end = start + 65 * 60_000;
 
     store
@@ -322,7 +333,7 @@ fn staged_smart_break_prompt_events_are_persisted() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Local::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     store
         .record_recovery_event(RecoveryEventInput {
@@ -353,7 +364,7 @@ fn smart_break_summary_uses_configured_threshold() {
             ..Default::default()
         })
         .expect("settings");
-    let start = chrono::Local::now().timestamp_millis() - 35 * 60_000;
+    let start = test_today_noon_ms() - 35 * 60_000;
     let end = start + 35 * 60_000;
 
     store
@@ -389,7 +400,7 @@ fn recovery_breaks_split_overlapping_active_window_spans() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 90 * 60_000;
+    let start = test_today_noon_ms() - 90 * 60_000;
     let end = start + 60 * 60_000;
     let break_start = start + 30 * 60_000;
     let break_end = break_start + 5 * 60_000;
@@ -467,7 +478,7 @@ fn records_unclassified_idle_gap_candidate_for_return_prompt() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 35 * 60_000;
+    let start = test_today_noon_ms() - 35 * 60_000;
     let end = start + 25 * 60_000;
 
     let recorded = store
@@ -494,7 +505,7 @@ fn idle_gap_candidate_is_suppressed_when_paused_or_already_classified() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 45 * 60_000;
+    let start = test_today_noon_ms() - 45 * 60_000;
     let end = start + 20 * 60_000;
 
     store.pause("manual pause").expect("pause");
@@ -526,7 +537,7 @@ fn search_indexes_weekly_calendar_focus_ai_and_offline_sources() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 60 * 60_000;
+    let start = test_today_noon_ms() - 60 * 60_000;
     let end = start + 30 * 60_000;
 
     store
@@ -887,7 +898,7 @@ fn daily_report_is_non_empty_when_work_sessions_exist() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let start = chrono::Local::now().timestamp_millis() - 20 * 60_000;
+    let start = test_today_noon_ms() - 20 * 60_000;
     let end = start + 15 * 60_000;
 
     store
@@ -2523,7 +2534,7 @@ fn tracks_meetings_field_visits_and_idle_recovery_in_today_and_reports() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     store
         .upsert_meeting(MeetingInput {
@@ -2602,7 +2613,7 @@ fn materializes_source_events_into_sessions_streams_and_graph_edges() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     for event in [
         SourceEventInput {
@@ -2746,7 +2757,7 @@ fn today_snapshot_falls_back_to_recent_source_events_when_sessions_are_not_persi
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     store
         .record_source_event(SourceEventInput {
@@ -2782,7 +2793,7 @@ fn today_snapshot_does_not_persist_derived_sessions_on_read() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("daytrail.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     store
         .record_source_event(SourceEventInput {
@@ -2832,7 +2843,7 @@ fn materialize_work_memory_skips_unchanged_source_events_without_rewriting_rows(
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("daytrail.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     for event in [
         SourceEventInput {
@@ -2917,7 +2928,7 @@ fn materialized_capture_titles_use_workspace_and_app_labels_not_untitled() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     store
         .update_settings(SettingsPatch {
@@ -2981,7 +2992,7 @@ fn today_snapshot_exposes_session_evidence_ai_usage_and_automation_candidates() 
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = test_today_noon_ms();
 
     for (index, title) in [
         "billing-api daily export",
