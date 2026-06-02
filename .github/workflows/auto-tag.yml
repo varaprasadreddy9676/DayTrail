@@ -1,0 +1,109 @@
+name: Auto-tag release
+
+# When a push to main bumps the desktop version in tauri.conf.json,
+# create and push the matching vX.Y.Z tag. The tag push then triggers
+# macos-release.yml and windows-release.yml, which build the artifacts
+# and publish a new GitHub Release.
+#
+# If the version is unchanged (or the tag already exists), this is a no-op.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/src-tauri/tauri.conf.json"
+      - "apps/desktop/package.json"
+      - "apps/desktop/src-tauri/Cargo.toml"
+
+concurrency:
+  group: auto-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read desktop version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version is not semver: $version" >&2
+            exit 1
+          fi
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Desktop version: $version (tag: $tag)"
+
+      - name: Verify all version files agree
+        env:
+          EXPECTED: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          v_pkg="$(node -p "require('./apps/desktop/package.json').version")"
+          v_cargo="$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          fail=0
+          if [ "$v_pkg" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/package.json version ($v_pkg) does not match tauri.conf.json ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$v_cargo" != "$EXPECTED" ]; then
+            echo "::error::apps/desktop/src-tauri/Cargo.toml version ($v_cargo) does not match tauri.conf.json ($EXPECTED)"
+            fail=1
+          fi
+          if [ "$fail" = "1" ]; then
+            echo "Refusing to tag with mismatched versions. Use scripts/release.sh to bump consistently." >&2
+            exit 1
+          fi
+
+      - name: Check whether tag already exists
+        id: check
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists. Nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG does not exist yet."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "DayTrail $TAG"
+          git push origin "$TAG"
+          echo "Pushed $TAG."
+
+      # Tags pushed using the default GITHUB_TOKEN do NOT trigger other
+      # workflows (GitHub's anti-recursion guard). Dispatch the release
+      # builds explicitly so they pick up the new tag.
+      - name: Trigger release builds
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run macos-release.yml --ref "$TAG" -f release_tag="$TAG"
+          gh workflow run windows-release.yml --ref "$TAG" -f release_tag="$TAG"
+          echo "Dispatched macOS and Windows release builds for $TAG."
