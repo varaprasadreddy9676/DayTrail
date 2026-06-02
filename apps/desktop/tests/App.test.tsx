@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -178,6 +178,22 @@ describe("DayTrail command center", () => {
     expect(screen.getAllByText(/today timeline/i).length).toBeGreaterThan(0);
   });
 
+  it("opens bulk task import directly from the sidebar", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^import tasks$/i }));
+
+    expect(screen.getByRole("heading", { name: /^import tasks$/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/paste tasks/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ai draft tasks/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /paste many/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("manages overall tasks and reminders from Today", async () => {
     const user = userEvent.setup();
     const settings = { browserBridgeEnabled: true, excludedDomains: [] };
@@ -270,7 +286,8 @@ describe("DayTrail command center", () => {
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /add task/i }));
+    const tasksPanel = screen.getByLabelText(/tasks and reminders/i);
+    await user.click(within(tasksPanel).getByRole("button", { name: /add task/i }));
     await user.click(screen.getByRole("button", { name: /paste many/i }));
     await user.type(
       screen.getByLabelText(/paste tasks/i),
@@ -303,8 +320,12 @@ describe("DayTrail command center", () => {
         }),
       });
     });
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: /^import tasks$/i })).not.toBeInTheDocument(),
+    );
 
-    await user.click(screen.getByRole("button", { name: /add task/i }));
+    const refreshedTasksPanel = screen.getByLabelText(/tasks and reminders/i);
+    await user.click(within(refreshedTasksPanel).getByRole("button", { name: /add task/i }));
     await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");
     await user.type(screen.getByLabelText(/^notes$/i), "Ask whether PO is approved");
     fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: "2026-06-03" } });

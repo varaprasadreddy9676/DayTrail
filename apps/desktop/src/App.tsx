@@ -3287,9 +3287,10 @@ export default function App() {
     }
   }
 
-  function openTaskModal() {
+  function openTaskModal(mode: "single" | "bulk" = "single") {
+    const entryMode = mode === "bulk" ? "bulk" : "single";
     setTaskForm(defaultTaskForm());
-    setTaskModalMode("single");
+    setTaskModalMode(entryMode);
     setBulkTaskText("");
     setBulkTaskPriority("high");
     setBulkTaskDrafts([]);
@@ -4055,6 +4056,20 @@ export default function App() {
         )}
 
         <div className="sidebar-offline-action">
+          <button
+            className="button compact sidebar-log-offline"
+            onClick={() => openTaskModal("single")}
+            type="button"
+          >
+            + Add task
+          </button>
+          <button
+            className="button compact sidebar-log-offline sidebar-import-tasks"
+            onClick={() => openTaskModal("bulk")}
+            type="button"
+          >
+            Import tasks
+          </button>
           <button
             className="button compact sidebar-log-offline"
             onClick={() => {
@@ -9827,9 +9842,12 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 type UpdateCheckResult = {
   currentVersion: string;
+  currentBuildUnix?: number | null;
   latestVersion?: string | null;
+  latestBuildAt?: string | null;
   updateAvailable: boolean;
   releaseUrl: string;
+  downloadUrl?: string | null;
   error?: string | null;
 };
 
@@ -9858,6 +9876,10 @@ function UpdateChecker() {
   const openReleases = (url: string) => {
     void invokeTauri("plugin:opener|open_url", { url });
   };
+  const updateLabel =
+    result?.latestVersion && result.latestVersion !== result.currentVersion
+      ? `Update available: v${result.latestVersion} - Download`
+      : "New build available - Download";
 
   return (
     <div className="settings-about-card">
@@ -9880,9 +9902,9 @@ function UpdateChecker() {
             <button
               className="button compact"
               type="button"
-              onClick={() => openReleases(result.releaseUrl)}
+              onClick={() => openReleases(result.downloadUrl || result.releaseUrl)}
             >
-              Update available: v{result.latestVersion} — Download
+              {updateLabel}
             </button>
           ) : (
             <span>You're on the latest version.</span>

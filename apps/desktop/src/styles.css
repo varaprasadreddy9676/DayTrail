@@ -709,6 +709,8 @@ button {
 }
 
 .sidebar-offline-action {
+  display: grid;
+  gap: 8px;
   padding: 6px 8px 2px;
 }
 
@@ -725,6 +727,13 @@ button {
   color: var(--text-main);
   border-color: var(--accent-main);
   background: color-mix(in srgb, var(--accent-main) 8%, transparent);
+}
+
+.sidebar-import-tasks {
+  color: var(--text-main);
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent-main) 42%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-main) 10%, transparent);
 }
 
 /* ── Offline time log modal ─────────────────────────────────────── */
