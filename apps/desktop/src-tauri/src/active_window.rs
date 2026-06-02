@@ -1,11 +1,12 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Read,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output, Stdio},
     sync::Mutex,
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 type ContentTitleCache = HashMap<u32, (Option<String>, SystemTime)>;
@@ -185,6 +186,84 @@ fn duration_to_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u64::MAX as u128) as u64
 }
 
+fn command_output_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Option<Output> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            watcher_log(&format!("{label} spawn failed: {error}"));
+            return None;
+        }
+    };
+    let stdout_reader = child.stdout.take().map(|mut stream| {
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stream.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+    let stderr_reader = child.stderr.take().map(|mut stream| {
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stream.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = stdout_reader
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
+                let stderr = stderr_reader
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
+                return Some(Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(reader) = stdout_reader {
+                    let _ = reader.join();
+                }
+                if let Some(reader) = stderr_reader {
+                    let _ = reader.join();
+                }
+                watcher_log(&format!(
+                    "{label} skipped after {}ms timeout",
+                    timeout.as_millis()
+                ));
+                return None;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(reader) = stdout_reader {
+                    let _ = reader.join();
+                }
+                if let Some(reader) = stderr_reader {
+                    let _ = reader.join();
+                }
+                watcher_log(&format!("{label} wait failed: {error}"));
+                return None;
+            }
+        }
+    }
+}
+
 /// Whether the active window should be captured this tick.
 fn should_record(idle_ms: u64, idle_threshold_ms: u64) -> bool {
     idle_ms < idle_threshold_ms
@@ -272,7 +351,10 @@ static WATCHER_HEARTBEAT: Mutex<Option<WatcherHeartbeat>> = Mutex::new(None);
 
 /// Snapshot of the latest watcher heartbeat, or `None` before the first tick.
 pub fn watcher_heartbeat() -> Option<WatcherHeartbeat> {
-    WATCHER_HEARTBEAT.lock().ok().and_then(|guard| guard.clone())
+    WATCHER_HEARTBEAT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
 }
 
 fn update_heartbeat(apply: impl FnOnce(&mut WatcherHeartbeat)) {
@@ -372,8 +454,10 @@ fn begin_background_activity() -> Option<impl Sized> {
     use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
 
     let reason = NSString::from_str("DayTrail continuous activity capture");
-    let token = NSProcessInfo::processInfo()
-        .beginActivityWithOptions_reason(NSActivityOptions::UserInitiatedAllowingIdleSystemSleep, &reason);
+    let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        &reason,
+    );
     watcher_log("App Nap disabled via NSProcessInfo activity assertion");
     Some(token)
 }
@@ -420,10 +504,12 @@ fn begin_background_activity() {}
 /// Returns `None` if the check is unavailable or fails.
 #[cfg(target_os = "macos")]
 fn system_idle_ms() -> Option<u64> {
-    let output = Command::new("ioreg")
-        .args(["-c", "IOHIDSystem", "-n", "IOHIDSystem"])
-        .output()
-        .ok()?;
+    let mut command = Command::new("ioreg");
+    command.args(["-c", "IOHIDSystem", "-n", "IOHIDSystem"]);
+    let output = command_output_with_timeout(command, Duration::from_millis(800), "ioreg")?;
+    if !output.status.success() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&output.stdout);
     for line in text.lines() {
         if line.contains("HIDIdleTime") {
@@ -555,21 +641,21 @@ fn native_frontmost_application() -> Option<ActiveWindowInfo> {
 
 #[cfg(target_os = "macos")]
 fn applescript_frontmost_application() -> Option<ActiveWindowInfo> {
-    let output = Command::new("osascript")
-        .args([
-            "-e",
-            r#"tell application "System Events" to set frontApp to name of first application process whose frontmost is true"#,
-            "-e",
-            r#"tell application "System Events" to set frontTitle to "" "#,
-            "-e",
-            r#"tell application "System Events" to set frontPid to unix id of first application process whose frontmost is true"#,
-            "-e",
-            r#"tell application "System Events" to tell process frontApp to if exists window 1 then set frontTitle to name of window 1"#,
-            "-e",
-            r#"return frontApp & linefeed & frontTitle & linefeed & frontPid"#,
-        ])
-        .output()
-        .ok()?;
+    let mut command = Command::new("osascript");
+    command.args([
+        "-e",
+        r#"tell application "System Events" to set frontApp to name of first application process whose frontmost is true"#,
+        "-e",
+        r#"tell application "System Events" to set frontTitle to "" "#,
+        "-e",
+        r#"tell application "System Events" to set frontPid to unix id of first application process whose frontmost is true"#,
+        "-e",
+        r#"tell application "System Events" to tell process frontApp to if exists window 1 then set frontTitle to name of window 1"#,
+        "-e",
+        r#"return frontApp & linefeed & frontTitle & linefeed & frontPid"#,
+    ]);
+    let output =
+        command_output_with_timeout(command, Duration::from_millis(1_000), "frontmost osascript")?;
 
     if !output.status.success() {
         return None;
@@ -702,10 +788,11 @@ fn window_title_for_app(app_name: &str) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn workspace_candidates_from_process(pid: u32) -> Vec<String> {
-    let output = Command::new("lsof")
-        .args(["-p", &pid.to_string(), "-Fn"])
-        .output();
-    let Ok(output) = output else {
+    let mut command = Command::new("lsof");
+    command.args(["-p", &pid.to_string(), "-Fn"]);
+    let Some(output) =
+        command_output_with_timeout(command, Duration::from_millis(800), "workspace lsof")
+    else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -850,12 +937,9 @@ fn extract_ticket_id(text: &str) -> Option<String> {
 }
 
 fn run_git(workspace_path: &str, args: &[&str]) -> Option<String> {
-    let output = crate::platform::hidden_command("git")
-        .arg("-C")
-        .arg(workspace_path)
-        .args(args)
-        .output()
-        .ok()?;
+    let mut command = crate::platform::hidden_command("git");
+    command.arg("-C").arg(workspace_path).args(args);
+    let output = command_output_with_timeout(command, Duration::from_millis(1_000), "git")?;
     if !output.status.success() {
         return None;
     }
@@ -921,8 +1005,11 @@ fn editor_ai_tools_from_processes_legacy_scan(app_name: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let output = Command::new("ps").args(["-axo", "command"]).output();
-    let Ok(output) = output else {
+    let mut command = Command::new("ps");
+    command.args(["-axo", "command"]);
+    let Some(output) =
+        command_output_with_timeout(command, Duration::from_millis(1_000), "editor ps")
+    else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -996,10 +1083,11 @@ fn terminal_ai_tools_from_processes(app_name: &str, process_id: Option<u32>) -> 
         return Vec::new();
     };
 
-    let output = Command::new("ps")
-        .args(["-axo", "pid,ppid,command"])
-        .output();
-    let Ok(output) = output else {
+    let mut command = Command::new("ps");
+    command.args(["-axo", "pid,ppid,command"]);
+    let Some(output) =
+        command_output_with_timeout(command, Duration::from_millis(1_000), "terminal ps")
+    else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -1094,10 +1182,9 @@ fn app_context_hint_for_process(app_name: &str, process_id: Option<u32>) -> Opti
 
 #[cfg(target_os = "macos")]
 fn codex_context_from_process(root_pid: u32) -> Option<AppContextHint> {
-    let output = Command::new("ps")
-        .args(["-axo", "pid,ppid,command"])
-        .output()
-        .ok()?;
+    let mut command = Command::new("ps");
+    command.args(["-axo", "pid,ppid,command"]);
+    let output = command_output_with_timeout(command, Duration::from_millis(1_000), "codex ps")?;
     if !output.status.success() {
         return None;
     }
@@ -1105,10 +1192,10 @@ fn codex_context_from_process(root_pid: u32) -> Option<AppContextHint> {
     let descendants = descendant_process_ids(&String::from_utf8_lossy(&output.stdout), root_pid);
     let mut sessions = Vec::new();
     for pid in descendants {
-        let output = Command::new("lsof")
-            .args(["-p", &pid.to_string(), "-Fn"])
-            .output()
-            .ok()?;
+        let mut command = Command::new("lsof");
+        command.args(["-p", &pid.to_string(), "-Fn"]);
+        let output =
+            command_output_with_timeout(command, Duration::from_millis(600), "codex lsof")?;
         if !output.status.success() {
             continue;
         }
@@ -1446,7 +1533,7 @@ fn run_osascript(lines: &[&str]) -> Option<String> {
     for line in lines {
         command.arg("-e").arg(line);
     }
-    let output = command.output().ok()?;
+    let output = command_output_with_timeout(command, Duration::from_millis(1_000), "osascript")?;
     if !output.status.success() {
         return None;
     }
@@ -1777,10 +1864,13 @@ fn terminal_ai_tools_from_processes(app_name: &str, process_id: Option<u32>) -> 
 #[cfg(target_os = "windows")]
 fn windows_process_command_output() -> Option<String> {
     let script = "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId,$_.ParentProcessId,(($_.CommandLine -as [string]) -replace '[\\r\\n]+',' ') }";
-    let output = crate::platform::hidden_command("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .output()
-        .ok()?;
+    let mut command = crate::platform::hidden_command("powershell.exe");
+    command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+    let output = command_output_with_timeout(
+        command,
+        Duration::from_millis(2_000),
+        "powershell process scan",
+    )?;
     output
         .status
         .success()
@@ -2607,11 +2697,26 @@ mod tests {
     use super::is_chromium_browser;
     use super::{
         clean_codex_context_title, codex_thread_hint_from_state_db,
-        display_app_name_from_executable, is_resume, meaningful_ax_candidate, push_ai_tool_from_path,
-        score_ax_context_candidate, should_record, single_workspace_candidate,
-        status_prefixed_ax_candidate, terminal_ai_tools_from_ps_output, workspace_from_candidates,
+        display_app_name_from_executable, is_resume, meaningful_ax_candidate,
+        push_ai_tool_from_path, score_ax_context_candidate, should_record,
+        single_workspace_candidate, status_prefixed_ax_candidate, terminal_ai_tools_from_ps_output,
+        workspace_from_candidates,
     };
-    use std::path::Path;
+    use std::{path::Path, process::Command, time::Duration};
+
+    #[cfg(windows)]
+    fn shell_command(script: &str) -> Command {
+        let mut command = Command::new("cmd");
+        command.args(["/C", script]);
+        command
+    }
+
+    #[cfg(not(windows))]
+    fn shell_command(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", script]);
+        command
+    }
 
     #[test]
     fn records_only_while_user_is_active() {
@@ -2697,6 +2802,40 @@ mod tests {
             super::assess_capture_liveness(Some(&hb_no_ax), now, 30_000),
             super::CaptureLiveness::Healthy
         );
+    }
+
+    #[test]
+    fn timeout_command_helper_captures_output() {
+        let script = if cfg!(windows) {
+            "echo DayTrail"
+        } else {
+            "printf DayTrail"
+        };
+        let output = super::command_output_with_timeout(
+            shell_command(script),
+            Duration::from_secs(2),
+            "test echo",
+        )
+        .expect("command should finish");
+
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("DayTrail"));
+    }
+
+    #[test]
+    fn timeout_command_helper_stops_slow_commands() {
+        let script = if cfg!(windows) {
+            "ping -n 2 127.0.0.1 >NUL"
+        } else {
+            "sleep 1"
+        };
+
+        assert!(super::command_output_with_timeout(
+            shell_command(script),
+            Duration::from_millis(50),
+            "test slow command"
+        )
+        .is_none());
     }
 
     #[test]

@@ -134,11 +134,10 @@ describe("DayTrail command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /recovery rhythm/i })).toBeInTheDocument();
-    expect(screen.getByText(/82/)).toBeInTheDocument();
-    expect(screen.getAllByText(/42m/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/2 taken/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 skipped/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/smart recovery/i)).toBeInTheDocument();
+    expect(screen.getByText(/break due/i)).toBeInTheDocument();
+    expect(screen.getByText(/31m current.*2 taken/i)).toBeInTheDocument();
+    expect(screen.getByText(/longest 42m.*1 skipped/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /take break/i }));
     await user.click(screen.getByRole("button", { name: /snooze/i }));
@@ -427,8 +426,8 @@ describe("DayTrail command center", () => {
     expect(screen.getByRole("heading", { name: /24-hour timeline/i })).toBeInTheDocument();
     expect(await screen.findByText(/showing 1 active hour/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/selected range summary/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /recovery rhythm/i })).toBeInTheDocument();
-    expect(screen.getByText(/range summary/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/smart recovery/i)).toBeInTheDocument();
+    expect(screen.queryByText(/range summary/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /take break/i })).not.toBeInTheDocument();
   });
 

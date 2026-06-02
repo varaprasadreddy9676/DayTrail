@@ -17,13 +17,13 @@ Also verify the installed desktop app manually:
 - Browser bridge captures domains and redacted URLs.
 - Terminal bridge captures current folder and redacted commands.
 - AI usage appears for observed AI tools and DayTrail-generated reports.
-- Calendar events supplied through local import/integration appear in Today and
-  reconcile against captured work as matched, missed, or partial.
+- Calendar/planned-work reconciliation is not presented as a user-facing feature
+  unless a connector or clear planned-block entry point is shipped.
 - Focus Mode nudges still work, and focus timer sessions are persisted with
   goal, target duration, elapsed time, and drift summary.
-- Smart Recovery shows the Today recovery card, sends local nudges after a long
-  uninterrupted screen run, and records take/snooze/skip actions in recovery
-  stats without blocking apps.
+- Smart Recovery shows the sidebar recovery status, sends local nudges after a
+  long uninterrupted screen run, and records take/snooze/skip actions when a
+  break is due without blocking apps.
 - Away/resume gaps create idle recovery prompts without surfacing sleep-sized
   gaps as classification work.
 - Daily report, weekly digest, and replay/restore flows generate source-backed
@@ -39,10 +39,12 @@ Also verify the installed desktop app manually:
 - Focus Mode is documented with its current behavior: local distraction nudges,
   native notifications, duration choices, snooze/end controls, and no app
   blocking. Persisted focus timer/review behavior is also documented.
-- Smart Recovery is documented as local sustainable-focus nudges with
+- Smart Recovery is documented as local sustainable-focus nudges with due-state
   take/snooze/skip controls, not as medical or eye-care advice.
-- README claims about calendar support are limited to imported/local events; do
-  not imply Google/Outlook sync unless that connector is actually shipped.
+- README does not claim user-facing calendar/planned-block support unless that
+  workflow is actually shipped.
+- Regenerate `01-today.png` after UI layout changes so the screenshot matches
+  the current Today screen.
 - README mentions weekly digest, replay/restore, idle recovery, and
   interruption-friendly positioning consistently with the app UI.
 - Screenshots use realistic demo data and do not expose secrets, private

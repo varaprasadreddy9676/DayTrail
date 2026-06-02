@@ -9,7 +9,8 @@ use tauri::{
 use crate::store::WorktraceStore;
 
 /// Without a heartbeat tick for this long, the tray treats capture as stopped.
-const TRAY_STALE_AFTER_MS: i64 = 30_000;
+/// Keep this in sync with the UI-facing capture health threshold.
+const TRAY_STALE_AFTER_MS: i64 = 120_000;
 /// How often the tray re-checks capture health.
 const TRAY_HEALTH_POLL: Duration = Duration::from_secs(10);
 

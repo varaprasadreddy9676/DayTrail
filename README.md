@@ -11,8 +11,8 @@ It helps you answer questions like:
 
 - **Where did my day really go?** You'll see the 90 minutes in email and the
   hour on YouTube you'd have sworn was deep work.
-- **Did my plan match reality?** Compare imported calendar blocks with the work
-  DayTrail actually observed, including missed or partially matched events.
+- **Can I trust my memory?** Compare what you remember with the captured
+  timeline, apps, projects, and AI trail.
 - **What's eating my time?** Spot recurring distractions and time-sinks so you
   can actually cut them.
 - **Can I stay focused right now?** Start a focus block and get a gentle native
@@ -123,8 +123,8 @@ day with DayTrail it's obvious — "I thought I shipped features all morning, bu
   snoozed, or skipped without blocking apps.
 - **Recover context after interruptions** with replay/restore views and
   unclassified away-time prompts.
-- **Compare planned vs actual work** when calendar events are supplied by a
-  local integration or import.
+- **See enough context to resume quickly** without rebuilding the whole day from
+  memory.
 - **Separate day-job work from side-project work** without two timers.
 - **Find the routines** you repeat every day and decide what to automate or drop.
 - **Back your standup / invoice / changelog / weekly update with facts**, not
@@ -142,9 +142,8 @@ local memory of your own work** that only you can see.
 ![DayTrail Today dashboard: current work is "Claude · Deep dive into project codebase", with daily stats and a 24-hour timeline](docs/screenshots/01-today.png)
 
 One glance answers "what did I do today?": what you're on right now (with the real
-document/chat title, not just the app name), time tracked, active apps, AI time,
-calendar/focus/recovery intelligence, and a 24-hour timeline you can drill into
-hour by hour.
+document/chat title, not just the app name), time tracked, top work app, AI time,
+review count, tasks, and a 24-hour timeline you can drill into hour by hour.
 
 ### Focus Mode — a gentle nudge before a distraction becomes an hour
 
@@ -161,19 +160,18 @@ you; it never blocks apps or sends data anywhere.
 
 Smart Recovery watches the same local foreground-window metadata as the rest of
 DayTrail. After a long uninterrupted screen run, it can send a native nudge and
-show a compact Today card with recovery score, longest run, taken breaks, and
-skips. Actions stay simple: take a short break, snooze, or skip. DayTrail records
-only local recovery events and uses them in weekly review; it does not make
-medical claims or lock your apps.
+show a compact sidebar status. When a break is due, the sidebar exposes simple
+actions: take a short break, snooze, or skip. DayTrail records only local
+recovery events and uses them in weekly review; it does not make medical claims
+or lock your apps.
 
 ### Weekly digest and replay — source-backed updates without reconstructing memory
 
 Daily reports, weekly reviews, and replay/restore flows are generated from the
 same local evidence: work sessions, AI usage, outputs, meetings, idle recovery
-notes, focus sessions, Smart Recovery rhythm, and imported calendar events. With
-an AI provider configured, DayTrail can turn the last seven local days into a
-first draft for a standup, client update, or changelog while keeping the source
-trail visible.
+notes, focus sessions, and Smart Recovery rhythm. With an AI provider configured,
+DayTrail can turn the last seven local days into a first draft for a standup,
+client update, or changelog while keeping the source trail visible.
 
 ### AI Impact — how much of your work actually flows through AI
 
@@ -213,8 +211,6 @@ work without storing private content unnecessarily.
   installed.
 - AI tools: detected AI apps, browser tools, editor assistants, and terminal
   agents.
-- Calendar context: event title, location, start/end time, and attendee count
-  when events are supplied by a local integration or import.
 - Manual context: meetings, offline work, client / project / task labels, and
   billable flags.
 - Idle recovery: away/resume gaps that need classification, plus user-approved
@@ -243,8 +239,8 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
 2. Browser, editor, and terminal bridges add deeper context where installed.
 3. DayTrail groups events into sessions, hours, apps, projects, sites, and AI
    usage.
-4. Calendar events and focus sessions are reconciled against captured activity
-   when those local facts exist.
+4. Focus sessions are reconciled against captured activity when those facts
+   exist.
 5. You can tag gaps, meetings, or current work context manually.
 6. Focus Mode can nudge you during an active focus block when a distraction
    pattern is detected.
@@ -263,11 +259,9 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    and command context.
 5. Allow notifications if you want Focus Mode, Smart Recovery, and away-time
    nudges.
-6. Add calendar context through a local integration/import if you want planned
-   vs actual reconciliation.
-7. Add an optional AI provider in Settings if you want generated report drafts
+6. Add an optional AI provider in Settings if you want generated report drafts
    and weekly digests.
-8. Leave DayTrail running from startup so the day is captured automatically.
+7. Leave DayTrail running from startup so the day is captured automatically.
 
 DayTrail is most useful after one full workday of capture.
 

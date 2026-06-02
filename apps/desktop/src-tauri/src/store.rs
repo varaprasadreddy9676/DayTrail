@@ -21,9 +21,10 @@ const RECOVERY_PROMPT_THRESHOLD_MS: i64 = 25 * 60 * 1000;
 const RECOVERY_STREAK_RESET_GAP_MS: i64 = 3 * 60 * 1000;
 const RECOVERY_SUGGESTED_BREAK_MINUTES: i64 = 3;
 /// How long the capture watcher can go without a heartbeat tick before it is
-/// considered stalled. The watcher ticks every 2s, so 30s is ~15 missed ticks —
-/// well clear of scheduling jitter but fast enough to flag a real stop.
-const CAPTURE_STALE_AFTER_MS: i64 = 30_000;
+/// considered stalled. The watcher ticks every 2s, but macOS can briefly delay
+/// tray-resident background work; helper-process timeouts catch real hangs while
+/// this avoids false red alerts during short OS stalls.
+const CAPTURE_STALE_AFTER_MS: i64 = 120_000;
 const DISPLAY_APP_NAME: &str = "DayTrail";
 const DATA_DIR_NAME: &str = "ai.daytrail.desktop";
 const DB_FILE_NAME: &str = "daytrail.sqlite3";

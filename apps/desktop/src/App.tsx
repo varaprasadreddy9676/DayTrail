@@ -287,14 +287,6 @@ type BackendCalendarEvent = {
   plannedWorkType?: string | null;
 };
 
-type CalendarBlockForm = {
-  title: string;
-  date: string;
-  start: string;
-  end: string;
-  plannedWorkType: string;
-};
-
 type BackendCalendarReconciliation = {
   plannedEvents: number;
   matchedEvents: number;
@@ -355,13 +347,6 @@ type BackendRecoverySummary = {
     durationMs: number;
     note?: string | null;
   }>;
-};
-
-type ActiveFocusTimer = {
-  id: string;
-  goal: string;
-  startedAt: number;
-  targetMs: number;
 };
 
 type BackendActiveWorkContext = {
@@ -2333,16 +2318,6 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
   };
 }
 
-function defaultCalendarBlockForm(date = formatLocalDateInput(new Date())): CalendarBlockForm {
-  return {
-    title: "",
-    date,
-    start: "",
-    end: "",
-    plannedWorkType: "meeting",
-  };
-}
-
 function defaultTaskForm(): TaskForm {
   return {
     title: "",
@@ -2583,8 +2558,6 @@ export default function App() {
   const [permissionSetupDismissed, setPermissionSetupDismissed] = useState(false);
   const [logOfflineOpen, setLogOfflineOpen] = useState(false);
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
-  const [calendarBlockOpen, setCalendarBlockOpen] = useState(false);
-  const [calendarBlockForm, setCalendarBlockForm] = useState<CalendarBlockForm>(() => defaultCalendarBlockForm());
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskForm, setTaskForm] = useState<TaskForm>(() => defaultTaskForm());
   const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
@@ -2600,7 +2573,6 @@ export default function App() {
   const [timelineToDate, setTimelineToDate] = useState(() => formatLocalDateInput(new Date()));
   const [timelineRangePayload, setTimelineRangePayload] = useState<BackendExportPayload | null>(null);
   const [timelineRangeStatus, setTimelineRangeStatus] = useState("Today");
-  const [activeFocusTimer, setActiveFocusTimer] = useState<ActiveFocusTimer | null>(null);
 
   const effectiveSnapshot = useMemo(
     () =>
@@ -3282,54 +3254,6 @@ export default function App() {
     }
   }
 
-  function openCalendarBlockModal() {
-    const date = todaySnapshot?.localDate && /^\d{4}-\d{2}-\d{2}$/.test(todaySnapshot.localDate)
-      ? todaySnapshot.localDate
-      : formatLocalDateInput(new Date());
-    setCalendarBlockForm(defaultCalendarBlockForm(date));
-    setCalendarBlockOpen(true);
-  }
-
-  async function submitCalendarBlock(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const startedAt = new Date(`${calendarBlockForm.date}T${calendarBlockForm.start}:00`).getTime();
-    const endedAt = new Date(`${calendarBlockForm.date}T${calendarBlockForm.end}:00`).getTime();
-    const title = calendarBlockForm.title.trim();
-
-    if (!title) {
-      addToast("error", "Missing title", "Add a short label for the planned block.");
-      return;
-    }
-    if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt <= startedAt) {
-      addToast("error", "Invalid time range", "End time must be after start time.");
-      return;
-    }
-
-    const result = await invokeTauri<BackendCalendarEvent>("upsert_calendar_event", {
-      input: {
-        id: null,
-        source: "manual",
-        externalId: null,
-        calendarName: "Manual plan",
-        title,
-        startsAt: startedAt,
-        endsAt: endedAt,
-        location: null,
-        status: "confirmed",
-        plannedWorkType: calendarBlockForm.plannedWorkType,
-      },
-    });
-
-    if (result) {
-      setCalendarBlockOpen(false);
-      setCalendarBlockForm(defaultCalendarBlockForm(calendarBlockForm.date));
-      addToast("success", "Calendar block added", `${title} saved as planned time.`);
-      await refreshTodaySnapshot();
-    } else {
-      addToast("error", "Could not add calendar block", "Backend unavailable.");
-    }
-  }
-
   function openTaskModal() {
     setTaskForm(defaultTaskForm());
     setTaskModalOpen(true);
@@ -3504,36 +3428,6 @@ export default function App() {
     addToast("info", "Work context cleared", "Activity will be untagged until you set a new context.");
   }
 
-  async function startFocusTimer() {
-    const context = effectiveSnapshot?.activeWorkContext;
-    const goal = context?.task || context?.project || context?.client || "Focused work";
-    const id = `focus-${Date.now()}`;
-    const startedAt = Date.now();
-    const targetMs = 25 * 60_000;
-    const result = await invokeTauri<BackendFocusSession>("upsert_focus_session", {
-      input: {
-        id,
-        goal,
-        client: context?.client ?? null,
-        project: context?.project ?? null,
-        task: context?.task ?? null,
-        ticketId: context?.ticketId ?? null,
-        targetMs,
-        startedAt,
-        endedAt: null,
-        status: "active",
-      },
-    });
-
-    if (!result) {
-      addToast("error", "Focus timer unavailable", "Could not start a focus session.");
-      return;
-    }
-    setActiveFocusTimer({ id, goal, startedAt, targetMs });
-    addToast("success", "Focus started", goal);
-    await refreshTodaySnapshot();
-  }
-
   async function handleRecoveryAction(action: "take_break" | "snooze" | "skip") {
     const command =
       action === "take_break"
@@ -3561,33 +3455,6 @@ export default function App() {
           ? "Recovery snoozed"
           : "Recovery skipped";
     addToast("success", title);
-    await refreshTodaySnapshot();
-  }
-
-  async function stopFocusTimer() {
-    if (!activeFocusTimer) return;
-    const context = effectiveSnapshot?.activeWorkContext;
-    const result = await invokeTauri<BackendFocusSession>("upsert_focus_session", {
-      input: {
-        id: activeFocusTimer.id,
-        goal: activeFocusTimer.goal,
-        client: context?.client ?? null,
-        project: context?.project ?? null,
-        task: context?.task ?? null,
-        ticketId: context?.ticketId ?? null,
-        targetMs: activeFocusTimer.targetMs,
-        startedAt: activeFocusTimer.startedAt,
-        endedAt: Date.now(),
-        status: "completed",
-      },
-    });
-
-    if (!result) {
-      addToast("error", "Focus timer unavailable", "Could not stop the focus session.");
-      return;
-    }
-    setActiveFocusTimer(null);
-    addToast("success", "Focus saved", `${formatDuration(result.matchedWorkMs)} matched, ${formatDuration(result.driftMs)} drift.`);
     await refreshTodaySnapshot();
   }
 
@@ -4101,6 +3968,10 @@ export default function App() {
         </div>
 
         <FocusMode />
+        <SidebarRecovery
+          onRecoveryAction={handleRecoveryAction}
+          recoverySummary={todaySnapshot?.recoverySummary ?? null}
+        />
 
         <footer className="sidebar-footer">
           <button
@@ -4173,16 +4044,10 @@ export default function App() {
               actions={displayActions}
               aiUsageSummary={effectiveSnapshot?.aiUsageSummary}
               appUsageSummary={effectiveSnapshot?.appUsageSummary}
-              onGenerateReport={generateDailyReport}
-              onGenerateWeeklyReport={generateWeeklyReport}
-              onOpenCalendarBlock={openCalendarBlockModal}
               onOpenTaskModal={openTaskModal}
               onCompleteTask={completeTask}
               onSnoozeTask={snoozeTask}
               onDeleteTask={deleteTask}
-              onStartFocus={startFocusTimer}
-              onStopFocus={stopFocusTimer}
-              onRecoveryAction={handleRecoveryAction}
               onIgnoreIdleBlock={ignoreIdleBlock}
               onOpenHour={(hour) => {
                 setActiveHourDetail(hour);
@@ -4202,7 +4067,6 @@ export default function App() {
               appCount={displayApps.length}
               bridgeStatus={bridgeStatus}
               backendReady={backendReady}
-              activeFocusTimer={activeFocusTimer}
               rangePayload={timelineRangePayload}
               rangeFromDate={timelineFromDate}
               rangePreset={timelineRangePreset}
@@ -4413,75 +4277,6 @@ export default function App() {
             <div className="offline-modal-actions">
               <button className="button" type="submit">Save block</button>
               <button className="button ghost" onClick={() => setLogOfflineOpen(false)} type="button">Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {calendarBlockOpen && (
-        <div className="offline-modal-backdrop" onClick={() => setCalendarBlockOpen(false)}>
-          <form
-            className="offline-modal calendar-block-modal"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={submitCalendarBlock}
-          >
-            <h3>Add planned block</h3>
-            <p>Use this for meetings, focus blocks, calls, or planned offline work.</p>
-            <label className="offline-modal-full">
-              Title
-              <input
-                required
-                type="text"
-                placeholder="e.g. Customer call, Focus block"
-                value={calendarBlockForm.title}
-                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, title: e.target.value }))}
-              />
-            </label>
-            <label className="offline-modal-full">
-              Date
-              <input
-                required
-                type="date"
-                value={calendarBlockForm.date}
-                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, date: e.target.value }))}
-              />
-            </label>
-            <div className="offline-modal-row">
-              <label>
-                Start
-                <input
-                  required
-                  type="time"
-                  value={calendarBlockForm.start}
-                  onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, start: e.target.value }))}
-                />
-              </label>
-              <label>
-                End
-                <input
-                  required
-                  type="time"
-                  value={calendarBlockForm.end}
-                  onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, end: e.target.value }))}
-                />
-              </label>
-            </div>
-            <label className="offline-modal-full">
-              Type
-              <select
-                value={calendarBlockForm.plannedWorkType}
-                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, plannedWorkType: e.target.value }))}
-              >
-                <option value="meeting">Meeting</option>
-                <option value="focus">Focus block</option>
-                <option value="call">Call</option>
-                <option value="planning">Planning</option>
-                <option value="offline-work">Offline work</option>
-              </select>
-            </label>
-            <div className="offline-modal-actions">
-              <button className="button" type="submit">Save planned block</button>
-              <button className="button ghost" onClick={() => setCalendarBlockOpen(false)} type="button">Cancel</button>
             </div>
           </form>
         </div>
@@ -4950,20 +4745,13 @@ function TodayView({
   actions,
   aiUsageSummary,
   appUsageSummary,
-  activeFocusTimer,
   idleGapCount,
   isPaused,
-  onGenerateReport,
-  onGenerateWeeklyReport,
-  onOpenCalendarBlock,
   onOpenTaskModal,
   onCompleteTask,
   onSnoozeTask,
   onDeleteTask,
   onIgnoreIdleBlock,
-  onStartFocus,
-  onStopFocus,
-  onRecoveryAction,
   onOpenHour,
   onOpenWorkContextEditor,
   onClearWorkContext,
@@ -4986,20 +4774,13 @@ function TodayView({
   actions: ActionItem[];
   aiUsageSummary?: BackendAiUsageSummary;
   appUsageSummary?: BackendAppUsageSummary;
-  activeFocusTimer: ActiveFocusTimer | null;
   idleGapCount: number;
   isPaused: boolean;
-  onGenerateReport: () => void;
-  onGenerateWeeklyReport: () => void;
-  onOpenCalendarBlock: () => void;
   onOpenTaskModal: () => void;
   onCompleteTask: (task: BackendTask) => void | Promise<void>;
   onSnoozeTask: (task: BackendTask) => void | Promise<void>;
   onDeleteTask: (task: BackendTask) => void | Promise<void>;
   onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
-  onStartFocus: () => void;
-  onStopFocus: () => void;
-  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
   onOpenHour: (hour: number) => void;
   onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
   onClearWorkContext: () => void;
@@ -5216,17 +4997,15 @@ function TodayView({
         : rangePresetLabel(rangePreset);
   const stats = [
     { label: "Time tracked", value: simpleToday.totalTrackedLabel || formatDuration(totalTrackedDuration), detail: detailScope },
-    { label: "Work sessions", value: sessions.length, detail: detailScope },
-    { label: "Work apps", value: simpleToday.appCount || appCount, detail: "with activity" },
+    {
+      label: "Top work app",
+      value: simpleToday.topWorkApp?.name ?? "No work app yet",
+      detail: simpleToday.topWorkApp?.durationLabel ?? `${simpleToday.appCount || appCount} apps with activity`,
+    },
     {
       label: "AI detected",
       value: aiActiveDuration > 0 ? formatDuration(aiActiveDuration) : "0m",
       detail: aiToolCount ? `${aiToolCount} tool${aiToolCount === 1 ? "" : "s"}` : "not detected yet",
-    },
-    {
-      label: "Top work app",
-      value: simpleToday.topWorkApp?.name ?? "No work app yet",
-      detail: simpleToday.topWorkApp?.durationLabel ?? "waiting",
     },
     { label: "Needs review", value: attentionCount, detail: "items" },
   ];
@@ -5239,14 +5018,6 @@ function TodayView({
             <span>{rangePreset === "today" ? "Now" : isSingleDayRange ? "Selected day" : "Selected range"}</span>
             <h2>{currentContext}</h2>
           </div>
-          <button className="button compact" onClick={onGenerateReport} type="button">
-            <Icon name="ritual" />
-            Daily report
-          </button>
-          <button className="button compact" onClick={onGenerateWeeklyReport} type="button">
-            <Icon name="archive" />
-            Weekly digest
-          </button>
         </div>
 
         <section className="today-live-card">
@@ -5305,18 +5076,6 @@ function TodayView({
             </div>
           ))}
         </section>
-
-        <CalendarFocusPanel
-          activeFocusTimer={activeFocusTimer}
-          calendar={snapshot?.calendarReconciliation}
-          focusSessions={snapshot?.focusSessions ?? []}
-          isRecoveryActionable={rangePreset === "today"}
-          onAddCalendarBlock={onOpenCalendarBlock}
-          recoverySummary={snapshot?.recoverySummary ?? null}
-          onStartFocus={onStartFocus}
-          onStopFocus={onStopFocus}
-          onRecoveryAction={onRecoveryAction}
-        />
 
         <TasksReminderPanel
           onAddTask={onOpenTaskModal}
@@ -5734,113 +5493,6 @@ function IdleRecoveryPrompt({
   );
 }
 
-function CalendarFocusPanel({
-  activeFocusTimer,
-  calendar,
-  focusSessions,
-  isRecoveryActionable,
-  onAddCalendarBlock,
-  recoverySummary,
-  onStartFocus,
-  onStopFocus,
-  onRecoveryAction,
-}: {
-  activeFocusTimer: ActiveFocusTimer | null;
-  calendar?: BackendCalendarReconciliation;
-  focusSessions: BackendFocusSession[];
-  isRecoveryActionable: boolean;
-  onAddCalendarBlock: () => void;
-  recoverySummary?: BackendRecoverySummary | null;
-  onStartFocus: () => void;
-  onStopFocus: () => void;
-  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
-}) {
-  const planned = calendar?.plannedEvents ?? 0;
-  const matched = calendar?.matchedEvents ?? 0;
-  const missed = calendar?.unmatchedEvents ?? 0;
-  const matchRate = planned > 0 ? Math.round((matched / planned) * 100) : 0;
-  const driftMs = focusSessions.reduce((sum, session) => sum + (session.driftMs ?? 0), 0);
-  const latestFocus = focusSessions[0] ?? null;
-  const missedItems = (calendar?.items ?? []).filter((item) => item.status !== "matched").slice(0, 3);
-
-  return (
-    <section className="today-intelligence-grid" aria-label="Calendar, focus, and recovery summary">
-      <div className="panel-block compact-intel-panel">
-        <PanelHeader eyebrow="Calendar" title="Planned vs actual" value={planned ? `${matchRate}%` : "No plan"} />
-        <div className="report-settings-list">
-          <div><span>Planned</span><strong>{planned}</strong></div>
-          <div><span>Matched</span><strong>{matched}</strong></div>
-          <div><span>Missed</span><strong>{missed}</strong></div>
-        </div>
-        <div className="range-list">
-          {missedItems.length === 0 ? (
-            <article>
-              <strong>{planned ? "Calendar matches look clean" : "Import or add calendar blocks"}</strong>
-              <span>{planned ? "No missed planned work detected" : "DayTrail will reconcile planned time with captured work"}</span>
-              {!planned && (
-                <button className="button compact" type="button" onClick={onAddCalendarBlock}>
-                  Add planned block
-                </button>
-              )}
-            </article>
-          ) : missedItems.map((item) => (
-            <article key={item.id}>
-              <strong>{item.title}</strong>
-              <span>{item.status} · {formatDuration(item.actualOverlapMs)}</span>
-            </article>
-          ))}
-        </div>
-      </div>
-
-      <div className="panel-block compact-intel-panel">
-        <PanelHeader eyebrow="Focus" title="Context-aware sessions" value={focusSessions.length ? `${focusSessions.length}` : "Ready"} />
-        <div className="report-settings-list">
-          <div><span>Sessions</span><strong>{focusSessions.length}</strong></div>
-          <div><span>Drift</span><strong>{formatDuration(driftMs)}</strong></div>
-          <div><span>Timer</span><strong>{activeFocusTimer ? "active" : (latestFocus?.status ?? "idle")}</strong></div>
-        </div>
-        <div className="range-list">
-          {activeFocusTimer ? (
-            <article>
-              <strong>{activeFocusTimer.goal}</strong>
-              <span>Started {formatTime(activeFocusTimer.startedAt)} · target {formatDuration(activeFocusTimer.targetMs)}</span>
-            </article>
-          ) : latestFocus ? (
-            <article>
-              <strong>{latestFocus.goal}</strong>
-              <span>{formatDuration(latestFocus.matchedWorkMs)} matched · {formatDuration(latestFocus.driftMs)} drift</span>
-            </article>
-          ) : (
-            <article>
-              <strong>Ready to focus</strong>
-              <span>Uses the current client, project, and task as the target when available.</span>
-            </article>
-          )}
-        </div>
-        <div className="output-actions">
-          {activeFocusTimer ? (
-            <button className="button compact primary" onClick={onStopFocus} type="button">
-              <Icon name="check" />
-              Stop focus
-            </button>
-          ) : (
-            <button className="button compact primary" onClick={onStartFocus} type="button">
-              <Icon name="ritual" />
-              Start 25m focus
-            </button>
-          )}
-        </div>
-      </div>
-
-      <RecoveryPanel
-        isActionable={isRecoveryActionable}
-        recoverySummary={recoverySummary}
-        onRecoveryAction={onRecoveryAction}
-      />
-    </section>
-  );
-}
-
 function TasksReminderPanel({
   tasks,
   onAddTask,
@@ -5922,59 +5574,6 @@ function TasksReminderPanel({
         </div>
       )}
     </section>
-  );
-}
-
-function RecoveryPanel({
-  isActionable,
-  recoverySummary,
-  onRecoveryAction,
-}: {
-  isActionable: boolean;
-  recoverySummary?: BackendRecoverySummary | null;
-  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
-}) {
-  const score = recoverySummary?.score;
-  const longestRunMs = recoverySummary?.longestUninterruptedMs ?? 0;
-  const currentStreakMs = recoverySummary?.currentStreakMs ?? 0;
-  const takenCount = recoverySummary?.takenCount ?? 0;
-  const skippedCount = recoverySummary?.skippedCount ?? 0;
-  const promptDue = recoverySummary?.nextPrompt?.action === "due";
-  const status = promptDue ? "Recovery due" : recoverySummary ? "On rhythm" : "Ready";
-
-  return (
-    <div className="panel-block compact-intel-panel recovery-panel">
-      <PanelHeader eyebrow="Recovery" title="Recovery rhythm" value={typeof score === "number" ? `${score}` : "Ready"} />
-      <div className="report-settings-list">
-        <div><span>Status</span><strong>{status}</strong></div>
-        <div><span>Longest run</span><strong>{formatDuration(longestRunMs)}</strong></div>
-        <div><span>Current</span><strong>{formatDuration(currentStreakMs)}</strong></div>
-      </div>
-      <div className="range-list">
-        <article>
-          <strong>{promptDue ? "Take a short reset" : "Recovery rhythm ready"}</strong>
-          <span>{takenCount} taken · {skippedCount} skipped · longest {formatDuration(longestRunMs)}</span>
-        </article>
-      </div>
-      {isActionable ? (
-        <div className="output-actions recovery-actions">
-          <button className="button compact primary" onClick={() => onRecoveryAction("take_break")} type="button">
-            <Icon name="check" />
-            Take break
-          </button>
-          <button className="button compact" onClick={() => onRecoveryAction("snooze")} type="button">
-            Snooze
-          </button>
-          <button className="button compact ghost" onClick={() => onRecoveryAction("skip")} type="button">
-            Skip
-          </button>
-        </div>
-      ) : (
-        <div className="output-actions recovery-actions recovery-actions-readonly">
-          <span>Range summary</span>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -8658,7 +8257,7 @@ function RitualsView({
         <div className="screen-titlebar">
           <div>
             <h2>Reports</h2>
-            <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, calendar matches, focus drift, and review items.</p>
+            <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, focus drift, recovery rhythm, and review items.</p>
           </div>
           <div className="screen-actions">
             <button
@@ -8763,7 +8362,7 @@ function RitualsView({
       <div className="screen-titlebar">
         <div>
           <h2>Reports</h2>
-          <p>Generate source-backed daily reports and weekly digests from captured work, calendar matches, focus drift, AI usage, and review items.</p>
+          <p>Generate source-backed daily reports and weekly digests from captured work, focus drift, recovery rhythm, AI usage, and review items.</p>
         </div>
         <div className="screen-actions">
           <button className="button compact" onClick={onOpenExports} type="button">
@@ -10245,6 +9844,56 @@ function FocusMode() {
         </div>
       )}
     </div>
+  );
+}
+
+function SidebarRecovery({
+  recoverySummary,
+  onRecoveryAction,
+}: {
+  recoverySummary?: BackendRecoverySummary | null;
+  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
+}) {
+  const longestRunMs = recoverySummary?.longestUninterruptedMs ?? 0;
+  const currentStreakMs = recoverySummary?.currentStreakMs ?? 0;
+  const takenCount = recoverySummary?.takenCount ?? 0;
+  const skippedCount = recoverySummary?.skippedCount ?? 0;
+  const promptDue = recoverySummary?.nextPrompt?.action === "due";
+  const status = promptDue ? "Break due" : recoverySummary ? "On rhythm" : "Ready";
+  const detail = recoverySummary
+    ? `${formatDuration(currentStreakMs)} current · ${takenCount} taken`
+    : "Break nudges appear here";
+
+  return (
+    <section
+      aria-label="Smart recovery"
+      className={`sidebar-recovery${promptDue ? " sidebar-recovery-due" : ""}`}
+    >
+      <div className="sidebar-recovery-head">
+        <span>Recovery</span>
+        <strong>{status}</strong>
+        <em>{detail}</em>
+      </div>
+      {promptDue ? (
+        <div className="sidebar-recovery-actions">
+          <button className="button compact primary" onClick={() => onRecoveryAction("take_break")} type="button">
+            <Icon name="check" />
+            Take break
+          </button>
+          <button className="button compact" onClick={() => onRecoveryAction("snooze")} type="button">
+            Snooze
+          </button>
+          <button className="button compact ghost" onClick={() => onRecoveryAction("skip")} type="button">
+            Skip
+          </button>
+        </div>
+      ) : null}
+      {recoverySummary ? (
+        <span className="sidebar-recovery-meta">
+          Longest {formatDuration(longestRunMs)} · {skippedCount} skipped
+        </span>
+      ) : null}
+    </section>
   );
 }
 
