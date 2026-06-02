@@ -13,18 +13,19 @@ export function HeroCopy() {
           />
           <rect height="10" rx="3" stroke="currentColor" strokeWidth="2" width="14" x="5" y="11" />
         </svg>
-        <span>Private workday memory for Mac and Windows</span>
+        <span>ADHD-friendly work memory for interruption-heavy days</span>
       </p>
 
       <h1 className="motion-copy" id="hero-title">
-        Your workday,
+        Replay your day,
         <br />
-        <span>automatically remembered.</span>
+        <span>recover your context.</span>
       </h1>
 
       <p className="hero-subhead motion-copy">
-        DayTrail turns your apps, windows, projects, and AI activity into a clean private timeline,
-        so you can retrace your workday without managing timers.
+        DayTrail builds a local-first timeline from your apps, windows, projects, and AI activity
+        so you can get back on task, retrace decisions, and draft weekly updates without managing
+        timers.
       </p>
 
       <div className="hero-actions motion-cta" id="download">
@@ -70,7 +71,7 @@ export function HeroCopy() {
               strokeWidth="2"
             />
           </svg>
-          Local-first
+          Local-first memory
         </span>
         <span>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -87,7 +88,7 @@ export function HeroCopy() {
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v18M5 8h14M7 16h10" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
           </svg>
-          Simple + Pro modes
+          Focus recovery
         </span>
         <span>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -100,7 +101,7 @@ export function HeroCopy() {
             />
             <path d="M12 14v2" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
           </svg>
-          Bring your own AI key
+          AI weekly updates
         </span>
       </div>
 
@@ -114,8 +115,9 @@ export function HeroCopy() {
           />
         </svg>
         <span>
-          Metadata-first. No screenshots. No clipboard capture. Bring your own AI key for OpenAI-compatible,
-          Anthropic, Gemini, or local models. Keys stay in your OS keychain.
+          Metadata-first. No screenshots. No clipboard capture. Bring your own AI key for optional
+          summaries and weekly updates with OpenAI-compatible, Anthropic, Gemini, or local models.
+          Keys stay in your OS keychain.
         </span>
       </p>
     </div>

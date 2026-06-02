@@ -225,6 +225,9 @@ pub struct TodaySnapshot {
     pub commitments: Vec<Commitment>,
     pub pending_replies: Vec<EmailThread>,
     pub ai_outputs: Vec<WorkOutput>,
+    pub calendar_events: Vec<CalendarEvent>,
+    pub calendar_reconciliation: CalendarReconciliation,
+    pub focus_sessions: Vec<FocusSessionSummary>,
     pub meetings: Vec<Meeting>,
     pub field_visits: Vec<FieldVisit>,
     pub idle_blocks: Vec<IdleBlock>,
@@ -466,6 +469,9 @@ pub struct ExportPayload {
     pub to_date: Option<String>,
     pub timesheet_rows: Vec<TimesheetRow>,
     pub ai_contribution_rows: Vec<AiContributionRow>,
+    pub calendar_events: Vec<CalendarEvent>,
+    pub calendar_reconciliation: CalendarReconciliation,
+    pub focus_sessions: Vec<FocusSessionSummary>,
     pub tasks: Vec<Task>,
     pub quick_notes: Vec<QuickNote>,
     pub commitments: Vec<Commitment>,
@@ -522,6 +528,100 @@ pub struct AiContributionRow {
     pub destination: String,
     pub status: String,
     pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEvent {
+    pub id: String,
+    pub source: String,
+    pub external_id: Option<String>,
+    pub calendar_name: Option<String>,
+    pub title: String,
+    pub starts_at: i64,
+    pub ends_at: i64,
+    pub location: Option<String>,
+    pub status: String,
+    pub planned_work_type: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventInput {
+    pub id: Option<String>,
+    pub source: Option<String>,
+    pub external_id: Option<String>,
+    pub calendar_name: Option<String>,
+    pub title: String,
+    pub starts_at: i64,
+    pub ends_at: i64,
+    pub location: Option<String>,
+    pub status: Option<String>,
+    pub planned_work_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarReconciliation {
+    pub planned_events: usize,
+    pub matched_events: usize,
+    pub unmatched_events: usize,
+    pub planned_duration_ms: i64,
+    pub actual_overlap_ms: i64,
+    pub items: Vec<CalendarReconciliationItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarReconciliationItem {
+    pub id: String,
+    pub title: String,
+    pub starts_at: i64,
+    pub ends_at: i64,
+    pub status: String,
+    pub actual_overlap_ms: i64,
+    pub matched_session_ids: Vec<String>,
+    pub matched_source_event_ids: Vec<String>,
+    pub evidence_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusSessionInput {
+    pub id: Option<String>,
+    pub goal: String,
+    pub client: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
+    pub ticket_id: Option<String>,
+    pub target_ms: i64,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusSessionSummary {
+    pub id: String,
+    pub goal: String,
+    pub client: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
+    pub ticket_id: Option<String>,
+    pub target_ms: i64,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub status: String,
+    pub actual_duration_ms: i64,
+    pub matched_work_ms: i64,
+    pub drift_ms: i64,
+    pub evidence_event_ids: Vec<String>,
+    pub drift_events: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

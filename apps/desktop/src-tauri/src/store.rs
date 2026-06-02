@@ -30,17 +30,18 @@ use crate::{
         ActiveWorkContext, ActiveWorkContextInput, AgentRun, AgentRunInput, AiContextUsage,
         AiContributionRow, AiOutputLedgerItem, AiToolUsage, AiUsage, AiUsageInput, AiUsageSummary,
         AppProjectUsage, AppUsage, AppUsageSummary, AutomationCandidate, BrowserBridgeEvent,
+        CalendarEvent, CalendarEventInput, CalendarReconciliation, CalendarReconciliationItem,
         CaptureHealthCheck, CaptureHealthSummary, Commitment, CommitmentInput,
         DatabaseTransferResult, EmailThread, EmailThreadInput, ExportPayload, ExportRangeInput,
-        FieldVisit, FieldVisitInput, FileUsage, IdleBlock, IdleBlockInput, LoopAction,
-        LoopActionInput, LoopRisk, Meeting, MeetingInput, MenuBarSummary, NextBestAction,
-        ParallelStreamSummary, PauseState, PlanningItem, PlanningOutput, PrivacyDeleteSummary,
-        ProjectContext, QuickNote, ReportOutput, ReturnMarker, ReviewSessionInput, ScratchpadNote,
-        ScratchpadNoteInput, SearchResult, Settings, SettingsConfigPayload, SettingsPatch,
-        SourceEvent, SourceEventInput, StateSnapshot, StateSnapshotInput, StorageLocationInfo,
-        Task, TaskInput, TaskStatus, TerminalBridgeMetadata, TimesheetRow, TodaySnapshot,
-        UnclosedLoopItem, WorkMemorySummary, WorkOutput, WorkOutputInput, WorkSessionSummary,
-        WorkspaceContext,
+        FieldVisit, FieldVisitInput, FileUsage, FocusSessionInput, FocusSessionSummary, IdleBlock,
+        IdleBlockInput, LoopAction, LoopActionInput, LoopRisk, Meeting, MeetingInput,
+        MenuBarSummary, NextBestAction, ParallelStreamSummary, PauseState, PlanningItem,
+        PlanningOutput, PrivacyDeleteSummary, ProjectContext, QuickNote, ReportOutput,
+        ReturnMarker, ReviewSessionInput, ScratchpadNote, ScratchpadNoteInput, SearchResult,
+        Settings, SettingsConfigPayload, SettingsPatch, SourceEvent, SourceEventInput,
+        StateSnapshot, StateSnapshotInput, StorageLocationInfo, Task, TaskInput, TaskStatus,
+        TerminalBridgeMetadata, TimesheetRow, TodaySnapshot, UnclosedLoopItem, WorkMemorySummary,
+        WorkOutput, WorkOutputInput, WorkSessionSummary, WorkspaceContext,
     },
     platform::{
         keychain_key_for_ai_provider, keychain_key_from_ref, set_launch_at_login, KeychainAdapter,
@@ -333,6 +334,36 @@ impl WorktraceStore {
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS calendar_events (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL DEFAULT 'manual',
+                external_id TEXT,
+                calendar_name TEXT,
+                title TEXT NOT NULL,
+                starts_at INTEGER NOT NULL,
+                ends_at INTEGER NOT NULL,
+                location TEXT,
+                status TEXT NOT NULL DEFAULT 'confirmed',
+                planned_work_type TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS focus_sessions (
+                id TEXT PRIMARY KEY,
+                goal TEXT NOT NULL,
+                client TEXT,
+                project TEXT,
+                task TEXT,
+                ticket_id TEXT,
+                target_ms INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS field_visits (
                 id TEXT PRIMARY KEY,
                 client_label TEXT,
@@ -502,6 +533,10 @@ impl WorktraceStore {
                 ON work_sessions(started_at, ended_at);
             CREATE INDEX IF NOT EXISTS idx_parallel_streams_time
                 ON parallel_streams(started_at, ended_at);
+            CREATE INDEX IF NOT EXISTS idx_calendar_events_time
+                ON calendar_events(starts_at, ends_at);
+            CREATE INDEX IF NOT EXISTS idx_focus_sessions_time
+                ON focus_sessions(started_at, ended_at);
             CREATE INDEX IF NOT EXISTS idx_scratchpad_context
                 ON scratchpad_notes(context_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_state_snapshots_context
@@ -1853,6 +1888,7 @@ impl WorktraceStore {
         let commitments = self.list_open_commitments(20)?;
         let pending_replies = self.list_pending_replies(20)?;
         let ai_outputs = self.list_work_outputs(20)?;
+        let calendar_events = self.list_calendar_events_between(Some(day_start), Some(day_end), 100)?;
         let meetings = self.list_meetings(20)?;
         let field_visits = self.list_field_visits(20)?;
         let idle_blocks = self
@@ -1861,6 +1897,10 @@ impl WorktraceStore {
             .filter(is_actionable_idle_block)
             .collect::<Vec<_>>();
         let source_events = self.list_today_source_events(10_000)?;
+        let calendar_reconciliation =
+            build_calendar_reconciliation(&calendar_events, &work_sessions, &source_events);
+        let focus_sessions =
+            self.list_focus_sessions_between(Some(day_start), Some(day_end), 100)?;
         let ai_usage = self.list_ai_usage_between(Some(day_start), Some(day_end), 1_000)?;
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
         let app_usage_summary = build_app_usage_summary(&source_events);
@@ -1913,6 +1953,9 @@ impl WorktraceStore {
             commitments,
             pending_replies,
             ai_outputs,
+            calendar_events,
+            calendar_reconciliation,
+            focus_sessions,
             meetings,
             field_visits,
             idle_blocks,
@@ -2446,6 +2489,10 @@ impl WorktraceStore {
         let ai_usage = self.list_ai_usage_between(from_ms, to_ms, 2_000)?;
         let ai_outputs =
             filter_work_outputs_by_range(self.list_work_outputs(1000)?, from_ms, to_ms);
+        let calendar_events = self.list_calendar_events_between(from_ms, to_ms, 2_000)?;
+        let calendar_reconciliation =
+            build_calendar_reconciliation(&calendar_events, &work_sessions, &source_events);
+        let focus_sessions = self.list_focus_sessions_between(from_ms, to_ms, 2_000)?;
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
         let app_usage_summary = build_app_usage_summary(&source_events);
         let automation_candidates = build_automation_candidates(&source_events);
@@ -2484,6 +2531,9 @@ impl WorktraceStore {
             to_date: range.to_date,
             timesheet_rows,
             ai_contribution_rows,
+            calendar_events,
+            calendar_reconciliation,
+            focus_sessions,
             tasks,
             quick_notes,
             commitments,
@@ -2617,11 +2667,28 @@ impl WorktraceStore {
     }
 
     pub fn generate_weekly_review(&self) -> Result<ReportOutput> {
-        let mut snapshot = self.today_snapshot()?;
-        snapshot.tasks = self.list_tasks(None)?;
+        let today = Local::now().date_naive();
+        let from_date = today
+            .checked_sub_signed(ChronoDuration::days(6))
+            .unwrap_or(today)
+            .format("%Y-%m-%d")
+            .to_string();
+        let to_date = today.format("%Y-%m-%d").to_string();
+        let export = self.export_data_range(ExportRangeInput {
+            from_date: Some(from_date.clone()),
+            to_date: Some(to_date.clone()),
+        })?;
         let generated_at = now_utc();
-        let title = format!("Weekly Work Review - {}", snapshot.local_date);
-        let body_markdown = build_weekly_review_markdown(&snapshot);
+        let title = format!("Weekly Work Review - {from_date} to {to_date}");
+        let deterministic_markdown = build_weekly_review_markdown_from_export(&export);
+        let ai_markdown = self.try_generate_ai_markdown(
+            "AI weekly auto-draft",
+            "Rewrite this DayTrail weekly evidence digest into a concise weekly update. Do not invent facts. Preserve calendar planned-vs-actual, focus drift, AI work, open loops, and source-backed accomplishments.",
+            &deterministic_markdown,
+            &SystemKeychain,
+        );
+        let used_ai = ai_markdown.is_some();
+        let body_markdown = ai_markdown.unwrap_or(deterministic_markdown);
         let report_type = "weekly_review".to_string();
         let id = format!("weekly-review-{}", Utc::now().timestamp_micros());
 
@@ -2636,7 +2703,7 @@ impl WorktraceStore {
                 title,
                 body_markdown,
                 now_ms(),
-                serde_json::to_string(&snapshot)?
+                serde_json::to_string(&export)?
             ],
         )?;
 
@@ -2645,10 +2712,10 @@ impl WorktraceStore {
             report_type,
             title,
             body_markdown,
-            used_ai: false,
-            fallback_reason: Some(
-                "Weekly review is generated deterministically from local evidence.".into(),
-            ),
+            used_ai,
+            fallback_reason: (!used_ai).then(|| {
+                "Configured AI was unavailable, so DayTrail generated a deterministic weekly evidence draft.".into()
+            }),
         })
     }
 
@@ -3103,6 +3170,206 @@ impl WorktraceStore {
             }
         }
 
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, body_markdown, generated_at FROM weekly_reviews",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, title, body, generated_at) = row?;
+                Self::insert_search_document_locked(
+                    conn,
+                    "weekly_review",
+                    &id,
+                    &title,
+                    &body,
+                    Some("weekly_review"),
+                    &generated_at.to_string(),
+                )?;
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, title, source, calendar_name, location, planned_work_type, starts_at
+                FROM calendar_events
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, title, source, calendar_name, location, planned_work_type, starts_at) = row?;
+                let body = [calendar_name.as_deref(), location.as_deref(), planned_work_type.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Self::insert_search_document_locked(
+                    conn,
+                    "calendar_event",
+                    &id,
+                    &title,
+                    &body,
+                    Some(&source),
+                    &starts_at.to_string(),
+                )?;
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, goal, client, project, task, ticket_id, started_at
+                FROM focus_sessions
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, goal, client, project, task, ticket_id, started_at) = row?;
+                let body = [client.as_deref(), project.as_deref(), task.as_deref(), ticket_id.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Self::insert_search_document_locked(
+                    conn,
+                    "focus_session",
+                    &id,
+                    &goal,
+                    &body,
+                    project.as_deref(),
+                    &started_at.to_string(),
+                )?;
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, summary, actions_json, created_at FROM meetings",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, title, summary, actions, created_at) = row?;
+                let body = [summary.as_deref(), actions.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Self::insert_search_document_locked(
+                    conn,
+                    "meeting",
+                    &id,
+                    &title,
+                    &body,
+                    Some("meeting"),
+                    &created_at.to_string(),
+                )?;
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, output_type, title, source, evidence_json, created_at FROM outputs",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, output_type, title, source, evidence, created_at) = row?;
+                Self::insert_search_document_locked(
+                    conn,
+                    "work_output",
+                    &id,
+                    &title,
+                    evidence.as_deref().unwrap_or(""),
+                    source.as_deref().or(Some(output_type.as_str())),
+                    &created_at.to_string(),
+                )?;
+            }
+        }
+
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, provider, tool_name, thread_title, prompt_summary, output_summary, created_at
+                FROM ai_usage
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, provider, tool, thread_title, prompt, output, created_at) = row?;
+                let title = thread_title
+                    .or_else(|| prompt.clone())
+                    .unwrap_or_else(|| "AI usage".to_string());
+                let body = [prompt.as_deref(), output.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Self::insert_search_document_locked(
+                    conn,
+                    "ai_usage",
+                    &id,
+                    &title,
+                    &body,
+                    tool.as_deref().or(provider.as_deref()),
+                    &created_at.to_string(),
+                )?;
+            }
+        }
+
         Ok(())
     }
 
@@ -3390,6 +3657,187 @@ impl WorktraceStore {
         Ok(meetings)
     }
 
+    pub fn upsert_calendar_event(&self, input: CalendarEventInput) -> Result<CalendarEvent> {
+        let title = input.title.trim();
+        anyhow::ensure!(!title.is_empty(), "calendar event title is required");
+        anyhow::ensure!(
+            input.ends_at >= input.starts_at,
+            "calendar event ends_at must be after starts_at"
+        );
+        let now = now_ms();
+        let id = input
+            .id
+            .filter(|id| !id.trim().is_empty())
+            .or_else(|| {
+                input
+                    .external_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("calendar-{}", stable_id_part(value)))
+            })
+            .unwrap_or_else(|| format!("calendar-{}", Utc::now().timestamp_micros()));
+        let source = input
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("manual")
+            .to_string();
+        let status = input
+            .status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("confirmed")
+            .to_string();
+        let conn = self.lock()?;
+        conn.execute(
+            r#"
+            INSERT INTO calendar_events
+                (id, source, external_id, calendar_name, title, starts_at, ends_at,
+                 location, status, planned_work_type, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+            ON CONFLICT(id) DO UPDATE SET
+                source = excluded.source,
+                external_id = excluded.external_id,
+                calendar_name = excluded.calendar_name,
+                title = excluded.title,
+                starts_at = excluded.starts_at,
+                ends_at = excluded.ends_at,
+                location = excluded.location,
+                status = excluded.status,
+                planned_work_type = excluded.planned_work_type,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                &id,
+                source,
+                &input.external_id,
+                &input.calendar_name,
+                title,
+                input.starts_at,
+                input.ends_at,
+                &input.location,
+                status,
+                &input.planned_work_type,
+                now,
+            ],
+        )?;
+        Self::calendar_event_by_id_locked(&conn, &id)
+    }
+
+    pub fn list_calendar_events(&self, limit: usize) -> Result<Vec<CalendarEvent>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, source, external_id, calendar_name, title, starts_at, ends_at,
+                   location, status, planned_work_type, created_at, updated_at
+            FROM calendar_events
+            ORDER BY starts_at DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit as i64], Self::calendar_event_from_row)?;
+        let mut events = Vec::new();
+        for event in rows {
+            events.push(event?);
+        }
+        Ok(events)
+    }
+
+    pub fn list_calendar_events_for_dates(
+        &self,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> Result<Vec<CalendarEvent>> {
+        let (from_ms, to_ms) = date_range_to_ms(from_date, to_date)?;
+        self.list_calendar_events_between(from_ms, to_ms, 2_000)
+    }
+
+    pub fn upsert_focus_session(&self, input: FocusSessionInput) -> Result<FocusSessionSummary> {
+        let goal = input.goal.trim();
+        anyhow::ensure!(!goal.is_empty(), "focus goal is required");
+        anyhow::ensure!(input.target_ms > 0, "focus target_ms must be positive");
+        if let Some(end) = input.ended_at {
+            anyhow::ensure!(end >= input.started_at, "focus session ended_at must be after started_at");
+        }
+        let now = now_ms();
+        let id = input
+            .id
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| format!("focus-{}", Utc::now().timestamp_micros()));
+        let status = input
+            .status
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| if input.ended_at.is_some() { "completed" } else { "active" })
+            .to_string();
+        let conn = self.lock()?;
+        conn.execute(
+            r#"
+            INSERT INTO focus_sessions
+                (id, goal, client, project, task, ticket_id, target_ms, started_at,
+                 ended_at, status, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+            ON CONFLICT(id) DO UPDATE SET
+                goal = excluded.goal,
+                client = excluded.client,
+                project = excluded.project,
+                task = excluded.task,
+                ticket_id = excluded.ticket_id,
+                target_ms = excluded.target_ms,
+                started_at = excluded.started_at,
+                ended_at = excluded.ended_at,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                &id,
+                goal,
+                &input.client,
+                &input.project,
+                &input.task,
+                &input.ticket_id,
+                input.target_ms,
+                input.started_at,
+                input.ended_at,
+                status,
+                now,
+            ],
+        )?;
+        let focus = Self::focus_session_base_by_id_locked(&conn, &id)?;
+        drop(conn);
+        let from_ms = Some(focus.started_at);
+        let to_ms = Some(focus.ended_at.unwrap_or_else(now_ms));
+        let events = self.list_source_events_between(from_ms, to_ms, 10_000)?;
+        Ok(summarize_focus_session(&focus, &events, now_ms()))
+    }
+
+    pub fn list_focus_sessions(&self, limit: usize) -> Result<Vec<FocusSessionSummary>> {
+        let bases = self.list_focus_session_bases_between(None, None, limit)?;
+        let from_ms = bases.iter().map(|session| session.started_at).min();
+        let to_ms = bases
+            .iter()
+            .map(|session| session.ended_at.unwrap_or_else(now_ms))
+            .max();
+        let events = self.list_source_events_between(from_ms, to_ms, 10_000)?;
+        Ok(bases
+            .iter()
+            .map(|focus| summarize_focus_session(focus, &events, now_ms()))
+            .collect())
+    }
+
+    pub fn list_focus_sessions_for_dates(
+        &self,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> Result<Vec<FocusSessionSummary>> {
+        let (from_ms, to_ms) = date_range_to_ms(from_date, to_date)?;
+        self.list_focus_sessions_between(from_ms, to_ms, 2_000)
+    }
+
     pub fn upsert_field_visit(&self, input: FieldVisitInput) -> Result<FieldVisit> {
         let starts_at = input.starts_at.unwrap_or_else(now_ms);
         if let Some(end) = input.ends_at {
@@ -3503,6 +3951,75 @@ impl WorktraceStore {
             ],
         )?;
         Self::idle_block_by_id_locked(&conn, &id)
+    }
+
+    pub fn record_idle_gap_candidate(
+        &self,
+        kind: &str,
+        started_at: i64,
+        ended_at: i64,
+    ) -> Result<Option<IdleBlock>> {
+        anyhow::ensure!(
+            ended_at >= started_at,
+            "idle gap ended_at must be after started_at"
+        );
+        let duration_ms = ended_at.saturating_sub(started_at);
+        if duration_ms < 10 * 60_000 {
+            return Ok(None);
+        }
+        if self.pause_state()?.paused {
+            return Ok(None);
+        }
+
+        let conn = self.lock()?;
+        let covered_count: i64 = conn.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM idle_blocks
+            WHERE classified = 1
+              AND started_at < ?2
+              AND ended_at > ?1
+            "#,
+            params![started_at, ended_at],
+            |row| row.get(0),
+        )?;
+        if covered_count > 0 {
+            return Ok(None);
+        }
+
+        let kind_id = stable_id_part(kind);
+        let id = format!(
+            "idle-auto-{}-{}-{}",
+            if kind_id.is_empty() { "return" } else { kind_id.as_str() },
+            started_at.div_euclid(60_000),
+            ended_at.div_euclid(60_000)
+        );
+        let existing_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM idle_blocks WHERE id = ?1",
+            params![&id],
+            |row| row.get(0),
+        )?;
+        if existing_count > 0 {
+            return Ok(None);
+        }
+        drop(conn);
+
+        self.upsert_idle_block(IdleBlockInput {
+            id: Some(id),
+            started_at,
+            ended_at,
+            category: None,
+            classified: Some(false),
+            evidence_json: Some(
+                serde_json::json!({
+                    "source": "auto_idle_gap",
+                    "kind": kind,
+                    "durationMs": duration_ms,
+                })
+                .to_string(),
+            ),
+        })
+        .map(Some)
     }
 
     pub fn list_idle_blocks(&self, limit: usize) -> Result<Vec<IdleBlock>> {
@@ -4057,6 +4574,84 @@ impl WorktraceStore {
             events.push(event?);
         }
         Ok(events)
+    }
+
+    pub fn list_calendar_events_between(
+        &self,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<CalendarEvent>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, source, external_id, calendar_name, title, starts_at, ends_at,
+                   location, status, planned_work_type, created_at, updated_at
+            FROM calendar_events
+            WHERE (?1 IS NULL OR ends_at >= ?1)
+              AND (?2 IS NULL OR starts_at < ?2)
+            ORDER BY starts_at DESC
+            LIMIT ?3
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![from_ms, to_ms, limit as i64],
+            Self::calendar_event_from_row,
+        )?;
+        let mut events = Vec::new();
+        for event in rows {
+            events.push(event?);
+        }
+        Ok(events)
+    }
+
+    pub fn list_focus_sessions_between(
+        &self,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<FocusSessionSummary>> {
+        let bases = self.list_focus_session_bases_between(from_ms, to_ms, limit)?;
+        let event_from_ms = bases.iter().map(|session| session.started_at).min();
+        let event_to_ms = bases
+            .iter()
+            .map(|session| session.ended_at.unwrap_or_else(now_ms))
+            .max();
+        let events = self.list_source_events_between(event_from_ms, event_to_ms, 10_000)?;
+        let now = now_ms();
+        Ok(bases
+            .iter()
+            .map(|focus| summarize_focus_session(focus, &events, now))
+            .collect())
+    }
+
+    fn list_focus_session_bases_between(
+        &self,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<FocusSessionRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, goal, client, project, task, ticket_id, target_ms, started_at,
+                   ended_at, status, created_at, updated_at
+            FROM focus_sessions
+            WHERE (?1 IS NULL OR COALESCE(ended_at, started_at) >= ?1)
+              AND (?2 IS NULL OR started_at < ?2)
+            ORDER BY started_at DESC
+            LIMIT ?3
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![from_ms, to_ms, limit as i64],
+            Self::focus_session_base_from_row,
+        )?;
+        let mut sessions = Vec::new();
+        for session in rows {
+            sessions.push(session?);
+        }
+        Ok(sessions)
     }
 
     pub fn list_work_sessions_between(
@@ -5511,6 +6106,36 @@ impl WorktraceStore {
         .with_context(|| format!("meeting not found: {id}"))
     }
 
+    fn calendar_event_by_id_locked(conn: &Connection, id: &str) -> Result<CalendarEvent> {
+        conn.query_row(
+            r#"
+            SELECT id, source, external_id, calendar_name, title, starts_at, ends_at,
+                   location, status, planned_work_type, created_at, updated_at
+            FROM calendar_events
+            WHERE id = ?1
+            "#,
+            params![id],
+            Self::calendar_event_from_row,
+        )
+        .optional()?
+        .with_context(|| format!("calendar event not found: {id}"))
+    }
+
+    fn focus_session_base_by_id_locked(conn: &Connection, id: &str) -> Result<FocusSessionRecord> {
+        conn.query_row(
+            r#"
+            SELECT id, goal, client, project, task, ticket_id, target_ms, started_at,
+                   ended_at, status, created_at, updated_at
+            FROM focus_sessions
+            WHERE id = ?1
+            "#,
+            params![id],
+            Self::focus_session_base_from_row,
+        )
+        .optional()?
+        .with_context(|| format!("focus session not found: {id}"))
+    }
+
     fn field_visit_by_id_locked(conn: &Connection, id: &str) -> Result<FieldVisit> {
         conn.query_row(
             r#"
@@ -5811,6 +6436,40 @@ impl WorktraceStore {
         })
     }
 
+    fn calendar_event_from_row(row: &Row<'_>) -> rusqlite::Result<CalendarEvent> {
+        Ok(CalendarEvent {
+            id: row.get(0)?,
+            source: row.get(1)?,
+            external_id: row.get(2)?,
+            calendar_name: row.get(3)?,
+            title: row.get(4)?,
+            starts_at: row.get(5)?,
+            ends_at: row.get(6)?,
+            location: row.get(7)?,
+            status: row.get(8)?,
+            planned_work_type: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+        })
+    }
+
+    fn focus_session_base_from_row(row: &Row<'_>) -> rusqlite::Result<FocusSessionRecord> {
+        Ok(FocusSessionRecord {
+            id: row.get(0)?,
+            goal: row.get(1)?,
+            client: row.get(2)?,
+            project: row.get(3)?,
+            task: row.get(4)?,
+            ticket_id: row.get(5)?,
+            target_ms: row.get(6)?,
+            started_at: row.get(7)?,
+            ended_at: row.get(8)?,
+            status: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+        })
+    }
+
     fn field_visit_from_row(row: &Row<'_>) -> rusqlite::Result<FieldVisit> {
         Ok(FieldVisit {
             id: row.get(0)?,
@@ -5999,6 +6658,22 @@ struct MaterializedStream {
     summary: Option<String>,
     confidence: f64,
     event_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FocusSessionRecord {
+    id: String,
+    goal: String,
+    client: Option<String>,
+    project: Option<String>,
+    task: Option<String>,
+    ticket_id: Option<String>,
+    target_ms: i64,
+    started_at: i64,
+    ended_at: Option<i64>,
+    status: String,
+    created_at: i64,
+    updated_at: i64,
 }
 
 fn work_session_summary_from_materialized(session: MaterializedSession) -> WorkSessionSummary {
@@ -7925,6 +8600,282 @@ fn build_ai_contribution_rows(
     rows
 }
 
+fn build_calendar_reconciliation(
+    calendar_events: &[CalendarEvent],
+    work_sessions: &[WorkSessionSummary],
+    source_events: &[SourceEvent],
+) -> CalendarReconciliation {
+    let planned = calendar_events
+        .iter()
+        .filter(|event| !calendar_event_cancelled(event))
+        .collect::<Vec<_>>();
+    let mut items = Vec::new();
+    let mut matched_events = 0usize;
+    let mut planned_duration_ms = 0i64;
+    let mut actual_overlap_ms = 0i64;
+
+    for event in planned {
+        let duration_ms = event.ends_at.saturating_sub(event.starts_at);
+        planned_duration_ms += duration_ms;
+        let overlapping_sources = source_events
+            .iter()
+            .filter(|source| source.started_at < event.ends_at && source.ended_at > event.starts_at)
+            .collect::<Vec<_>>();
+        let intervals = overlapping_sources
+            .iter()
+            .map(|source| (source.started_at.max(event.starts_at), source.ended_at.min(event.ends_at)))
+            .collect::<Vec<_>>();
+        let overlap_ms = merged_interval_duration_ms(intervals);
+        actual_overlap_ms += overlap_ms;
+
+        let matched_session_ids = work_sessions
+            .iter()
+            .filter(|session| session.started_at < event.ends_at && session.ended_at > event.starts_at)
+            .map(|session| session.id.clone())
+            .collect::<Vec<_>>();
+        let matched_source_event_ids = overlapping_sources
+            .iter()
+            .map(|source| source.id.clone())
+            .collect::<Vec<_>>();
+        let strong_signal = overlapping_sources
+            .iter()
+            .any(|source| calendar_event_matches_source(event, source));
+        let enough_overlap = overlap_ms >= 5 * 60_000
+            && overlap_ms.saturating_mul(4) >= duration_ms.max(1);
+        let status = if overlap_ms == 0 {
+            "missed"
+        } else if strong_signal || enough_overlap {
+            matched_events += 1;
+            "matched"
+        } else {
+            "partial"
+        };
+        let evidence_label = overlapping_sources
+            .iter()
+            .max_by_key(|source| {
+                source
+                    .ended_at
+                    .min(event.ends_at)
+                    .saturating_sub(source.started_at.max(event.starts_at))
+            })
+            .map(|source| source_event_short_label(source));
+
+        items.push(CalendarReconciliationItem {
+            id: event.id.clone(),
+            title: event.title.clone(),
+            starts_at: event.starts_at,
+            ends_at: event.ends_at,
+            status: status.to_string(),
+            actual_overlap_ms: overlap_ms,
+            matched_session_ids,
+            matched_source_event_ids,
+            evidence_label,
+        });
+    }
+
+    items.sort_by_key(|item| item.starts_at);
+    let planned_events = items.len();
+    CalendarReconciliation {
+        planned_events,
+        matched_events,
+        unmatched_events: planned_events.saturating_sub(matched_events),
+        planned_duration_ms,
+        actual_overlap_ms,
+        items,
+    }
+}
+
+fn calendar_event_cancelled(event: &CalendarEvent) -> bool {
+    matches!(
+        event.status.trim().to_ascii_lowercase().as_str(),
+        "cancelled" | "canceled" | "declined"
+    )
+}
+
+fn calendar_event_matches_source(event: &CalendarEvent, source: &SourceEvent) -> bool {
+    let source_text = [
+        source.app.as_deref(),
+        source.title.as_deref(),
+        source.domain.as_deref(),
+        source.url_redacted.as_deref(),
+        source.workspace_key.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(normalize_match_text)
+    .collect::<Vec<_>>()
+    .join(" ");
+
+    calendar_match_terms(event)
+        .iter()
+        .any(|term| !term.is_empty() && source_text.contains(term))
+}
+
+fn calendar_match_terms(event: &CalendarEvent) -> Vec<String> {
+    [
+        Some(event.title.as_str()),
+        event.location.as_deref(),
+        event.planned_work_type.as_deref(),
+        event.calendar_name.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(match_terms)
+    .collect()
+}
+
+fn summarize_focus_session(
+    focus: &FocusSessionRecord,
+    events: &[SourceEvent],
+    now: i64,
+) -> FocusSessionSummary {
+    let ended_at = focus.ended_at.unwrap_or(now);
+    let overlapping_events = events
+        .iter()
+        .filter(|event| event.started_at < ended_at && event.ended_at > focus.started_at)
+        .collect::<Vec<_>>();
+    let mut matched_intervals = Vec::new();
+    let mut drift_intervals = Vec::new();
+    let mut evidence_event_ids = Vec::new();
+    let mut drift_events = Vec::new();
+
+    for event in overlapping_events {
+        let interval = (event.started_at.max(focus.started_at), event.ended_at.min(ended_at));
+        if interval.1 <= interval.0 {
+            continue;
+        }
+        evidence_event_ids.push(event.id.clone());
+        if focus_matches_source(focus, event) {
+            matched_intervals.push(interval);
+        } else {
+            drift_intervals.push(interval);
+            let label = source_event_short_label(event);
+            if !drift_events.contains(&label) {
+                drift_events.push(label);
+            }
+        }
+    }
+
+    let actual_duration_ms = ended_at.saturating_sub(focus.started_at);
+    let matched_work_ms = merged_interval_duration_ms(matched_intervals);
+    let drift_ms = merged_interval_duration_ms(drift_intervals);
+
+    FocusSessionSummary {
+        id: focus.id.clone(),
+        goal: focus.goal.clone(),
+        client: focus.client.clone(),
+        project: focus.project.clone(),
+        task: focus.task.clone(),
+        ticket_id: focus.ticket_id.clone(),
+        target_ms: focus.target_ms,
+        started_at: focus.started_at,
+        ended_at: focus.ended_at,
+        status: focus.status.clone(),
+        actual_duration_ms,
+        matched_work_ms,
+        drift_ms,
+        evidence_event_ids,
+        drift_events,
+        created_at: focus.created_at,
+        updated_at: focus.updated_at,
+    }
+}
+
+fn focus_matches_source(focus: &FocusSessionRecord, source: &SourceEvent) -> bool {
+    let source_text = [
+        source.app.as_deref(),
+        source.title.as_deref(),
+        source.domain.as_deref(),
+        source.url_redacted.as_deref(),
+        source.workspace_key.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(normalize_match_text)
+    .collect::<Vec<_>>()
+    .join(" ");
+    let terms = [
+        Some(focus.goal.as_str()),
+        focus.client.as_deref(),
+        focus.project.as_deref(),
+        focus.task.as_deref(),
+        focus.ticket_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(match_terms)
+    .collect::<Vec<_>>();
+
+    terms
+        .iter()
+        .any(|term| !term.is_empty() && source_text.contains(term))
+}
+
+fn match_terms(value: &str) -> Vec<String> {
+    let normalized = normalize_match_text(value);
+    let mut terms = Vec::new();
+    if normalized.len() >= 3 {
+        terms.push(normalized.clone());
+    }
+    terms.extend(
+        normalized
+            .split_whitespace()
+            .filter(|part| part.len() >= 3)
+            .map(str::to_string),
+    );
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn normalize_match_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn merged_interval_duration_ms(mut intervals: Vec<(i64, i64)>) -> i64 {
+    intervals.retain(|(start, end)| end > start);
+    intervals.sort_by_key(|(start, _)| *start);
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    for (start, end) in intervals {
+        if let Some((_, last_end)) = merged.last_mut() {
+            if start <= *last_end {
+                *last_end = (*last_end).max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+    merged
+        .into_iter()
+        .map(|(start, end)| end.saturating_sub(start))
+        .sum()
+}
+
+fn source_event_short_label(event: &SourceEvent) -> String {
+    [
+        event.app.as_deref().and_then(clean_app_label),
+        event.title.as_deref().and_then(clean_capture_label),
+        event.domain.as_deref().and_then(clean_capture_label),
+        event.workspace_key.as_deref().and_then(clean_capture_label),
+    ]
+    .into_iter()
+    .flatten()
+    .next()
+    .unwrap_or_else(|| "Captured activity".to_string())
+}
+
 fn build_ai_output_ledger(
     events: &[SourceEvent],
     ai_outputs: &[WorkOutput],
@@ -8769,49 +9720,145 @@ fn append_planning_section(markdown: &mut String, title: &str, items: &[Planning
     }
 }
 
-fn build_weekly_review_markdown(snapshot: &TodaySnapshot) -> String {
+fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
     let mut markdown = String::new();
+    let range_label = match (&export.from_date, &export.to_date) {
+        (Some(from), Some(to)) => format!("{from} to {to}"),
+        (Some(from), None) => format!("since {from}"),
+        (None, Some(to)) => format!("through {to}"),
+        _ => "latest captured range".to_string(),
+    };
+
+    markdown.push_str(&format!("# Weekly Work Review - {range_label}\n\n"));
+    markdown.push_str("## AI weekly auto-draft\n");
+    markdown.push_str("- Source-backed draft generated from local DayTrail evidence. Review before sharing.\n");
+
+    markdown.push_str("\n## Movement\n");
     markdown.push_str(&format!(
-        "# Weekly Work Review - week of {}\n\n",
-        snapshot.local_date
+        "- {} work session(s), {} source event(s), {} AI contribution(s).\n",
+        export.work_sessions.len(),
+        export.source_events.len(),
+        export.ai_contribution_rows.len()
     ));
-    markdown.push_str("## Movement\n");
     markdown.push_str(&format!(
-        "- {} work session(s) and {} parallel stream(s) captured.\n",
-        snapshot.work_sessions.len(),
-        snapshot.parallel_streams.len()
+        "- Planned vs actual: {}/{} calendar event(s) matched, {} missed.\n",
+        export.calendar_reconciliation.matched_events,
+        export.calendar_reconciliation.planned_events,
+        export.calendar_reconciliation.unmatched_events
     ));
     markdown.push_str(&format!(
-        "- {} AI-assisted output(s), {} open commitment(s), {} pending replie(s).\n",
-        snapshot.ai_outputs.len(),
-        snapshot.commitments.len(),
-        snapshot.pending_replies.len()
+        "- {} focus session(s), {} focus drift, {} review item(s).\n",
+        export.focus_sessions.len(),
+        format_duration_words(export.focus_sessions.iter().map(|session| session.drift_ms).sum()),
+        export.unclosed_loop_inbox.len()
     ));
 
-    markdown.push_str("\n## Leadership summary\n");
-    if snapshot.work_sessions.is_empty() {
-        markdown.push_str("- No completed work sessions have been materialized yet.\n");
+    markdown.push_str("\n## Work completed\n");
+    if export.work_sessions.is_empty() && export.source_events.is_empty() {
+        markdown.push_str("- No captured work sessions in this week range.\n");
     } else {
-        for session in snapshot.work_sessions.iter().take(6) {
+        for session in export.work_sessions.iter().take(8) {
             markdown.push_str(&format!(
-                "- {}: {}\n",
+                "- {}: {} ({}).\n",
                 clean_report_text(&session.status),
-                clean_report_text(&session.title)
+                clean_report_text(&session.title),
+                format_duration_words(session.duration_ms)
+            ));
+        }
+        for event in export.source_events.iter().take(8) {
+            let label = event
+                .title
+                .as_deref()
+                .and_then(clean_capture_label)
+                .or_else(|| event.app.as_deref().and_then(clean_app_label))
+                .unwrap_or_else(|| "Captured activity".to_string());
+            markdown.push_str(&format!(
+                "- Evidence: {} in {}.\n",
+                clean_report_text(&label),
+                clean_report_text(&source_event_context_label(event))
+            ));
+        }
+    }
+
+    markdown.push_str("\n## Planned vs actual\n");
+    if export.calendar_reconciliation.items.is_empty() {
+        markdown.push_str("- No calendar events imported for this week.\n");
+    } else {
+        for item in export.calendar_reconciliation.items.iter().take(10) {
+            markdown.push_str(&format!(
+                "- {}: {} ({} overlap{}).\n",
+                clean_report_text(&item.status),
+                clean_report_text(&item.title),
+                format_duration_words(item.actual_overlap_ms),
+                item.evidence_label
+                    .as_ref()
+                    .map(|label| format!(", evidence: {}", clean_report_text(label)))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+
+    markdown.push_str("\n## Focus recovery\n");
+    if export.focus_sessions.is_empty() {
+        markdown.push_str("- No focus sessions captured for this week.\n");
+    } else {
+        for focus in export.focus_sessions.iter().take(10) {
+            markdown.push_str(&format!(
+                "- {}: {} matched work, {} drift{}.\n",
+                clean_report_text(&focus.goal),
+                format_duration_words(focus.matched_work_ms),
+                format_duration_words(focus.drift_ms),
+                if focus.drift_events.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " ({})",
+                        focus
+                            .drift_events
+                            .iter()
+                            .take(3)
+                            .map(|event| clean_report_text(event))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            ));
+        }
+    }
+
+    markdown.push_str("\n## AI work\n");
+    if export.ai_contribution_rows.is_empty() {
+        markdown.push_str("- No AI-assisted contributions captured for this week.\n");
+    } else {
+        for row in export.ai_contribution_rows.iter().take(10) {
+            markdown.push_str(&format!(
+                "- {}: {} ({}).\n",
+                clean_report_text(&row.tool),
+                clean_report_text(&row.title),
+                format_duration_words(row.duration_ms)
             ));
         }
     }
 
     markdown.push_str("\n## Risks and follow-ups\n");
-    if snapshot.pending_replies.is_empty() && snapshot.commitments.is_empty() {
-        markdown.push_str("- No reply debt or open commitments captured.\n");
+    if export.unclosed_loop_inbox.is_empty()
+        && export.pending_replies.is_empty()
+        && export.commitments.is_empty()
+    {
+        markdown.push_str("- No reply debt, open commitments, or review items captured.\n");
     } else {
-        for reply in &snapshot.pending_replies {
+        for item in export.unclosed_loop_inbox.iter().take(10) {
             markdown.push_str(&format!(
-                "- Reply debt: {}\n",
-                clean_report_text(&reply.subject)
+                "- {}: {} - {}\n",
+                clean_report_text(&item.category),
+                clean_report_text(&item.title),
+                clean_report_text(&item.detail)
             ));
         }
-        for commitment in &snapshot.commitments {
+        for reply in export.pending_replies.iter().take(5) {
+            markdown.push_str(&format!("- Reply debt: {}\n", clean_report_text(&reply.subject)));
+        }
+        for commitment in export.commitments.iter().take(5) {
             markdown.push_str(&format!(
                 "- Commitment: {}\n",
                 clean_report_text(&commitment.title)

@@ -8,7 +8,7 @@ const appRows = [
 
 export function ProductMockup() {
   return (
-    <div className="mockup-shell" role="img" aria-label="DayTrail mockup showing today, a 24-hour timeline, selected hour, app breakdown, and daily report">
+    <div className="mockup-shell" role="img" aria-label="DayTrail mockup showing today, a 24-hour timeline, context recovery, app breakdown, and a weekly update draft">
       <div className="mockup-titlebar">
         <span className="traffic" aria-hidden="true">
           <i />
@@ -30,20 +30,20 @@ export function ProductMockup() {
         <div className="mockup-heading">
           <div>
             <span>Today</span>
-            <strong>7h 42m remembered</strong>
+            <strong>7h 42m captured</strong>
           </div>
-          <p>Daily report ready</p>
+          <p>Context ready</p>
         </div>
 
         <div className="summary-row">
-          <span>24-hour timeline</span>
+          <span>Context replay</span>
           <span>3 AI sessions</span>
-          <span>5 work apps</span>
+          <span>Weekly update</span>
         </div>
 
         <div className="timeline-panel">
           <div className="timeline-title">
-            <span>What happened today</span>
+            <span>Replay today</span>
             <span>9 AM - 10 AM selected</span>
           </div>
           <span className="time-badge">9:41 AM</span>
@@ -69,7 +69,7 @@ export function ProductMockup() {
           <div className="selected-hour">
             <div className="hour-card">
               <h3>9 AM - 10 AM</h3>
-              <p>Deep work session · 47m</p>
+              <p>Focus block · resume point</p>
               {appRows.map((app) => (
                 <div className="app-row" key={app.name}>
                   <span>
@@ -82,10 +82,10 @@ export function ProductMockup() {
             </div>
 
             <div className="report-card">
-              <strong>Daily report ready</strong>
-              <span>VS Code work grouped</span>
+              <strong>Weekly update draft</strong>
+              <span>VS Code context recovered</span>
               <span>ChatGPT research linked</span>
-              <span>Terminal context included</span>
+              <span>Next steps ready</span>
             </div>
           </div>
         </div>

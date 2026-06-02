@@ -5,10 +5,10 @@ use serde_json::json;
 use tempfile::tempdir;
 use worktrace_ai_desktop::{
     models::{
-        AgentRunInput, BrowserBridgeEvent, CommitmentInput, EmailThreadInput, ExportRangeInput,
-        FieldVisitInput, IdleBlockInput, MeetingInput, ScratchpadNoteInput, SettingsPatch,
-        SourceEventInput, StateSnapshotInput, TaskInput, TaskStatus, TerminalBridgeMetadata,
-        WorkOutputInput,
+        AgentRunInput, BrowserBridgeEvent, CalendarEventInput, CommitmentInput, EmailThreadInput,
+        ExportRangeInput, FieldVisitInput, FocusSessionInput, IdleBlockInput, MeetingInput,
+        ScratchpadNoteInput, SettingsPatch, SourceEventInput, StateSnapshotInput, TaskInput,
+        TaskStatus, TerminalBridgeMetadata, WorkOutputInput,
     },
     native_messaging,
     platform::KeychainAdapter,
@@ -19,6 +19,312 @@ use worktrace_ai_desktop::{
 #[derive(Default)]
 struct TestKeychain {
     values: Mutex<HashMap<String, String>>,
+}
+
+#[test]
+fn calendar_events_reconcile_planned_vs_actual_work() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Local::now().timestamp_millis();
+    let meeting_start = now - 90 * 60_000;
+    let meeting_end = meeting_start + 60 * 60_000;
+    let missed_start = now - 4 * 60 * 60_000;
+    let missed_end = missed_start + 45 * 60_000;
+
+    store
+        .upsert_calendar_event(CalendarEventInput {
+            id: Some("cal-client-sync".into()),
+            source: Some("manual".into()),
+            external_id: Some("external-client-sync".into()),
+            calendar_name: Some("Work".into()),
+            title: "Client sync".into(),
+            starts_at: meeting_start,
+            ends_at: meeting_end,
+            location: Some("Google Meet".into()),
+            status: Some("confirmed".into()),
+            planned_work_type: Some("meeting".into()),
+        })
+        .expect("calendar event");
+    store
+        .upsert_calendar_event(CalendarEventInput {
+            id: Some("cal-missed-review".into()),
+            source: Some("manual".into()),
+            external_id: None,
+            calendar_name: Some("Work".into()),
+            title: "Design review".into(),
+            starts_at: missed_start,
+            ends_at: missed_end,
+            location: None,
+            status: Some("confirmed".into()),
+            planned_work_type: Some("review".into()),
+        })
+        .expect("missed calendar event");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("meeting-signal".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("Google Meet".into()),
+            title: Some("Client sync".into()),
+            url: None,
+            workspace_key: Some("meet.google.com".into()),
+            started_at: Some(meeting_start + 5 * 60_000),
+            ended_at: Some(meeting_end - 5 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record event");
+
+    let today = store.today_snapshot().expect("today");
+
+    assert_eq!(today.calendar_events.len(), 2);
+    assert_eq!(today.calendar_reconciliation.planned_events, 2);
+    assert_eq!(today.calendar_reconciliation.matched_events, 1);
+    assert_eq!(today.calendar_reconciliation.unmatched_events, 1);
+    assert!(today
+        .calendar_reconciliation
+        .items
+        .iter()
+        .any(|item| item.title == "Client sync" && item.status == "matched"));
+    assert!(today
+        .calendar_reconciliation
+        .items
+        .iter()
+        .any(|item| item.title == "Design review" && item.status == "missed"));
+
+    let weekly = store.generate_weekly_review().expect("weekly review");
+    assert!(weekly.body_markdown.contains("Planned vs actual"));
+    assert!(weekly.body_markdown.contains("Client sync"));
+    assert!(weekly.body_markdown.contains("Design review"));
+}
+
+#[test]
+fn focus_sessions_measure_drift_from_the_declared_context() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 40 * 60_000;
+    let end = start + 30 * 60_000;
+
+    store
+        .upsert_focus_session(FocusSessionInput {
+            id: Some("focus-ticket-123".into()),
+            goal: "Ship ticket 123".into(),
+            client: Some("Acme".into()),
+            project: Some("DayTrail".into()),
+            task: Some("Ticket 123".into()),
+            ticket_id: Some("DT-123".into()),
+            target_ms: 30 * 60_000,
+            started_at: start,
+            ended_at: Some(end),
+            status: Some("completed".into()),
+        })
+        .expect("focus session");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("focus-code".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("DayTrail App.tsx".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(start),
+            ended_at: Some(start + 20 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record code");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("focus-drift".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("YouTube".into()),
+            title: Some("Unrelated video".into()),
+            url: None,
+            workspace_key: Some("youtube.com".into()),
+            started_at: Some(start + 20 * 60_000),
+            ended_at: Some(end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record drift");
+
+    let today = store.today_snapshot().expect("today");
+    let focus = today
+        .focus_sessions
+        .iter()
+        .find(|session| session.id == "focus-ticket-123")
+        .expect("focus session in snapshot");
+
+    assert_eq!(focus.status, "completed");
+    assert_eq!(focus.actual_duration_ms, 30 * 60_000);
+    assert_eq!(focus.matched_work_ms, 20 * 60_000);
+    assert_eq!(focus.drift_ms, 10 * 60_000);
+    assert!(focus.drift_events.iter().any(|event| event.contains("YouTube")));
+}
+
+#[test]
+fn weekly_review_uses_last_seven_days_not_only_today() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let three_days_ago = chrono::Local::now().timestamp_millis() - 3 * 24 * 60 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("weekly-prior-work".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("Refactored calendar reconciliation".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(three_days_ago),
+            ended_at: Some(three_days_ago + 30 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record prior work");
+    store
+        .materialize_work_memory()
+        .expect("materialize prior work");
+
+    let review = store.generate_weekly_review().expect("weekly review");
+
+    assert_eq!(review.report_type, "weekly_review");
+    assert!(review.body_markdown.contains("Refactored calendar reconciliation"));
+    assert!(review.body_markdown.contains("AI weekly auto-draft"));
+}
+
+#[test]
+fn records_unclassified_idle_gap_candidate_for_return_prompt() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 35 * 60_000;
+    let end = start + 25 * 60_000;
+
+    let recorded = store
+        .record_idle_gap_candidate("resume", start, end)
+        .expect("record candidate")
+        .expect("candidate should be recorded");
+
+    assert!(!recorded.classified);
+    assert!(recorded.category.is_none());
+    assert!(recorded.evidence_json.as_deref().unwrap_or("").contains("resume"));
+
+    let again = store
+        .record_idle_gap_candidate("resume", start, end)
+        .expect("duplicate candidate");
+    assert!(again.is_none());
+}
+
+#[test]
+fn idle_gap_candidate_is_suppressed_when_paused_or_already_classified() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 45 * 60_000;
+    let end = start + 20 * 60_000;
+
+    store.pause("manual pause").expect("pause");
+    assert!(store
+        .record_idle_gap_candidate("hid-return", start, end)
+        .expect("paused candidate")
+        .is_none());
+
+    store.resume().expect("resume");
+    store
+        .upsert_idle_block(IdleBlockInput {
+            id: Some("classified-away".into()),
+            started_at: start,
+            ended_at: end,
+            category: Some("Meeting".into()),
+            classified: Some(true),
+            evidence_json: None,
+        })
+        .expect("classified block");
+
+    assert!(store
+        .record_idle_gap_candidate("hid-return", start + 60_000, end - 60_000)
+        .expect("covered candidate")
+        .is_none());
+}
+
+#[test]
+fn search_indexes_weekly_calendar_focus_ai_and_offline_sources() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 60 * 60_000;
+    let end = start + 30 * 60_000;
+
+    store
+        .upsert_calendar_event(CalendarEventInput {
+            id: Some("cal-roadmap".into()),
+            source: Some("manual".into()),
+            external_id: None,
+            calendar_name: Some("Product".into()),
+            title: "Roadmap sync".into(),
+            starts_at: start,
+            ends_at: end,
+            location: Some("Zoom".into()),
+            status: Some("confirmed".into()),
+            planned_work_type: Some("meeting".into()),
+        })
+        .expect("calendar");
+    store
+        .upsert_focus_session(FocusSessionInput {
+            id: Some("focus-roadmap".into()),
+            goal: "Roadmap digest draft".into(),
+            client: None,
+            project: Some("DayTrail".into()),
+            task: Some("Roadmap digest".into()),
+            ticket_id: None,
+            target_ms: 25 * 60_000,
+            started_at: start,
+            ended_at: Some(end),
+            status: Some("completed".into()),
+        })
+        .expect("focus");
+    store
+        .upsert_meeting(MeetingInput {
+            id: Some("meeting-roadmap".into()),
+            title: "Roadmap follow-up".into(),
+            starts_at: Some(start),
+            ends_at: Some(end),
+            attendees_json: None,
+            summary: Some("Calendar launch plan".into()),
+            actions_json: None,
+        })
+        .expect("meeting");
+    store
+        .record_work_output(WorkOutputInput {
+            id: Some("output-roadmap".into()),
+            output_type: "weekly_update".into(),
+            title: "Roadmap weekly update".into(),
+            source: Some("AI weekly auto-draft".into()),
+            ai_assisted: Some(true),
+            status: Some("drafted".into()),
+            evidence_json: None,
+        })
+        .expect("output");
+    store.generate_weekly_review().expect("weekly");
+
+    let results = store.search_work_memory("roadmap", 20).expect("search");
+    let types = results
+        .iter()
+        .map(|result| result.entity_type.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    assert!(types.contains("calendar_event"));
+    assert!(types.contains("focus_session"));
+    assert!(types.contains("meeting"));
+    assert!(types.contains("work_output"));
+    assert!(types.contains("weekly_review"));
 }
 
 impl KeychainAdapter for TestKeychain {

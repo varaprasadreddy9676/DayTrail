@@ -8,7 +8,7 @@ export function LandingHeader() {
           <img className="brand-mark" src={assets.daytrailIcon} alt="" width="44" height="44" />
           <span className="brand-copy">
             <strong>DayTrail</strong>
-            <span>Retrace your workday.</span>
+            <span>Replay your workday.</span>
           </span>
         </a>
 

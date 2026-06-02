@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod bridge;
+pub mod calendar;
 pub mod commitments;
 pub mod context;
 pub mod export;
@@ -52,6 +53,10 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         offline::upsert_idle_block,
         offline::list_idle_blocks,
         offline::delete_idle_block,
+        calendar::upsert_calendar_event,
+        calendar::list_calendar_events,
+        focus::upsert_focus_session,
+        focus::list_focus_sessions,
         privacy::clear_clipboard_history,
         privacy::delete_context_data,
         privacy::purge_captured_data,

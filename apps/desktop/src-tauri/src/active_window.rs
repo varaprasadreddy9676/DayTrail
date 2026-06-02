@@ -114,6 +114,10 @@ fn watcher_tick(
             "resume after {wall_gap_ms}ms wall-clock gap (sleep/App Nap) — clearing AX cache"
         ));
         clear_content_title_cache();
+        let started_at = now_epoch.saturating_sub(wall_gap_ms);
+        if let Err(error) = store.record_idle_gap_candidate("resume", started_at, now_epoch) {
+            watcher_log(&format!("idle candidate skipped after resume: {error}"));
+        }
         maybe_notify_away(app, wall_gap_ms);
     }
 
@@ -132,6 +136,10 @@ fn watcher_tick(
         }
     } else if !*recording {
         watcher_log("capture resumed — user active");
+        let started_at = now_epoch.saturating_sub(idle_ms as i64);
+        if let Err(error) = store.record_idle_gap_candidate("hid-return", started_at, now_epoch) {
+            watcher_log(&format!("idle candidate skipped after HID return: {error}"));
+        }
         *recording = true;
     }
 

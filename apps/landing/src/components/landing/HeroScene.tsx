@@ -13,7 +13,7 @@ export function HeroScene({ sceneRef }: HeroSceneProps) {
   return (
     <div className="hero-scene" ref={sceneRef} aria-label="Animated DayTrail product preview">
       <p className="engine-label" aria-hidden="true">
-        Memory engine
+        Work memory
       </p>
 
       <AppConstellation />
@@ -26,20 +26,20 @@ export function HeroScene({ sceneRef }: HeroSceneProps) {
       <FloatingHeroCard
         body="VS Code · DayTrail repo"
         className="card-capture"
-        detail="42m focused"
+        detail="resume point saved"
         icon={assets.apps.vscode}
-        title="Now capturing"
+        title="Context saved"
       />
       <FloatingHeroCard
-        body="Codex · ChatGPT · Gemini"
+        body="Prompts and tools linked"
         className="card-ai"
         icon={assets.apps.chatgpt}
-        title="AI detected"
+        title="AI context logged"
       />
       <FloatingHeroCard
-        body="4 sessions summarized"
+        body="Weekly notes drafted"
         className="card-report"
-        title="Daily report ready"
+        title="Update ready"
         variant="report"
       />
     </div>

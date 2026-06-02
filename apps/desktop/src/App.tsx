@@ -31,7 +31,7 @@ type ViewKey =
   | "review"
   | "memory"
   | "settings";
-type RitualKey = "daily";
+type RitualKey = "daily" | "weekly";
 
 type WorkSession = {
   id: string;
@@ -187,6 +187,9 @@ type BackendTodaySnapshot = {
   commitments: Array<{ id: string; title: string; source?: string | null; dueAt?: number | null }>;
   pendingReplies: Array<{ id: string; subject: string; latestSender?: string | null }>;
   aiOutputs: Array<{ id: string; title: string; outputType: string; status: string; aiAssisted: boolean }>;
+  calendarEvents: BackendCalendarEvent[];
+  calendarReconciliation: BackendCalendarReconciliation;
+  focusSessions: BackendFocusSession[];
   meetings: Array<{ id: string; title: string; summary?: string | null }>;
   fieldVisits: Array<{ id: string; clientLabel?: string | null; locationLabel?: string | null; status: string }>;
   idleBlocks: BackendIdleBlock[];
@@ -239,6 +242,63 @@ type BackendTodaySnapshot = {
   settings: BackendSettings;
   projectContext?: { path: string; source: string } | null;
   activeWorkContext?: BackendActiveWorkContext | null;
+};
+
+type BackendCalendarEvent = {
+  id: string;
+  source: string;
+  externalId?: string | null;
+  calendarName?: string | null;
+  title: string;
+  startsAt: number;
+  endsAt: number;
+  location?: string | null;
+  status: string;
+  plannedWorkType?: string | null;
+};
+
+type BackendCalendarReconciliation = {
+  plannedEvents: number;
+  matchedEvents: number;
+  unmatchedEvents: number;
+  plannedDurationMs: number;
+  actualOverlapMs: number;
+  items: Array<{
+    id: string;
+    title: string;
+    startsAt: number;
+    endsAt: number;
+    status: string;
+    actualOverlapMs: number;
+    matchedSessionIds: string[];
+    matchedSourceEventIds: string[];
+    evidenceLabel?: string | null;
+  }>;
+};
+
+type BackendFocusSession = {
+  id: string;
+  goal: string;
+  client?: string | null;
+  project?: string | null;
+  task?: string | null;
+  ticketId?: string | null;
+  targetMs: number;
+  startedAt: number;
+  endedAt?: number | null;
+  status: string;
+  actualDurationMs: number;
+  matchedWorkMs: number;
+  driftMs: number;
+  evidenceEventIds: string[];
+  driftEvents: string[];
+};
+
+type ActiveFocusTimer = {
+  id: string;
+  goal: string;
+  startedAt: number;
+  targetMs: number;
 };
 
 type BackendActiveWorkContext = {
@@ -487,6 +547,9 @@ type BackendExportPayload = {
     destination: string;
     status: string;
   }>;
+  calendarEvents?: BackendCalendarEvent[];
+  calendarReconciliation?: BackendCalendarReconciliation;
+  focusSessions?: BackendFocusSession[];
   tasks?: BackendTodaySnapshot["tasks"];
   quickNotes?: BackendTodaySnapshot["quickNotes"];
   commitments?: BackendTodaySnapshot["commitments"];
@@ -626,6 +689,7 @@ const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "today", label: "Today", icon: "layout" },
   { id: "apps", label: "Activity", icon: "apps" },
   { id: "ai", label: "AI Impact", icon: "ritual" },
+  { id: "restore", label: "Replay", icon: "search" },
   { id: "review", label: "Needs Review", icon: "archive" },
   { id: "rituals", label: "Reports", icon: "ritual" },
   { id: "settings", label: "Settings", icon: "sliders" },
@@ -640,6 +704,8 @@ const commandSuggestions = [
   "/activity",
   "/ai-usage",
   "/report",
+  "/weekly",
+  "/replay",
   "/export",
 ];
 
@@ -647,6 +713,10 @@ const commandLabels: Record<string, string> = {
   "/today": "Open Today",
   "/activity": "Open Activity",
   "/report": "Generate daily report",
+  "/weekly": "Generate weekly digest",
+  "/digest": "Generate weekly digest",
+  "/replay": "Replay my day",
+  "/resume": "Resume last context",
   "/what-did-i-do": "What did I work on today?",
   "/ai-usage": "Open AI Impact",
   "/export": "Export data",
@@ -773,8 +843,8 @@ const emptyStream: Stream = {
   events: [],
 };
 
-function buildLocalReportMarkdown(_reportType: RitualKey, snapshot: BackendTodaySnapshot | null, settings?: ExperienceSettingsLike) {
-  const title = "Daily Work Report";
+function buildLocalReportMarkdown(reportType: RitualKey, snapshot: BackendTodaySnapshot | null, settings?: ExperienceSettingsLike) {
+  const title = reportType === "weekly" ? "Weekly Work Review" : "Daily Work Report";
 
   if (!snapshot) {
     return `# ${title}
@@ -812,6 +882,16 @@ function exportPayloadToSnapshot(
     commitments: payload.commitments ?? [],
     pendingReplies: payload.pendingReplies ?? [],
     aiOutputs: payload.outputs ?? [],
+    calendarEvents: payload.calendarEvents ?? [],
+    calendarReconciliation: payload.calendarReconciliation ?? {
+      plannedEvents: 0,
+      matchedEvents: 0,
+      unmatchedEvents: 0,
+      plannedDurationMs: 0,
+      actualOverlapMs: 0,
+      items: [],
+    },
+    focusSessions: payload.focusSessions ?? [],
     meetings: [],
     fieldVisits: [],
     idleBlocks: payload.idleBlocks ?? [],
@@ -906,6 +986,14 @@ function formatTimeRange(startedAt: number, endedAt: number) {
   }
 
   return `${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function formatTime(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "now";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDuration(durationMs = 0) {
@@ -2398,6 +2486,7 @@ export default function App() {
   const [timelineToDate, setTimelineToDate] = useState(() => formatLocalDateInput(new Date()));
   const [timelineRangePayload, setTimelineRangePayload] = useState<BackendExportPayload | null>(null);
   const [timelineRangeStatus, setTimelineRangeStatus] = useState("Today");
+  const [activeFocusTimer, setActiveFocusTimer] = useState<ActiveFocusTimer | null>(null);
 
   const effectiveSnapshot = useMemo(
     () =>
@@ -3139,10 +3228,94 @@ export default function App() {
     }
   }
 
+  async function ignoreIdleBlock(gap: IdleGap & { id: string; idleBlockId?: string | null }) {
+    if (!gap.idleBlockId) {
+      return;
+    }
+    await invokeTauri("upsert_idle_block", {
+      input: {
+        id: gap.idleBlockId,
+        startedAt: gap.startMs,
+        endedAt: gap.endMs,
+        category: "Ignored",
+        classified: true,
+        evidenceJson: manualBlockEvidenceJson(
+          {
+            blockType: "Ignored",
+            client: "",
+            project: "",
+            task: "",
+            ticketId: "",
+            billable: false,
+          },
+          "idle-ignore",
+        ),
+      },
+    });
+    await refreshTodaySnapshot();
+  }
+
   async function clearWorkContext() {
     await invokeTauri("clear_active_work_context");
     setTodaySnapshot((prev) => prev ? { ...prev, activeWorkContext: null } : prev);
     addToast("info", "Work context cleared", "Activity will be untagged until you set a new context.");
+  }
+
+  async function startFocusTimer() {
+    const context = effectiveSnapshot?.activeWorkContext;
+    const goal = context?.task || context?.project || context?.client || "Focused work";
+    const id = `focus-${Date.now()}`;
+    const startedAt = Date.now();
+    const targetMs = 25 * 60_000;
+    const result = await invokeTauri<BackendFocusSession>("upsert_focus_session", {
+      input: {
+        id,
+        goal,
+        client: context?.client ?? null,
+        project: context?.project ?? null,
+        task: context?.task ?? null,
+        ticketId: context?.ticketId ?? null,
+        targetMs,
+        startedAt,
+        endedAt: null,
+        status: "active",
+      },
+    });
+
+    if (!result) {
+      addToast("error", "Focus timer unavailable", "Could not start a focus session.");
+      return;
+    }
+    setActiveFocusTimer({ id, goal, startedAt, targetMs });
+    addToast("success", "Focus started", goal);
+    await refreshTodaySnapshot();
+  }
+
+  async function stopFocusTimer() {
+    if (!activeFocusTimer) return;
+    const context = effectiveSnapshot?.activeWorkContext;
+    const result = await invokeTauri<BackendFocusSession>("upsert_focus_session", {
+      input: {
+        id: activeFocusTimer.id,
+        goal: activeFocusTimer.goal,
+        client: context?.client ?? null,
+        project: context?.project ?? null,
+        task: context?.task ?? null,
+        ticketId: context?.ticketId ?? null,
+        targetMs: activeFocusTimer.targetMs,
+        startedAt: activeFocusTimer.startedAt,
+        endedAt: Date.now(),
+        status: "completed",
+      },
+    });
+
+    if (!result) {
+      addToast("error", "Focus timer unavailable", "Could not stop the focus session.");
+      return;
+    }
+    setActiveFocusTimer(null);
+    addToast("success", "Focus saved", `${formatDuration(result.matchedWorkMs)} matched, ${formatDuration(result.driftMs)} drift.`);
+    await refreshTodaySnapshot();
   }
 
   async function toggleTracking() {
@@ -3226,6 +3399,10 @@ export default function App() {
 
   async function generateDailyReport() {
     await generateRitual("daily");
+  }
+
+  async function generateWeeklyReport() {
+    await generateRitual("weekly");
   }
 
   async function loadTimelineRange(
@@ -3509,7 +3686,9 @@ export default function App() {
     setActiveRitual(ritual);
 
     const report =
-      timelineRangePreset === "today"
+      ritual === "weekly"
+        ? await invokeTauri<BackendReport>("generate_weekly_review")
+        : timelineRangePreset === "today"
         ? await invokeTauri<BackendReport>("generate_daily_report")
         : await invokeTauri<BackendReport>("analyze_export_range", {
             range: {
@@ -3539,10 +3718,14 @@ export default function App() {
       setActiveView("apps");
     } else if (command === "/ai-usage") {
       setActiveView("ai");
+    } else if (command === "/replay" || command === "/resume") {
+      setActiveView("restore");
     } else if (command === "/export") {
       setActiveView("automation");
     } else if (command === "/report" || command === "/eod") {
       await generateRitual("daily");
+    } else if (command === "/weekly" || command === "/digest") {
+      await generateRitual("weekly");
     } else if (
       command === "/pending" ||
       command === "/commitments" ||
@@ -3687,6 +3870,16 @@ export default function App() {
               <Icon name="ritual" />
               <span className="button-label">Daily report</span>
             </button>
+            <button
+              className="button"
+              onClick={() => generateRitual("weekly")}
+              aria-label="Generate weekly digest"
+              title="Generate weekly digest"
+              type="button"
+            >
+              <Icon name="archive" />
+              <span className="button-label">Weekly digest</span>
+            </button>
           </div>
         </header>
 
@@ -3708,6 +3901,10 @@ export default function App() {
               aiUsageSummary={effectiveSnapshot?.aiUsageSummary}
               appUsageSummary={effectiveSnapshot?.appUsageSummary}
               onGenerateReport={generateDailyReport}
+              onGenerateWeeklyReport={generateWeeklyReport}
+              onStartFocus={startFocusTimer}
+              onStopFocus={stopFocusTimer}
+              onIgnoreIdleBlock={ignoreIdleBlock}
               onOpenHour={(hour) => {
                 setActiveHourDetail(hour);
                 setActiveView("hour");
@@ -3726,6 +3923,7 @@ export default function App() {
               appCount={displayApps.length}
               bridgeStatus={bridgeStatus}
               backendReady={backendReady}
+              activeFocusTimer={activeFocusTimer}
               rangePayload={timelineRangePayload}
               rangeFromDate={timelineFromDate}
               rangePreset={timelineRangePreset}
@@ -3813,8 +4011,11 @@ export default function App() {
           )}
           {activeView === "rituals" && (
             <RitualsView
+              activeRitual={activeRitual}
               onOpenExports={() => setActiveView("automation")}
               onGenerateReport={() => generateRitual(activeRitual)}
+              onGenerateDaily={() => generateRitual("daily")}
+              onGenerateWeekly={() => generateRitual("weekly")}
               onRegenerateContext={regenerateContextData}
               reportMarkdown={reportMarkdown}
               settings={effectiveSnapshot?.settings}
@@ -4321,9 +4522,14 @@ function TodayView({
   actions,
   aiUsageSummary,
   appUsageSummary,
+  activeFocusTimer,
   idleGapCount,
   isPaused,
   onGenerateReport,
+  onGenerateWeeklyReport,
+  onIgnoreIdleBlock,
+  onStartFocus,
+  onStopFocus,
   onOpenHour,
   onOpenWorkContextEditor,
   onClearWorkContext,
@@ -4346,9 +4552,14 @@ function TodayView({
   actions: ActionItem[];
   aiUsageSummary?: BackendAiUsageSummary;
   appUsageSummary?: BackendAppUsageSummary;
+  activeFocusTimer: ActiveFocusTimer | null;
   idleGapCount: number;
   isPaused: boolean;
   onGenerateReport: () => void;
+  onGenerateWeeklyReport: () => void;
+  onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
+  onStartFocus: () => void;
+  onStopFocus: () => void;
   onOpenHour: (hour: number) => void;
   onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
   onClearWorkContext: () => void;
@@ -4473,6 +4684,21 @@ function TodayView({
     // can still be logged via "Log offline time".
     const maximumPromptMs = 4 * 60 * 60 * 1000;
     const now = Date.now();
+    const persistedIdle = manualBlocks.find((block) =>
+      !block.classified &&
+      block.durationMs >= minimumPromptMs &&
+      block.endMs < now - 60_000 &&
+      !dismissedIdlePromptIds.has(block.id)
+    );
+    if (persistedIdle) {
+      return {
+        id: persistedIdle.id,
+        idleBlockId: persistedIdle.id,
+        startMs: persistedIdle.startMs,
+        endMs: persistedIdle.endMs,
+        durationMs: persistedIdle.durationMs,
+      };
+    }
     for (const gap of dayIdleGaps) {
       const id = `${gap.startMs}-${gap.endMs}`;
       const alreadyCovered = manualBlocks.some((block) =>
@@ -4485,7 +4711,7 @@ function TodayView({
         !alreadyCovered &&
         !dismissedIdlePromptIds.has(id)
       ) {
-        return { ...gap, id };
+        return { ...gap, id, idleBlockId: null };
       }
     }
     return null;
@@ -4577,6 +4803,10 @@ function TodayView({
             <Icon name="ritual" />
             Daily report
           </button>
+          <button className="button compact" onClick={onGenerateWeeklyReport} type="button">
+            <Icon name="archive" />
+            Weekly digest
+          </button>
         </div>
 
         <section className="today-live-card">
@@ -4635,6 +4865,14 @@ function TodayView({
             </div>
           ))}
         </section>
+
+        <CalendarFocusPanel
+          activeFocusTimer={activeFocusTimer}
+          calendar={snapshot?.calendarReconciliation}
+          focusSessions={snapshot?.focusSessions ?? []}
+          onStartFocus={onStartFocus}
+          onStopFocus={onStopFocus}
+        />
       </section>
 
       <section className="today-zone timeline-zone" aria-label="Today timeline">
@@ -4822,16 +5060,24 @@ function TodayView({
       {idlePrompt && (
         <IdleRecoveryPrompt
           gap={idlePrompt}
-          onDismiss={() => setDismissedIdlePromptIds((previous) => new Set(previous).add(idlePrompt.id))}
+          onDismiss={async () => {
+            setDismissedIdlePromptIds((previous) => new Set(previous).add(idlePrompt.id));
+            await onIgnoreIdleBlock(idlePrompt);
+          }}
           onMark={(blockType) => {
             setDismissedIdlePromptIds((previous) => new Set(previous).add(idlePrompt.id));
+            const context = snapshot?.activeWorkContext;
             onOpenWorkContextEditor({
               mode: "time-block",
               blockType,
+              client: context?.client ?? "",
+              project: context?.project ?? "",
               task: blockType === "Meeting" ? "Meeting" : blockType,
+              ticketId: context?.ticketId ?? "",
               billable: blockType === "Meeting" || blockType === "Offline work",
               startMs: idlePrompt.startMs,
               endMs: idlePrompt.endMs,
+              idleBlockId: idlePrompt.idleBlockId ?? null,
               source: "idle-recovery",
             });
           }}
@@ -5016,8 +5262,8 @@ function IdleRecoveryPrompt({
   onDismiss,
   onMark,
 }: {
-  gap: IdleGap & { id: string };
-  onDismiss: () => void;
+  gap: IdleGap & { id: string; idleBlockId?: string | null };
+  onDismiss: () => void | Promise<void>;
   onMark: (blockType: string) => void;
 }) {
   return (
@@ -5031,6 +5277,94 @@ function IdleRecoveryPrompt({
         <button className="button compact" onClick={() => onMark("Break")} type="button">Break</button>
         <button className="button compact" onClick={() => onMark("Offline work")} type="button">Offline work</button>
         <button className="button compact ghost" onClick={onDismiss} type="button">Ignore</button>
+      </div>
+    </section>
+  );
+}
+
+function CalendarFocusPanel({
+  activeFocusTimer,
+  calendar,
+  focusSessions,
+  onStartFocus,
+  onStopFocus,
+}: {
+  activeFocusTimer: ActiveFocusTimer | null;
+  calendar?: BackendCalendarReconciliation;
+  focusSessions: BackendFocusSession[];
+  onStartFocus: () => void;
+  onStopFocus: () => void;
+}) {
+  const planned = calendar?.plannedEvents ?? 0;
+  const matched = calendar?.matchedEvents ?? 0;
+  const missed = calendar?.unmatchedEvents ?? 0;
+  const matchRate = planned > 0 ? Math.round((matched / planned) * 100) : 0;
+  const driftMs = focusSessions.reduce((sum, session) => sum + (session.driftMs ?? 0), 0);
+  const latestFocus = focusSessions[0] ?? null;
+  const missedItems = (calendar?.items ?? []).filter((item) => item.status !== "matched").slice(0, 3);
+
+  return (
+    <section className="today-intelligence-grid" aria-label="Calendar and focus summary">
+      <div className="panel-block compact-intel-panel">
+        <PanelHeader eyebrow="Calendar" title="Planned vs actual" value={planned ? `${matchRate}%` : "No plan"} />
+        <div className="report-settings-list">
+          <div><span>Planned</span><strong>{planned}</strong></div>
+          <div><span>Matched</span><strong>{matched}</strong></div>
+          <div><span>Missed</span><strong>{missed}</strong></div>
+        </div>
+        <div className="range-list">
+          {missedItems.length === 0 ? (
+            <article>
+              <strong>{planned ? "Calendar matches look clean" : "Import or add calendar blocks"}</strong>
+              <span>{planned ? "No missed planned work detected" : "DayTrail will reconcile planned time with captured work"}</span>
+            </article>
+          ) : missedItems.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.status} · {formatDuration(item.actualOverlapMs)}</span>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel-block compact-intel-panel">
+        <PanelHeader eyebrow="Focus" title="Context-aware sessions" value={focusSessions.length ? `${focusSessions.length}` : "Ready"} />
+        <div className="report-settings-list">
+          <div><span>Sessions</span><strong>{focusSessions.length}</strong></div>
+          <div><span>Drift</span><strong>{formatDuration(driftMs)}</strong></div>
+          <div><span>Timer</span><strong>{activeFocusTimer ? "active" : (latestFocus?.status ?? "idle")}</strong></div>
+        </div>
+        <div className="range-list">
+          {activeFocusTimer ? (
+            <article>
+              <strong>{activeFocusTimer.goal}</strong>
+              <span>Started {formatTime(activeFocusTimer.startedAt)} · target {formatDuration(activeFocusTimer.targetMs)}</span>
+            </article>
+          ) : latestFocus ? (
+            <article>
+              <strong>{latestFocus.goal}</strong>
+              <span>{formatDuration(latestFocus.matchedWorkMs)} matched · {formatDuration(latestFocus.driftMs)} drift</span>
+            </article>
+          ) : (
+            <article>
+              <strong>Start a focused block from current context</strong>
+              <span>DayTrail will compare captured work against client/project/task signals.</span>
+            </article>
+          )}
+        </div>
+        <div className="output-actions">
+          {activeFocusTimer ? (
+            <button className="button compact primary" onClick={onStopFocus} type="button">
+              <Icon name="check" />
+              Stop focus
+            </button>
+          ) : (
+            <button className="button compact primary" onClick={onStartFocus} type="button">
+              <Icon name="ritual" />
+              Start 25m focus
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -7679,7 +8013,10 @@ function RestoreView({
 }
 
 function RitualsView({
+  activeRitual,
+  onGenerateDaily,
   onGenerateReport,
+  onGenerateWeekly,
   onOpenExports,
   onRegenerateContext,
   reportMarkdown,
@@ -7687,7 +8024,10 @@ function RitualsView({
   sourceFeed,
   snapshot,
 }: {
+  activeRitual: RitualKey;
+  onGenerateDaily: () => void;
   onGenerateReport: () => void;
+  onGenerateWeekly: () => void;
   onOpenExports: () => void;
   onRegenerateContext: () => void;
   reportMarkdown: string;
@@ -7710,12 +8050,16 @@ function RitualsView({
         <div className="screen-titlebar">
           <div>
             <h2>Reports</h2>
-            <p>Generate a readable daily summary from sessions, apps, AI tools, and review items.</p>
+            <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, calendar matches, focus drift, and review items.</p>
           </div>
           <div className="screen-actions">
-            <button className="button compact primary" onClick={onGenerateReport} type="button">
+            <button className="button compact" onClick={onGenerateDaily} type="button">
               <Icon name="plus" />
-              Generate
+              Daily
+            </button>
+            <button className="button compact primary" onClick={onGenerateWeekly} type="button">
+              <Icon name="archive" />
+              Weekly
             </button>
           </div>
         </div>
@@ -7745,14 +8089,14 @@ function RitualsView({
           </section>
 
           <section className="panel-block report-output-panel">
-            <PanelHeader eyebrow="2. Daily report" title="Daily Work Report" value="Markdown" />
+            <PanelHeader eyebrow={activeRitual === "weekly" ? "2. Weekly digest" : "2. Daily report"} title={activeRitual === "weekly" ? "Weekly Work Review" : "Daily Work Report"} value="Markdown" />
             <pre className="report-preview" aria-label="Generated report markdown">
               {simpleReportMarkdown || "Generate today’s report after DayTrail captures a work session."}
             </pre>
             <div className="output-actions">
-              <button className="button compact primary" onClick={onGenerateReport} type="button">
+              <button aria-label="Generate" className="button compact primary" onClick={onGenerateReport} type="button">
                 <Icon name="ritual" />
-                Generate
+                Generate {activeRitual === "weekly" ? "weekly" : "daily"}
               </button>
               <button
                 className="button compact"
@@ -7782,7 +8126,7 @@ function RitualsView({
       </div>
     );
   }
-  const markdownTitle = "Daily Work Report";
+  const markdownTitle = activeRitual === "weekly" ? "Weekly Work Review" : "Daily Work Report";
   const sourceSummary = sourceFeed.length
     ? sourceFeed.map((item) => `- ${item.label}`).join("\n")
     : "No source inputs captured yet.";
@@ -7801,16 +8145,20 @@ function RitualsView({
       <div className="screen-titlebar">
         <div>
           <h2>Reports</h2>
-          <p>Generate source-backed summaries from captured work, app usage, AI usage, and review items.</p>
+          <p>Generate source-backed daily reports and weekly digests from captured work, calendar matches, focus drift, AI usage, and review items.</p>
         </div>
         <div className="screen-actions">
           <button className="button compact" onClick={onOpenExports} type="button">
             <Icon name="archive" />
             Raw export
           </button>
-          <button className="button compact primary" onClick={onGenerateReport} type="button">
+          <button className="button compact" onClick={onGenerateDaily} type="button">
             <Icon name="plus" />
-            Generate
+            Daily
+          </button>
+          <button className="button compact primary" onClick={onGenerateWeekly} type="button">
+            <Icon name="archive" />
+            Weekly
           </button>
         </div>
       </div>
@@ -8883,6 +9231,14 @@ function CommandOverlay({
       "Open Activity to inspect apps, sites, folders, and activity details.",
     "/report":
       "Generate the daily report from captured activity.",
+    "/weekly":
+      "Generate a weekly digest from the last seven days of local evidence.",
+    "/digest":
+      "Generate a weekly digest from the last seven days of local evidence.",
+    "/replay":
+      "Open Replay to reconstruct the day from sessions, source clues, notes, and AI threads.",
+    "/resume":
+      "Open Replay to resume the last captured work context.",
     "/what-did-i-do":
       "Open Today to review the hour-by-hour timeline and recent work.",
     "/ai-usage":
