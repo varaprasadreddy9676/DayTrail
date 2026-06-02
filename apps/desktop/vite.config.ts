@@ -12,5 +12,9 @@ export default defineConfig({
     globals: true,
     setupFiles: "./tests/setupTests.ts",
     css: true,
+    // Default 5s is tight for Windows CI runners — the full App.tsx render
+    // test routinely crosses that line on cold runs. Give every test 20s.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
