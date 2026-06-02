@@ -533,6 +533,7 @@ Terminal activity
 Clipboard transitions
 Manual notes
 Idle recovery
+Smart Break events
 Focus sessions
 Field visits
 ```
@@ -978,11 +979,14 @@ Unknown
 
 ---
 
-## 5.13 Reply Debt Radar
+## 5.13 Reply Decision Records
 
-The system shall detect emails/messages that likely need user response.
+When an email/message connector, import, or manual source provides thread state,
+the system shall record threads that likely need user response. The shipped UI
+must not imply that DayTrail can infer every pending reply from screenshots or
+generic browser activity alone.
 
-### Detect
+### Connector signals
 
 ```text
 Opened but not replied
@@ -1046,7 +1050,11 @@ Drafts waiting for closure:
 
 ## 5.15 Promise / Commitment Tracker
 
-The system shall detect promises from emails, meetings, notes, AI chats, and manual entries.
+The system shall record promises from manual entries, imported source records,
+meeting actions, notes, and AI outputs. Automatic promise extraction from emails,
+meetings, and chats is only valid when the source connector supplies enough
+evidence; otherwise the product should present the item as a saved commitment,
+not as an inferred promise.
 
 ### Detect language
 
@@ -1340,6 +1348,28 @@ Suppress prompts while tracking is paused
 Suppress prompts for already-classified gaps
 Suppress sleep-sized away gaps
 Persist ignored gaps as Ignored instead of repeatedly prompting
+```
+
+---
+
+## 5.20.1 Smart Breaks
+
+The system shall offer optional, configurable Smart Break reminders for users
+who want blink, posture, and break nudges during sustained computer input.
+
+### Behavior
+
+```text
+Disabled by default
+Enabled from Settings
+Configurable break threshold
+Uses local foreground, idle, and input-activity signals
+Does not capture keystrokes
+Resets when the user is idle or tracking is paused
+Suppresses reminders during calls and presentation-like contexts
+Sends staged blink, posture, and break system notifications
+Does not add a Today-screen card
+Does not block the app or make medical claims
 ```
 
 ---
@@ -2429,7 +2459,7 @@ Work sessions
 Parallel streams
 Context marker on return
 Context-anchored scratchpad
-Reply Debt Radar
+Reply Decision Records
 Promise / Commitment Tracker
 Task Recovery
 Unclosed Loop Detector
@@ -2478,7 +2508,7 @@ Role-specific modes
 
 # 10. Final Functional Requirement Summary
 
-DayTrail shall function as a **personal AI work memory and recovery system** that captures real work signals, groups them into parallel work streams, restores interrupted context, detects missed replies and promises, tracks AI-assisted outputs, records offline/field work, supports planning, and generates clear daily/weekly reports.
+DayTrail shall function as a **personal AI work memory and recovery system** that captures real work signals, groups them into parallel work streams, restores interrupted context, surfaces recorded reply and promise follow-ups, tracks AI-assisted outputs, records offline/field work, supports planning, and generates clear daily/weekly reports.
 
 The product’s highest-value experience should be:
 

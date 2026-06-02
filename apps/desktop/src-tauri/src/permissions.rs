@@ -12,7 +12,7 @@ const AUTOMATION_URL: &str =
 pub fn capture_permission_summary() -> CapturePermissionSummary {
     #[cfg(target_os = "macos")]
     {
-        capture_permission_summary_for_platform("macos", macos_accessibility_trusted(false))
+        capture_permission_summary_for_platform("macos", macos_accessibility_trusted())
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -383,10 +383,10 @@ pub fn open_permission_settings(permission_id: &str) -> Result<CapturePermission
 pub fn request_capture_permission(permission_id: &str) -> Result<CapturePermissionSummary> {
     #[cfg(target_os = "macos")]
     {
-        if permission_id == "accessibility" {
-            let _ = macos_accessibility_trusted(true);
-        }
-
+        // Opening the Settings pane is enough for Accessibility. Calling
+        // AXIsProcessTrustedWithOptions with the prompt flag at the same time
+        // shows a second macOS dialog behind System Settings, forcing users to
+        // click twice during first-run setup.
         open_permission_settings(permission_id)
     }
 
@@ -440,7 +440,7 @@ pub fn trigger_browser_automation_prompt() -> Result<CapturePermissionSummary> {
 
         Ok(capture_permission_summary_for_platform_with_browser_check(
             "macos",
-            macos_accessibility_trusted(false),
+            macos_accessibility_trusted(),
             Some(browser_automation_check_from_probe_results(&results)),
         ))
     }
@@ -484,14 +484,13 @@ fn browser_automation_probe_script(target: BrowserAutomationTarget) -> String {
     }
 }
 
-/// Called at app startup: if AX is not yet trusted, open System Settings
-/// so the user can grant it for the current binary. Safe to call on every launch.
+/// Called at app startup by older flows. Keep this as a non-prompting preflight:
+/// first-run setup owns the explicit Settings button, and showing the system
+/// Accessibility dialog behind Settings creates a confusing double prompt.
 pub fn ensure_accessibility_permission() {
     #[cfg(target_os = "macos")]
     {
-        if !macos_accessibility_trusted(false) {
-            let _ = macos_accessibility_trusted(true);
-        }
+        let _ = macos_accessibility_trusted();
     }
 }
 
@@ -504,10 +503,8 @@ pub fn reset_and_request_accessibility() -> Result<CapturePermissionSummary> {
             .args(["reset", "Accessibility", "ai.daytrail.desktop"])
             .status();
 
-        // Trigger the system prompt / open System Settings Accessibility page.
-        let _ = macos_accessibility_trusted(true);
-
-        // Open the settings pane so the user can toggle the switch on.
+        // Open the settings pane so the user can toggle the switch on. Do not
+        // also trigger the macOS prompt; it can appear behind System Settings.
         let _ = std::process::Command::new("open")
             .arg(ACCESSIBILITY_URL)
             .status();
@@ -522,32 +519,15 @@ pub fn reset_and_request_accessibility() -> Result<CapturePermissionSummary> {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_accessibility_trusted(prompt: bool) -> bool {
-    use core_foundation::{
-        base::TCFType,
-        boolean::CFBoolean,
-        dictionary::{CFDictionary, CFDictionaryRef},
-        string::{CFString, CFStringRef},
-    };
+fn macos_accessibility_trusted() -> bool {
     use core_foundation_sys::base::Boolean;
 
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
-        static kAXTrustedCheckOptionPrompt: CFStringRef;
         fn AXIsProcessTrusted() -> Boolean;
-        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
     }
 
-    unsafe {
-        if !prompt {
-            return AXIsProcessTrusted() != 0;
-        }
-
-        let prompt_key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
-        let prompt_value = CFBoolean::true_value();
-        let options = CFDictionary::from_CFType_pairs(&[(prompt_key, prompt_value)]);
-        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0
-    }
+    unsafe { AXIsProcessTrusted() != 0 }
 }
 
 #[cfg(test)]

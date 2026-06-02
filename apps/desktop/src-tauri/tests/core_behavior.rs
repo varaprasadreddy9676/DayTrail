@@ -170,7 +170,7 @@ fn focus_sessions_measure_drift_from_the_declared_context() {
 }
 
 #[test]
-fn smart_recovery_scores_long_work_and_logged_breaks() {
+fn smart_breaks_score_long_work_and_logged_breaks() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
@@ -189,7 +189,7 @@ fn smart_recovery_scores_long_work_and_logged_breaks() {
             source: "active-window".into(),
             event_type: "active_window".into(),
             app: Some("VS Code".into()),
-            title: Some("Smart Recovery implementation".into()),
+            title: Some("Smart Break implementation".into()),
             url: None,
             workspace_key: Some("DayTrail".into()),
             started_at: Some(start),
@@ -219,7 +219,7 @@ fn smart_recovery_scores_long_work_and_logged_breaks() {
             source: "active-window".into(),
             event_type: "active_window".into(),
             app: Some("VS Code".into()),
-            title: Some("Recovery panel".into()),
+            title: Some("Smart Break settings".into()),
             url: None,
             workspace_key: Some("DayTrail".into()),
             started_at: Some(final_start),
@@ -257,7 +257,7 @@ fn smart_recovery_scores_long_work_and_logged_breaks() {
 }
 
 #[test]
-fn weekly_review_includes_recovery_rhythm() {
+fn weekly_review_includes_smart_breaks() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
@@ -312,9 +312,76 @@ fn weekly_review_includes_recovery_rhythm() {
 
     let review = store.generate_weekly_review().expect("weekly review");
 
-    assert!(review.body_markdown.contains("Recovery rhythm"));
+    assert!(review.body_markdown.contains("Smart Breaks"));
     assert!(review.body_markdown.contains("Longest uninterrupted"));
     assert!(review.body_markdown.contains("1 skipped"));
+}
+
+#[test]
+fn staged_smart_break_prompt_events_are_persisted() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = chrono::Local::now().timestamp_millis();
+
+    store
+        .record_recovery_event(RecoveryEventInput {
+            id: Some("blink-stage".into()),
+            event_type: "blink_prompted".into(),
+            started_at: now,
+            ended_at: None,
+            note: Some("Smart Break reminder".into()),
+            evidence_json: Some(json!({ "kind": "blink" }).to_string()),
+        })
+        .expect("record staged prompt");
+
+    let export = store.export_data().expect("export");
+
+    assert_eq!(export.recovery_events.len(), 1);
+    assert_eq!(export.recovery_events[0].event_type, "blink_prompted");
+    assert_eq!(export.recovery_summary.prompted_count, 1);
+}
+
+#[test]
+fn smart_break_summary_uses_configured_threshold() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    store
+        .update_settings(SettingsPatch {
+            recovery_threshold_minutes: Some(45),
+            ..Default::default()
+        })
+        .expect("settings");
+    let start = chrono::Local::now().timestamp_millis() - 35 * 60_000;
+    let end = start + 35 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("configured-smart-break-threshold".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("Configured Smart Break threshold".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(start),
+            ended_at: Some(end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record source");
+
+    let today = store.today_snapshot().expect("today");
+
+    assert_eq!(
+        today
+            .recovery_summary
+            .next_prompt
+            .as_ref()
+            .map(|prompt| prompt.action.as_str()),
+        Some("ready")
+    );
 }
 
 #[test]
@@ -673,7 +740,9 @@ fn drafts_bulk_tasks_from_pasted_text_without_due_dates() {
     assert_eq!(drafts[0].title, "HER Health LIS Integration");
     assert_eq!(drafts[1].title, "Implementation issues");
     assert_eq!(drafts[2].title, "NOVA Path kind LIS Integration");
-    assert!(drafts.iter().all(|draft| draft.priority.as_deref() == Some("high")));
+    assert!(drafts
+        .iter()
+        .all(|draft| draft.priority.as_deref() == Some("high")));
     assert!(drafts.iter().all(|draft| draft.due_date.is_none()));
     assert!(drafts.iter().all(|draft| draft.due_at.is_none()));
 }
@@ -724,7 +793,10 @@ fn manages_tasks_and_reminders_lifecycle() {
     assert_eq!(updated.title, "Renew production certificate");
     assert_eq!(updated.due_date.as_deref(), Some("2026-06-05"));
     assert_eq!(updated.due_at, None);
-    assert_eq!(updated.notes.as_deref(), Some("Coordinate maintenance window"));
+    assert_eq!(
+        updated.notes.as_deref(),
+        Some("Coordinate maintenance window")
+    );
     assert_eq!(updated.priority.as_deref(), Some("medium"));
     assert_eq!(updated.project_label.as_deref(), Some("Security"));
 
@@ -783,6 +855,8 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(!defaults.show_capture_confidence);
     assert_eq!(defaults.show_ai_details, "summary");
     assert_eq!(defaults.data_retention_days, 0);
+    assert!(!defaults.recovery_enabled);
+    assert_eq!(defaults.recovery_threshold_minutes, 30);
 
     let updated = store
         .update_settings(SettingsPatch {
@@ -792,6 +866,8 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
             show_capture_confidence: Some(true),
             show_ai_details: Some("detailed".into()),
             data_retention_days: Some(90),
+            recovery_enabled: Some(true),
+            recovery_threshold_minutes: Some(45),
             ..SettingsPatch::default()
         })
         .expect("update display settings");
@@ -802,6 +878,8 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(updated.show_capture_confidence);
     assert_eq!(updated.show_ai_details, "detailed");
     assert_eq!(updated.data_retention_days, 90);
+    assert!(updated.recovery_enabled);
+    assert_eq!(updated.recovery_threshold_minutes, 45);
 }
 
 #[test]
@@ -925,6 +1003,8 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
             ai_redact_secrets: Some(true),
             full_clipboard_history: Some(false),
             data_retention_days: Some(30),
+            recovery_enabled: Some(true),
+            recovery_threshold_minutes: Some(60),
             ..SettingsPatch::default()
         })
         .expect("source settings");
@@ -963,6 +1043,8 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
     assert!(imported.ai_redact_secrets);
     assert!(!imported.full_clipboard_history);
     assert_eq!(imported.data_retention_days, 30);
+    assert!(imported.recovery_enabled);
+    assert_eq!(imported.recovery_threshold_minutes, 60);
     assert_eq!(imported.ai_api_key_ref, None);
 }
 
@@ -2598,7 +2680,14 @@ fn sessionizer_splits_long_back_to_back_project_contexts() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");
     let store = WorktraceStore::open(&db_path).expect("open store");
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(12, 0, 0)
+        .expect("valid local noon")
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .expect("local noon timestamp")
+        .timestamp_millis();
 
     for event in [
         SourceEventInput {

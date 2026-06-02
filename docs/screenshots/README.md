@@ -13,10 +13,10 @@ In use:
 - `06-capture-health.png` — Settings → Capture Health (self-monitoring)
 
 Regenerate `01-today.png` before a public release whenever the Today layout
-changes; it should not show removed Calendar/Focus/Recovery main-screen cards.
+changes; it should not show removed Calendar/Focus/Smart Break main-screen cards.
 
 Optional future additions (not yet referenced): `04-timeline.png`,
 `05-reports.png`, `08-weekly-digest.png`, `09-replay-restore.png`,
-and `11-smart-recovery.png`. Capture with demo data only — never publish real
+and `11-smart-breaks-settings.png`. Capture with demo data only — never publish real
 customer/coworker names, emails, calendar attendees, internal hostnames, or
 local paths.

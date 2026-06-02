@@ -20,6 +20,7 @@ use tauri::{Manager, RunEvent};
 
 use crate::{
     active_window::spawn_active_window_watcher,
+    models::Task,
     store::WorktraceStore,
     tray::{setup_tray, show_main_window},
 };
@@ -102,23 +103,36 @@ fn spawn_task_reminder_scheduler(store: WorktraceStore, app: tauri::AppHandle, i
             continue;
         };
         for task in tasks {
-            post_task_reminder(&app, &task.title);
+            post_task_reminder(&app, &task);
             let _ = store.mark_task_reminder_sent(task.id, now);
         }
     });
 }
 
-fn post_task_reminder(app: &tauri::AppHandle, title: &str) {
+fn post_task_reminder(app: &tauri::AppHandle, task: &Task) {
     use tauri_plugin_notification::NotificationExt;
-    let body = if title.trim().is_empty() {
-        "A task reminder is due.".to_string()
+    let title = if task.title.trim().is_empty() {
+        "Reminder due"
     } else {
-        title.trim().to_string()
+        task.title.trim()
     };
+    let context = [task.client_label.as_deref(), task.project_label.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" - ");
+    let body = task
+        .notes
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::trim)
+        .or_else(|| (!context.is_empty()).then_some(context.as_str()))
+        .unwrap_or("Due now - open DayTrail to complete or snooze.");
     let _ = app
         .notification()
         .builder()
-        .title("Task reminder")
+        .title(title)
         .body(body)
         .sound(crate::platform::notification_sound())
         .show();

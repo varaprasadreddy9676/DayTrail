@@ -2,7 +2,7 @@
 name = "daytrail-desktop"
 version = "0.1.7"
 edition = "2021"
-description = "DayTrail desktop shell"
+description = "Local-first DayTrail desktop work memory with optional Smart Break nudges"
 license = "MIT OR Apache-2.0"
 
 [workspace]

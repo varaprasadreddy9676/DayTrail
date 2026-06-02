@@ -62,7 +62,7 @@ describe("DayTrail command center", () => {
     );
   });
 
-  it("renders Smart Recovery and records simple actions", async () => {
+  it("keeps Smart Breaks in settings instead of the sidebar", async () => {
     const user = userEvent.setup();
     const settings = {
       browserBridgeEnabled: true,
@@ -72,8 +72,10 @@ describe("DayTrail command center", () => {
       aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
       aiRedactSecrets: true,
       fullClipboardHistory: false,
+      recoveryEnabled: false,
+      recoveryThresholdMinutes: 30,
     };
-    const invoke = vi.fn(async (command: string) => {
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
           localDate: "2026-06-02",
@@ -129,8 +131,11 @@ describe("DayTrail command center", () => {
         };
       }
 
-      if (["take_recovery_break", "snooze_recovery", "skip_recovery"].includes(command)) {
-        return { id: `event-${command}` };
+      if (command === "update_settings") {
+        return {
+          ...settings,
+          ...(args?.patch as Record<string, unknown>),
+        };
       }
 
       return null;
@@ -147,18 +152,31 @@ describe("DayTrail command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText(/smart recovery/i)).toBeInTheDocument();
-    expect(screen.getByText(/break due/i)).toBeInTheDocument();
-    expect(screen.getByText(/31m current.*2 taken/i)).toBeInTheDocument();
-    expect(screen.getByText(/longest 42m.*1 skipped/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /blink, posture, and break reminders/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /take break/i }));
-    await user.click(screen.getByRole("button", { name: /snooze/i }));
-    await user.click(screen.getByRole("button", { name: /skip/i }));
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /capture health/i }));
+    expect(screen.getByRole("heading", { name: /blink, posture, and break reminders/i })).toBeInTheDocument();
+    expect(screen.getByText(/blink, posture, break/i)).toBeInTheDocument();
+    expect(screen.getByText(/quiet during calls/i)).toBeInTheDocument();
 
-    expect(invoke).toHaveBeenCalledWith("take_recovery_break", { minutes: 3 });
-    expect(invoke).toHaveBeenCalledWith("snooze_recovery", { minutes: 5 });
-    expect(invoke).toHaveBeenCalledWith("skip_recovery", undefined);
+    await user.click(screen.getByRole("checkbox", { name: /enable smart breaks/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_settings", {
+        patch: expect.objectContaining({ recoveryEnabled: true }),
+      }),
+    );
+
+    const breakReminderGroup = screen.getByRole("group", { name: /break reminder/i });
+    expect(within(breakReminderGroup).getByRole("button", { name: /30m/i })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(breakReminderGroup).getByRole("button", { name: /45m/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_settings", {
+        patch: expect.objectContaining({ recoveryThresholdMinutes: 45 }),
+      }),
+    );
+    expect(screen.getByText(/smart breaks updated/i)).toBeInTheDocument();
   });
 
   it("monkey-clicks the primary navigation without extra onboarding burden", async () => {
@@ -180,9 +198,9 @@ describe("DayTrail command center", () => {
     await user.click(screen.getByRole("button", { name: /^ai impact$/i }));
     expect(screen.getByRole("heading", { level: 2, name: /ai impact/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^needs review$/i }));
-    expect(screen.getByRole("heading", { level: 2, name: /needs review/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/source-backed/i).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /^review queue$/i }));
+    expect(screen.getByRole("heading", { level: 2, name: /review queue/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/local record/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /^reports$/i }));
     expect(screen.getAllByRole("heading", { level: 2, name: /reports/i }).length).toBeGreaterThan(0);
@@ -280,6 +298,7 @@ describe("DayTrail command center", () => {
 
     expect(await screen.findByLabelText(/daytrail update available/i)).toBeInTheDocument();
     expect(screen.getByText(/update available: v0.1.3/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remind me in 8h/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /download update/i }));
 
@@ -289,7 +308,7 @@ describe("DayTrail command center", () => {
     expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
   });
 
-  it("does not poll for updates again when the daily startup check already ran", async () => {
+  it("does not poll for updates again before the 8-hour startup check window", async () => {
     installLocalStorageMock();
     window.localStorage.setItem("daytrail:autoUpdate:lastCheckedAt", String(Date.now()));
     const invoke = vi.fn(async (command: string) => {
@@ -347,6 +366,84 @@ describe("DayTrail command center", () => {
 
     expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("check_for_updates", undefined);
+    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
+  });
+
+  it("snoozes an available startup update for 8 hours", async () => {
+    const user = userEvent.setup();
+    installLocalStorageMock();
+    const now = Date.now();
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          calendarEvents: [],
+          calendarReconciliation: {
+            plannedEvents: 0,
+            matchedEvents: 0,
+            unmatchedEvents: 0,
+            plannedDurationMs: 0,
+            actualOverlapMs: 0,
+            items: [],
+          },
+          focusSessions: [],
+          recoverySummary: null,
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+          appUsageSummary: { totalDurationMs: 0, apps: [] },
+          automationCandidates: [],
+          unclosedLoopInbox: [],
+          aiOutputLedger: [],
+          loopRisks: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings: { browserBridgeEnabled: true, excludedDomains: [] },
+          projectContext: null,
+          activeWorkContext: null,
+        };
+      }
+      if (command === "check_for_updates") {
+        return {
+          currentVersion: "0.1.2",
+          latestVersion: "0.1.3",
+          latestBuildAt: "2026-06-02T12:00:00Z",
+          updateAvailable: true,
+          releaseUrl: "https://github.com/example/releases/latest",
+          downloadUrl: null,
+          error: null,
+        };
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByLabelText(/daytrail update available/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /remind me in 8h/i }));
+
+    const snoozedUntil = Number(
+      window.localStorage.getItem("daytrail:autoUpdate:dismissed:0.1.3:2026-06-02T12:00:00Z"),
+    );
+    expect(snoozedUntil).toBeGreaterThanOrEqual(now + 8 * 60 * 60 * 1000 - 5_000);
     expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
   });
 
@@ -450,6 +547,20 @@ describe("DayTrail command center", () => {
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
 
+    await user.type(screen.getByLabelText(/reminder title/i), "Call pharmacy back");
+    await user.click(screen.getByRole("button", { name: /^10m$/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("create_task", {
+        input: expect.objectContaining({
+          title: "Call pharmacy back",
+          priority: "medium",
+          source: "quick-reminder",
+          dueAt: expect.any(Number),
+        }),
+      }),
+    );
+
     await user.click(screen.getByRole("button", { name: /^import tasks$/i }));
     await user.type(
       screen.getByLabelText(/paste tasks/i),
@@ -523,7 +634,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getByRole("button", { name: /^complete$/i }));
     expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
 
-    await user.click(screen.getByRole("button", { name: /^snooze$/i }));
+    await user.selectOptions(screen.getByLabelText(/snooze renew vendor contract/i), "15");
     expect(invoke).toHaveBeenCalledWith("snooze_task", {
       id: 42,
       dueAt: expect.any(Number),
@@ -597,7 +708,7 @@ describe("DayTrail command center", () => {
             promptedCount: 1,
             nextPrompt: {
               action: "ready",
-              reason: "Recovery rhythm is available",
+              reason: "Smart Breaks are ready when sustained input continues",
               streakMs: 0,
               suggestedMinutes: 3,
             },
@@ -682,7 +793,7 @@ describe("DayTrail command center", () => {
     expect(screen.getByRole("heading", { name: /24-hour timeline/i })).toBeInTheDocument();
     expect(await screen.findByText(/showing 1 active hour/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/selected range summary/i)).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/smart recovery/i)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /blink, posture, and break reminders/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/range summary/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /take break/i })).not.toBeInTheDocument();
 
@@ -1011,7 +1122,7 @@ describe("DayTrail command center", () => {
           {
             id: "commitment-1",
             title: "Send sponsor update",
-            source: "Meeting closure",
+            source: "Meeting actions",
           },
         ],
         pendingReplies: [
@@ -1197,7 +1308,7 @@ describe("DayTrail command center", () => {
     render(<App />);
 
     expect((await screen.findAllByText(/sqlite capture block/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/needs review/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/to review/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/ship backend wiring/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /capture paused/i })).toBeInTheDocument();
     expect(screen.getAllByText(/ai detected/i).length).toBeGreaterThan(0);
@@ -1683,7 +1794,7 @@ describe("DayTrail command center", () => {
         return missingPermissions;
       }
 
-      if (command === "request_capture_permission") {
+      if (command === "open_capture_permission_settings") {
         expect(args).toEqual({ permissionId: "accessibility" });
         return grantedPermissions;
       }
@@ -1712,7 +1823,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getAllByRole("button", { name: /open accessibility settings/i })[0]);
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("request_capture_permission", {
+      expect(invoke).toHaveBeenCalledWith("open_capture_permission_settings", {
         permissionId: "accessibility",
       }),
     );

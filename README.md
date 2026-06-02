@@ -18,9 +18,8 @@ It helps you answer questions like:
 - **Can I stay focused right now?** Start a focus block and get a gentle native
   nudge if you drift into WhatsApp, YouTube, Reddit, or other distractions;
   timer sessions are saved so you can review focus drift later.
-- **Am I working sustainably?** Smart Recovery notices long uninterrupted
-  screen runs, nudges you to take a short reset, and rolls taken/skipped breaks
-  into Today and the weekly digest.
+- **Am I working sustainably?** Optional Smart Breaks notice sustained input and
+  send blink, posture, and break reminders without adding another dashboard card.
 - **Can I recover after an interruption?** Replay your day and jump back to the
   app/project/context you were in before the break.
 - **How much of my work runs through AI** (ChatGPT, Claude, Codex, Copilot…) —
@@ -119,8 +118,8 @@ day with DayTrail it's obvious — "I thought I shipped features all morning, bu
 - **Cut the time-sinks** you didn't realize were so big (YouTube, inbox, doom-scrolling).
 - **Catch drift while it is happening** with Focus Mode nudges instead of only
   discovering the damage at the end of the day.
-- **Keep long work runs humane** with Smart Recovery nudges that can be taken,
-  snoozed, or skipped without blocking apps.
+- **Keep long work runs humane** with optional Smart Breaks for blink checks,
+  posture resets, and short pauses after sustained keyboard or mouse input.
 - **Recover context after interruptions** with replay/restore views and
   unclassified away-time prompts.
 - **See enough context to resume quickly** without rebuilding the whole day from
@@ -156,20 +155,21 @@ distractions. Persisted focus sessions can also be compared against the actual
 apps/projects used, so you can see whether a block stayed on track. It reminds
 you; it never blocks apps or sends data anywhere.
 
-### Smart Recovery — short resets before a long run burns the day
+### Smart Breaks — blink, posture, and break reminders without UI noise
 
-Smart Recovery watches the same local foreground-window metadata as the rest of
-DayTrail. After a long uninterrupted screen run, it can send a native nudge and
-show a compact sidebar status. When a break is due, the sidebar exposes simple
-actions: take a short break, snooze, or skip. DayTrail records only local
-recovery events and uses them in weekly review; it does not make medical claims
-or lock your apps.
+Smart Breaks are optional and live in Settings. When enabled, DayTrail watches
+the same local foreground-window and OS idle signals it already uses for capture.
+It only nudges after sustained keyboard or mouse activity, resets when you stop
+interacting for a few minutes, and stays quiet during calls or presentation-like
+contexts. Reminders are staged: a blink check, a posture reset, then a short
+break notification at the interval you choose. It does not make medical claims,
+capture keystrokes, block apps, or add another card to the Today screen.
 
 ### Weekly digest and replay — source-backed updates without reconstructing memory
 
 Daily reports, weekly reviews, and replay/restore flows are generated from the
 same local evidence: work sessions, AI usage, outputs, meetings, idle recovery
-notes, focus sessions, and Smart Recovery rhythm. With an AI provider configured,
+notes, focus sessions, and Smart Break events. With an AI provider configured,
 DayTrail can turn the last seven local days into a first draft for a standup,
 client update, or changelog while keeping the source trail visible.
 
@@ -218,8 +218,8 @@ work without storing private content unnecessarily.
 - Focus Mode and focus timer: active focus label, duration choice, persisted
   focus sessions, off-task time, nudge count, and distraction nudges based on
   local foreground-window metadata.
-- Smart Recovery: local recovery prompts, taken/snoozed/skipped break events,
-  longest uninterrupted screen run, and recovery rhythm score.
+- Smart Breaks: optional local blink, posture, and break notifications based on
+  sustained input and quieted by idle/call/presentation context.
 
 ## What It Avoids
 
@@ -244,8 +244,8 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
 5. You can tag gaps, meetings, or current work context manually.
 6. Focus Mode can nudge you during an active focus block when a distraction
    pattern is detected.
-7. Smart Recovery can nudge after long uninterrupted screen runs and records
-   taken, snoozed, or skipped resets locally.
+7. Optional Smart Breaks can nudge after sustained input with blink, posture,
+   and break reminders configured in Settings.
 8. Daily reports, weekly digests, and replay/restore views summarize the
    captured facts and keep the source trail visible.
 
@@ -257,11 +257,13 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    domains.
 4. Install editor and terminal integrations if you want project, file, folder,
    and command context.
-5. Allow notifications if you want Focus Mode, Smart Recovery, and away-time
+5. Allow notifications if you want Focus Mode, Smart Breaks, and away-time
    nudges.
-6. Add an optional AI provider in Settings if you want generated report drafts
+6. DayTrail checks for available releases on startup and can remind you again
+   after 8 hours when an update is available.
+7. Add an optional AI provider in Settings if you want generated report drafts
    and weekly digests.
-7. Leave DayTrail running from startup so the day is captured automatically.
+8. Leave DayTrail running from startup so the day is captured automatically.
 
 DayTrail is most useful after one full workday of capture.
 

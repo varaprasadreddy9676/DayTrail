@@ -35,7 +35,7 @@
     ],
     "targets": ["app", "dmg", "msi", "nsis"],
     "category": "Productivity",
-    "shortDescription": "DayTrail local workday capture shell",
-    "longDescription": "DayTrail helps you retrace your workday from local app, browser, editor, terminal, and AI usage metadata."
+    "shortDescription": "DayTrail local-first work memory",
+    "longDescription": "DayTrail helps you retrace your workday from local app, browser, editor, terminal, AI usage, timesheet, and optional Smart Break metadata."
   }
 }

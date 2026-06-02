@@ -17,7 +17,6 @@ use serde_json::Value;
 use tauri::Manager;
 
 const SOURCE_EVENT_COALESCE_GAP_MS: i64 = 2 * 60 * 1000;
-const RECOVERY_PROMPT_THRESHOLD_MS: i64 = 25 * 60 * 1000;
 const RECOVERY_STREAK_RESET_GAP_MS: i64 = 3 * 60 * 1000;
 const RECOVERY_SUGGESTED_BREAK_MINUTES: i64 = 3;
 /// How long the capture watcher can go without a heartbeat tick before it is
@@ -1175,7 +1174,11 @@ impl WorktraceStore {
         })
     }
 
-    fn try_draft_tasks_with_ai(&self, text: &str, default_priority: &str) -> Option<Vec<TaskDraft>> {
+    fn try_draft_tasks_with_ai(
+        &self,
+        text: &str,
+        default_priority: &str,
+    ) -> Option<Vec<TaskDraft>> {
         let settings = self.get_settings().ok()?;
         let endpoint = settings.ai_endpoint.trim();
         let model = settings.ai_model.trim();
@@ -1551,6 +1554,13 @@ impl WorktraceStore {
                     settings.data_retention_days =
                         value.parse().unwrap_or(settings.data_retention_days);
                 }
+                "recovery_enabled" => {
+                    settings.recovery_enabled = matches!(value.as_str(), "1" | "true");
+                }
+                "recovery_threshold_minutes" => {
+                    settings.recovery_threshold_minutes =
+                        value.parse().unwrap_or(settings.recovery_threshold_minutes);
+                }
                 _ => {}
             }
         }
@@ -1729,6 +1739,26 @@ impl WorktraceStore {
             );
             Self::upsert_setting_locked(&conn, "data_retention_days", &value.to_string(), &now)?;
         }
+        if let Some(value) = patch.recovery_enabled {
+            Self::upsert_setting_locked(
+                &conn,
+                "recovery_enabled",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.recovery_threshold_minutes {
+            anyhow::ensure!(
+                (15..=120).contains(&value),
+                "recovery threshold must be between 15 and 120 minutes"
+            );
+            Self::upsert_setting_locked(
+                &conn,
+                "recovery_threshold_minutes",
+                &value.to_string(),
+                &now,
+            )?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -1828,6 +1858,8 @@ impl WorktraceStore {
             show_capture_confidence: Some(settings.show_capture_confidence),
             show_ai_details: Some(settings.show_ai_details),
             data_retention_days: Some(settings.data_retention_days),
+            recovery_enabled: Some(settings.recovery_enabled),
+            recovery_threshold_minutes: Some(settings.recovery_threshold_minutes),
         })?;
 
         {
@@ -2127,11 +2159,14 @@ impl WorktraceStore {
             self.list_focus_sessions_between(Some(day_start), Some(day_end), 100)?;
         let recovery_events =
             self.list_recovery_events_between(Some(day_start), Some(day_end), 200)?;
+        let settings = self.get_settings()?;
+        let recovery_threshold_ms = configured_recovery_threshold_ms(&settings);
         let recovery_summary = build_recovery_summary(
             &source_events,
             &recovery_events,
             Some(day_start),
             Some(day_end),
+            recovery_threshold_ms,
         );
         let ai_usage = self.list_ai_usage_between(Some(day_start), Some(day_end), 1_000)?;
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
@@ -2140,7 +2175,6 @@ impl WorktraceStore {
         let loop_risks = self.detect_loop_risks()?;
         let hidden_loop_ids = self.hidden_loop_ids()?;
         let pause_state = self.pause_state()?;
-        let settings = self.get_settings()?;
         let next_best_action = self.next_best_action()?;
         let required_permissions_granted =
             crate::permissions::capture_permission_summary().all_required_granted;
@@ -2728,8 +2762,14 @@ impl WorktraceStore {
             build_calendar_reconciliation(&calendar_events, &work_sessions, &source_events);
         let focus_sessions = self.list_focus_sessions_between(from_ms, to_ms, 2_000)?;
         let recovery_events = self.list_recovery_events_between(from_ms, to_ms, 2_000)?;
-        let recovery_summary =
-            build_recovery_summary(&source_events, &recovery_events, from_ms, to_ms);
+        let settings = self.get_settings()?;
+        let recovery_summary = build_recovery_summary(
+            &source_events,
+            &recovery_events,
+            from_ms,
+            to_ms,
+            configured_recovery_threshold_ms(&settings),
+        );
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
         let app_usage_summary = build_app_usage_summary(&source_events);
         let automation_candidates = build_automation_candidates(&source_events);
@@ -4097,7 +4137,7 @@ impl WorktraceStore {
             matches!(
                 event_type.as_str(),
                 "prompted" | "taken" | "skipped" | "snoozed" | "started"
-            ),
+            ) || event_type.ends_with("_prompted"),
             "unsupported recovery event_type: {event_type}"
         );
         if let Some(end) = input.ended_at {
@@ -5194,7 +5234,7 @@ impl WorktraceStore {
         {
             return Ok(Some(NextBestAction {
                 title: format!("Reply to {subject}"),
-                reason: "Latest message is inbound and no outbound reply is recorded".to_string(),
+                reason: "A source record marked this thread as needing a reply".to_string(),
                 source_type: "email_thread".to_string(),
                 source_id: id,
                 priority: 100,
@@ -6119,7 +6159,7 @@ impl WorktraceStore {
                     source: row
                         .get::<_, Option<String>>(2)?
                         .unwrap_or_else(|| "inbox".into()),
-                    reason: "Latest message is inbound and no outbound reply is recorded".into(),
+                    reason: "A source record marked this thread as needing a reply".into(),
                     priority: 100,
                     evidence_json: row.get(3)?,
                 })
@@ -8219,12 +8259,18 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
     }
 }
 
+fn configured_recovery_threshold_ms(settings: &Settings) -> i64 {
+    settings.recovery_threshold_minutes.clamp(15, 120) * 60_000
+}
+
 fn build_recovery_summary(
     source_events: &[SourceEvent],
     recovery_events: &[RecoveryEvent],
     from_ms: Option<i64>,
     to_ms: Option<i64>,
+    threshold_ms: i64,
 ) -> RecoverySummary {
+    let threshold_ms = threshold_ms.clamp(15 * 60_000, 120 * 60_000);
     let mut work_events = source_events
         .iter()
         .filter(|event| event.duration_ms > 0)
@@ -8294,10 +8340,10 @@ fn build_recovery_summary(
         .count();
     let prompted_count = recovery_events
         .iter()
-        .filter(|event| event.event_type == "prompted")
+        .filter(|event| event.event_type == "prompted" || event.event_type.ends_with("_prompted"))
         .count();
 
-    let overrun_ms = longest_uninterrupted_ms.saturating_sub(RECOVERY_PROMPT_THRESHOLD_MS);
+    let overrun_ms = longest_uninterrupted_ms.saturating_sub(threshold_ms);
     let long_run_penalty = ((overrun_ms / (15 * 60_000)) * 5).min(40);
     let skipped_penalty = (skipped_count as i64 * 10).min(30);
     let snooze_penalty = (snoozed_count as i64 * 3).min(15);
@@ -8305,13 +8351,13 @@ fn build_recovery_summary(
     let score =
         (100 - long_run_penalty - skipped_penalty - snooze_penalty + break_credit).clamp(0, 100);
 
-    let prompt_due = current_streak_ms >= RECOVERY_PROMPT_THRESHOLD_MS;
+    let prompt_due = current_streak_ms >= threshold_ms;
     let next_prompt = (total_screen_ms > 0).then(|| RecoveryPrompt {
         action: if prompt_due { "due" } else { "ready" }.to_string(),
         reason: if prompt_due {
             "Long uninterrupted screen run".to_string()
         } else {
-            "Recovery rhythm is available".to_string()
+            "Smart Breaks are ready when sustained input continues".to_string()
         },
         streak_ms: current_streak_ms,
         suggested_minutes: RECOVERY_SUGGESTED_BREAK_MINUTES,
@@ -8779,7 +8825,7 @@ fn build_unclosed_loop_inbox(
                     .latest_sender
                     .clone()
                     .unwrap_or_else(|| "Latest message needs attention".to_string()),
-                source: "Reply Debt Radar".to_string(),
+                source: "Source-marked reply".to_string(),
                 risk: "high".to_string(),
                 status: "open".to_string(),
                 primary_action: "Send reply or dismiss".to_string(),
@@ -8804,7 +8850,7 @@ fn build_unclosed_loop_inbox(
                     .source
                     .clone()
                     .unwrap_or_else(|| "Open commitment".to_string()),
-                source: "Commitment Tracker".to_string(),
+                source: "Saved commitment".to_string(),
                 risk: if commitment.due_at.is_some() {
                     "high".to_string()
                 } else {
@@ -8871,7 +8917,7 @@ fn build_unclosed_loop_inbox(
                     .summary
                     .clone()
                     .unwrap_or_else(|| "Meeting has captured action items".to_string()),
-                source: "Meeting closure".to_string(),
+                source: "Meeting actions".to_string(),
                 risk: "medium".to_string(),
                 status: "open".to_string(),
                 primary_action: "Confirm notes and actions".to_string(),
@@ -10298,7 +10344,10 @@ fn parse_task_drafts_from_text(text: &str, default_priority: &str) -> Vec<TaskDr
         .collect()
 }
 
-fn parse_task_drafts_from_ai_output(output: &str, default_priority: &str) -> Option<Vec<TaskDraft>> {
+fn parse_task_drafts_from_ai_output(
+    output: &str,
+    default_priority: &str,
+) -> Option<Vec<TaskDraft>> {
     let json_text = extract_json_payload(output);
     let value: Value = serde_json::from_str(&json_text).ok()?;
     let rows = value
@@ -10588,7 +10637,7 @@ fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
         export.unclosed_loop_inbox.len()
     ));
     markdown.push_str(&format!(
-        "- Recovery score {}, longest uninterrupted {}, {} taken, {} skipped.\n",
+        "- Smart Break score {}, longest uninterrupted {}, {} taken, {} skipped.\n",
         export.recovery_summary.score,
         format_duration_words(export.recovery_summary.longest_uninterrupted_ms),
         export.recovery_summary.taken_count,
@@ -10640,9 +10689,9 @@ fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
         }
     }
 
-    markdown.push_str("\n## Recovery rhythm\n");
+    markdown.push_str("\n## Smart Breaks\n");
     if export.recovery_summary.total_screen_ms <= 0 {
-        markdown.push_str("- No screen-work recovery data captured for this week.\n");
+        markdown.push_str("- No Smart Break data captured for this week.\n");
     } else {
         markdown.push_str(&format!(
             "- Score: {} based on {} screen time.\n",

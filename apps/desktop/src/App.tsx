@@ -15,7 +15,7 @@ import { buildTodayView } from "./lib/viewModels/todayViewModel";
 
 // ── Toast system ────────────────────────────────────────────────────────────
 type ToastKind = "success" | "error" | "info" | "warning";
-type Toast = { id: number; kind: ToastKind; title: string; message?: string };
+type Toast = { id: number; kind: ToastKind; title: string; message?: string; dedupeKey?: string };
 let _toastSeq = 0;
 function nextToastId() { return ++_toastSeq; }
 
@@ -128,6 +128,8 @@ type BackendSettings = {
   showCaptureConfidence?: boolean;
   showAiDetails?: "summary" | "detailed";
   dataRetentionDays?: number;
+  recoveryEnabled?: boolean;
+  recoveryThresholdMinutes?: number;
 };
 
 type BackendStorageLocationInfo = {
@@ -284,6 +286,9 @@ type TaskForm = {
   clientLabel: string;
   projectLabel: string;
 };
+
+const QUICK_REMINDER_PRESETS = [5, 10, 15, 25] as const;
+type TaskSnoozePreset = "5" | "15" | "30" | "tomorrow";
 
 type BackendCalendarEvent = {
   id: string;
@@ -752,7 +757,7 @@ const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "apps", label: "Activity", icon: "apps" },
   { id: "ai", label: "AI Impact", icon: "ritual" },
   { id: "restore", label: "Replay", icon: "search" },
-  { id: "review", label: "Needs Review", icon: "archive" },
+  { id: "review", label: "Review Queue", icon: "archive" },
   { id: "rituals", label: "Reports", icon: "ritual" },
   { id: "settings", label: "Settings", icon: "sliders" },
 ];
@@ -2004,7 +2009,7 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       id: `loop-inbox-${item.id}`,
       title: item.title,
       source: item.source || formatLoopLabel(item.category),
-      reason: item.detail || "DayTrail found source evidence that needs a quick decision.",
+      reason: item.detail || "A local source record needs a quick decision.",
       primaryAction: item.primaryAction || "Review",
       evidenceCount: item.evidenceIds.length,
       state: "open" as const,
@@ -2025,15 +2030,15 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       id: `reply-${reply.id}`,
       title: `Reply to ${reply.subject}`,
       source: reply.latestSender ?? "Message",
-      reason: "A captured conversation still looks unanswered.",
+      reason: "A source record marked this thread as needing a reply.",
       primaryAction: "Reply",
       state: "open" as const,
     })),
     ...snapshot.commitments.slice(0, 3).map((commitment) => ({
       id: `commitment-${commitment.id}`,
       title: commitment.title,
-      source: commitment.source ?? "Commitment tracker",
-      reason: "A promise or task is still open.",
+      source: commitment.source ?? "Saved commitment",
+      reason: "A saved promise or follow-up is still open.",
       primaryAction: "Mark done",
       state: "open" as const,
     })),
@@ -2062,7 +2067,7 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       .map((block) => ({
         id: `idle-${block.id}`,
         title: `Classify ${Math.max(1, Math.round(block.durationMs / 60_000))}m idle block`,
-        source: "Idle recovery",
+        source: "Away time",
         reason: "This gap needs a simple label so reports do not guess.",
         primaryAction: "Classify",
         state: "open" as const,
@@ -2223,7 +2228,7 @@ function mapMemoryFacts(snapshot: BackendTodaySnapshot | null): MemoryFact[] {
       rawId: commitment.id,
       date: formatFactDate(commitment.dueAt),
       title: commitment.title,
-      source: commitment.source ?? "Commitment tracker",
+      source: commitment.source ?? "Saved commitment",
     });
   });
 
@@ -2392,6 +2397,37 @@ function taskContextLabel(task: BackendTask) {
   return [task.clientLabel, task.projectLabel].filter(Boolean).join(" · ") || task.source || "Backlog";
 }
 
+function dueFieldsForDate(date: Date) {
+  return {
+    dueAt: date.getTime(),
+    dueDate: formatLocalDateInput(date),
+  };
+}
+
+function dueFieldsForMinutes(minutes: number) {
+  return dueFieldsForDate(new Date(Date.now() + minutes * 60_000));
+}
+
+function snoozeDueFields(preset: TaskSnoozePreset) {
+  if (preset === "tomorrow") {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    return {
+      ...dueFieldsForDate(tomorrow),
+      label: "tomorrow morning",
+    };
+  }
+
+  const minutes = Number(preset);
+  return {
+    ...dueFieldsForMinutes(minutes),
+    label: `${minutes}m`,
+  };
+}
+
+const SMART_BREAK_THRESHOLD_OPTIONS = [25, 30, 45, 60, 90] as const;
+
 function timelineSegmentLabel(label: string, durationMs: number, details?: string[]) {
   const suffix = details && details.length > 0 ? ` · ${details.join(", ")}` : "";
   return `${label} · ${formatDuration(durationMs)}${suffix}`;
@@ -2557,9 +2593,24 @@ export default function App() {
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const [autoUpdateResult, setAutoUpdateResult] = useState<UpdateCheckResult | null>(null);
 
-  const addToast = useCallback((kind: ToastKind, title: string, message?: string) => {
+  const addToast = useCallback((kind: ToastKind, title: string, message?: string, dedupeKey?: string) => {
     const id = nextToastId();
-    setToasts((prev) => [...prev, { id, kind, title, message }]);
+    setToasts((prev) => {
+      if (!dedupeKey) {
+        return [...prev, { id, kind, title, message }];
+      }
+      prev
+        .filter((toast) => toast.dedupeKey === dedupeKey)
+        .forEach((toast) => {
+          const timer = toastTimers.current.get(toast.id);
+          if (timer) clearTimeout(timer);
+          toastTimers.current.delete(toast.id);
+        });
+      return [
+        ...prev.filter((toast) => toast.dedupeKey !== dedupeKey),
+        { id, kind, title, message, dedupeKey },
+      ];
+    });
     const delay = kind === "error" || kind === "warning" ? 6000 : 3000;
     toastTimers.current.set(id, setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -2803,9 +2854,9 @@ export default function App() {
   }
 
   async function openCapturePermissionSettings(permissionId: string) {
-    setPermissionStatus("Requesting permission...");
+    setPermissionStatus("Opening permission settings...");
     const summary = await invokeTauri<BackendCapturePermissionSummary>(
-      "request_capture_permission",
+      "open_capture_permission_settings",
       { permissionId },
     );
 
@@ -3248,16 +3299,25 @@ export default function App() {
   }
 
   async function saveExperienceSettings(patch: Partial<BackendSettings>) {
-    const nextSettings = {
-      ...(todaySnapshot?.settings ?? ({} as BackendSettings)),
-      ...patch,
-    };
+    const toastTitle =
+      "recoveryEnabled" in patch || "recoveryThresholdMinutes" in patch
+        ? "Smart Breaks updated"
+        : "experienceMode" in patch
+          ? "Display mode updated"
+          : "Settings saved";
+    const toastSubject =
+      "recoveryEnabled" in patch || "recoveryThresholdMinutes" in patch
+        ? "Smart Breaks"
+        : "experienceMode" in patch
+          ? "display mode"
+          : "settings";
+    const previousSettings = todaySnapshot?.settings;
+    setTodaySnapshot((previous) =>
+      previous ? { ...previous, settings: { ...previous.settings, ...patch } } : previous,
+    );
 
     if (!hasTauriRuntime()) {
-      setTodaySnapshot((previous) =>
-        previous ? { ...previous, settings: nextSettings } : previous,
-      );
-      addToast("success", "Display mode updated");
+      addToast("success", toastTitle, undefined, "settings-save");
       return;
     }
 
@@ -3265,8 +3325,11 @@ export default function App() {
     const savedSettings = await invokeTauri<BackendSettings>("update_settings", { patch });
 
     if (!savedSettings) {
+      setTodaySnapshot((previous) =>
+        previous && previousSettings ? { ...previous, settings: previousSettings } : previous,
+      );
       setSaveState("Save failed");
-      addToast("error", "Settings not saved", "Could not update display mode.");
+      addToast("error", "Settings not saved", `Could not update ${toastSubject}.`, "settings-save");
       return;
     }
 
@@ -3274,7 +3337,7 @@ export default function App() {
       previous ? { ...previous, settings: { ...previous.settings, ...savedSettings } } : previous,
     );
     setSaveState("Settings saved");
-    addToast("success", "Display mode updated");
+    addToast("success", toastTitle, undefined, "settings-save");
   }
 
   async function saveLaunchAtLogin(value: boolean) {
@@ -3474,6 +3537,38 @@ export default function App() {
     await refreshTodaySnapshot();
   }
 
+  async function createQuickReminder(title: string, minutes: number) {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      addToast("error", "Missing reminder", "Add a short reminder title.");
+      return false;
+    }
+
+    const due = dueFieldsForMinutes(minutes);
+    const result = await invokeTauri<BackendTask>("create_task", {
+      input: {
+        title: cleanTitle,
+        dueDate: due.dueDate,
+        dueAt: due.dueAt,
+        notes: null,
+        priority: "medium",
+        source: "quick-reminder",
+        projectPath: null,
+        clientLabel: null,
+        projectLabel: null,
+      },
+    });
+
+    if (result) {
+      addToast("success", "Reminder set", `${minutes}m from now.`);
+      await refreshTodaySnapshot();
+      return true;
+    }
+
+    addToast("error", "Reminder not set", "Could not create the reminder.");
+    return false;
+  }
+
   async function completeTask(task: BackendTask) {
     const result = await invokeTauri<BackendTask>("complete_task", { id: task.id });
     if (result) {
@@ -3484,16 +3579,14 @@ export default function App() {
     }
   }
 
-  async function snoozeTask(task: BackendTask) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
+  async function snoozeTask(task: BackendTask, preset: TaskSnoozePreset = "tomorrow") {
+    const due = snoozeDueFields(preset);
     const result = await invokeTauri<BackendTask>("snooze_task", {
       id: task.id,
-      dueAt: tomorrow.getTime(),
+      dueAt: due.dueAt,
     });
     if (result) {
-      addToast("success", "Task snoozed", "Reminder moved to tomorrow morning.");
+      addToast("success", "Task snoozed", `Reminder moved to ${due.label}.`);
       await refreshTodaySnapshot();
     } else {
       addToast("error", "Task not snoozed", "Could not update the reminder.");
@@ -3601,36 +3694,6 @@ export default function App() {
     await invokeTauri("clear_active_work_context");
     setTodaySnapshot((prev) => prev ? { ...prev, activeWorkContext: null } : prev);
     addToast("info", "Work context cleared", "Activity will be untagged until you set a new context.");
-  }
-
-  async function handleRecoveryAction(action: "take_break" | "snooze" | "skip") {
-    const command =
-      action === "take_break"
-        ? "take_recovery_break"
-        : action === "snooze"
-          ? "snooze_recovery"
-          : "skip_recovery";
-    const args =
-      action === "take_break"
-        ? { minutes: 3 }
-        : action === "snooze"
-          ? { minutes: 5 }
-          : undefined;
-    const result = await invokeTauri(command, args);
-
-    if (!result) {
-      addToast("error", "Recovery action unavailable", "Could not update Smart Recovery.");
-      return;
-    }
-
-    const title =
-      action === "take_break"
-        ? "Recovery break logged"
-        : action === "snooze"
-          ? "Recovery snoozed"
-          : "Recovery skipped";
-    addToast("success", title);
-    await refreshTodaySnapshot();
   }
 
   async function toggleTracking() {
@@ -4159,10 +4222,6 @@ export default function App() {
         </div>
 
         <FocusMode />
-        <SidebarRecovery
-          onRecoveryAction={handleRecoveryAction}
-          recoverySummary={todaySnapshot?.recoverySummary ?? null}
-        />
 
         <footer className="sidebar-footer">
           <button
@@ -4264,6 +4323,7 @@ export default function App() {
           {activeView === "tasks" && (
             <MyTasksView
               onAddTask={() => openTaskModal("single")}
+              onCreateQuickReminder={createQuickReminder}
               onCompleteTask={completeTask}
               onDeleteTask={deleteTask}
               onEditTask={(task) => openTaskModal("single", task)}
@@ -4731,7 +4791,7 @@ function UpdatePrompt({
           Download update
         </button>
         <button className="button compact ghost" onClick={onDismiss} type="button">
-          Later
+          Remind me in 8h
         </button>
       </div>
     </aside>
@@ -5365,7 +5425,7 @@ function TodayView({
       value: aiActiveDuration > 0 ? formatDuration(aiActiveDuration) : "0m",
       detail: aiToolCount ? `${aiToolCount} tool${aiToolCount === 1 ? "" : "s"}` : "not detected yet",
     },
-    { label: "Needs review", value: attentionCount, detail: "items" },
+    { label: "To review", value: attentionCount, detail: "decisions" },
   ];
 
   return (
@@ -5480,7 +5540,7 @@ function TodayView({
                 <div><span>Tracked</span><strong>{rangeSummary.trackedLabel}</strong></div>
                 <div><span>Sessions</span><strong>{rangeSummary.sessionCount}</strong></div>
                 <div><span>AI outputs</span><strong>{rangeSummary.aiOutputCount}</strong></div>
-                <div><span>Needs review</span><strong>{rangeSummary.needsReviewCount}</strong></div>
+                <div><span>To review</span><strong>{rangeSummary.needsReviewCount}</strong></div>
               </div>
             </div>
             <div className="panel-block range-summary-card">
@@ -5522,7 +5582,7 @@ function TodayView({
       <section className="today-zone needs-action-zone" aria-label="Needs action">
         <div className="zone-heading">
           <div>
-            <span>Needs Action</span>
+            <span>Review Queue</span>
             <h2>{openActions.length ? `${openActions.length} item${openActions.length === 1 ? "" : "s"} to review` : "Nothing urgent"}</h2>
           </div>
         </div>
@@ -5530,15 +5590,15 @@ function TodayView({
         <section className={`needs-action-layout${openActions.length === 0 ? " needs-action-layout-idle" : ""}`}>
           <div className="panel-block attention-panel">
             <PanelHeader
-              eyebrow="Review queue"
-              title="Source-backed decisions"
+              eyebrow="Needs a decision"
+              title="Review queue"
               value={`${openActions.length} open`}
             />
             <div className="action-list">
               {openActions.length === 0 && (
                 <div className="empty-state compact-empty">
-                  <strong>No open actions</strong>
-                  <span>Unanswered messages, promises, idle gaps, and AI drafts appear here with source and reason.</span>
+                <strong>No decisions waiting</strong>
+                <span>Tasks, AI drafts, saved promises, source-marked replies, meeting actions, and away-time gaps appear here only when DayTrail has a local record to review.</span>
                 </div>
               )}
               {openActions.slice(0, 6).map((action) => (
@@ -5854,6 +5914,7 @@ function IdleRecoveryPrompt({
 function MyTasksView({
   tasks,
   onAddTask,
+  onCreateQuickReminder,
   onImportTasks,
   onEditTask,
   onCompleteTask,
@@ -5862,15 +5923,27 @@ function MyTasksView({
 }: {
   tasks: BackendTask[];
   onAddTask: () => void;
+  onCreateQuickReminder: (title: string, minutes: number) => Promise<boolean>;
   onImportTasks: () => void;
   onEditTask: (task: BackendTask) => void;
   onCompleteTask: (task: BackendTask) => void | Promise<void>;
-  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
+  onSnoozeTask: (task: BackendTask, preset?: TaskSnoozePreset) => void | Promise<void>;
   onDeleteTask: (task: BackendTask) => void | Promise<void>;
 }) {
+  const [quickReminderTitle, setQuickReminderTitle] = useState("");
+  const [isSavingQuickReminder, setIsSavingQuickReminder] = useState(false);
   const openTasks = tasks.filter((task) => task.status !== "done");
   const completedTasks = tasks.filter((task) => task.status === "done").slice(0, 20);
   const highCount = openTasks.filter((task) => task.priority === "high").length;
+
+  const submitQuickReminder = async (minutes: number) => {
+    setIsSavingQuickReminder(true);
+    const created = await onCreateQuickReminder(quickReminderTitle, minutes);
+    setIsSavingQuickReminder(false);
+    if (created) {
+      setQuickReminderTitle("");
+    }
+  };
 
   return (
     <div className="view-frame my-tasks-view">
@@ -5889,6 +5962,38 @@ function MyTasksView({
             <Icon name="copy" />
             Import tasks
           </button>
+        </div>
+      </section>
+
+      <section className="quick-reminder-panel" aria-label="Quick reminder">
+        <label>
+          <span>Quick reminder</span>
+          <input
+            aria-label="Reminder title"
+            type="text"
+            placeholder="Task or reminder title"
+            value={quickReminderTitle}
+            onChange={(event) => setQuickReminderTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void submitQuickReminder(10);
+              }
+            }}
+          />
+        </label>
+        <div className="quick-reminder-presets" role="group" aria-label="Reminder time presets">
+          {QUICK_REMINDER_PRESETS.map((minutes) => (
+            <button
+              className="button compact"
+              disabled={isSavingQuickReminder || quickReminderTitle.trim().length === 0}
+              key={minutes}
+              onClick={() => void submitQuickReminder(minutes)}
+              type="button"
+            >
+              {minutes}m
+            </button>
+          ))}
         </div>
       </section>
 
@@ -5949,7 +6054,7 @@ function TaskListSection({
   onCompleteTask: (task: BackendTask) => void | Promise<void>;
   onDeleteTask: (task: BackendTask) => void | Promise<void>;
   onEditTask: (task: BackendTask) => void;
-  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
+  onSnoozeTask: (task: BackendTask, preset?: TaskSnoozePreset) => void | Promise<void>;
   tasks: BackendTask[];
   title: string;
 }) {
@@ -5988,9 +6093,24 @@ function TaskListSection({
                     <button className="button compact" onClick={() => void onCompleteTask(task)} type="button">
                       Complete
                     </button>
-                    <button className="button compact" onClick={() => void onSnoozeTask(task)} type="button">
-                      Snooze
-                    </button>
+                    <select
+                      aria-label={`Snooze ${task.title}`}
+                      className="task-snooze-select"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const preset = event.target.value as TaskSnoozePreset | "";
+                        if (preset) {
+                          void onSnoozeTask(task, preset);
+                          event.currentTarget.value = "";
+                        }
+                      }}
+                    >
+                      <option value="" disabled>Snooze</option>
+                      <option value="5">5m</option>
+                      <option value="15">15m</option>
+                      <option value="30">30m</option>
+                      <option value="tomorrow">Tomorrow</option>
+                    </select>
                   </>
                 )}
                 <button className="button compact danger" onClick={() => void onDeleteTask(task)} type="button">
@@ -7500,8 +7620,8 @@ function LoopsView({
     <div className="view-frame loops-view">
       <div className="screen-titlebar">
         <div>
-          <h2>Needs Review</h2>
-          <p>Review source-backed replies, promises, idle gaps, AI drafts, meeting actions, and agent failures.</p>
+          <h2>Review Queue</h2>
+          <p>Review tasks, AI drafts, saved promises, source-marked replies, meeting actions, and away-time gaps that have a local record behind them.</p>
         </div>
         <div className="screen-actions">
           <button
@@ -7575,13 +7695,13 @@ function LoopsView({
         </button>
       </section>
 
-      <section className="review-layout" aria-label="Needs review queue">
+      <section className="review-layout" aria-label="Review queue">
         <div className="review-list">
           {visibleItems.length === 0 && (
             <div className="panel-block review-empty-panel">
               <div className="empty-state empty-panel">
-                <strong>{normalizedItems.length === 0 ? "Nothing needs review" : "No items match this filter"}</strong>
-                <span>Unanswered messages, promises, idle gaps, drafted AI work, meeting actions, and agent failures appear only when DayTrail has source evidence.</span>
+                <strong>{normalizedItems.length === 0 ? "No decisions waiting" : "No items match this filter"}</strong>
+                <span>Items appear only when local evidence points to something you can complete, snooze, or ignore.</span>
               </div>
             </div>
           )}
@@ -7644,7 +7764,7 @@ function LoopsView({
                 </div>
               </dl>
               <section className="review-reason-card">
-                <strong>Why this needs review</strong>
+                <strong>Why this is in the queue</strong>
                 <span>{selectedItem.detail}</span>
               </section>
               <div className="review-actions">
@@ -7676,7 +7796,7 @@ function LoopsView({
           ) : (
             <div className="empty-state compact-empty">
               <strong>No item selected</strong>
-              <span>Review items will appear here when detected from captured activity.</span>
+              <span>Select an item to see its source, reason, evidence count, and suggested next action.</span>
             </div>
           )}
         </aside>
@@ -7743,7 +7863,7 @@ function AiLedgerView({
     ["Linked to work", impactView.evidenceCounts.linkedToWork, "AI evidence appears inside a work session"],
     ["Generated output", impactView.evidenceCounts.linkedOutputs, "Output ledger rows exist"],
     ["Accepted/completed", impactView.evidenceCounts.completed, "Output status proves completion or acceptance"],
-    ["Needs review", impactView.evidenceCounts.needsReview, "Drafts, blocked items, or failures still need a decision"],
+    ["To review", impactView.evidenceCounts.needsReview, "Drafts, blocked items, or failures still need a decision"],
   ];
   const recentInteractions =
     ledger.length > 0
@@ -7951,7 +8071,7 @@ function SimpleAiImpactView({
 
       {view.lowDataMessage && (
         <section className="panel-block early-capture-panel">
-          <PanelHeader eyebrow="AI tools detected" title="Not enough activity for a useful breakdown" value="Simple Mode" />
+          <PanelHeader eyebrow={view.lowDataEyebrow} title={view.lowDataTitle} value="Simple Mode" />
           <p>{view.lowDataMessage}</p>
         </section>
       )}
@@ -8353,8 +8473,8 @@ function NeedsReviewSimpleView({
     <div className="view-frame loops-view">
       <div className="screen-titlebar">
         <div>
-          <h2>Needs Review</h2>
-          <p>Review unclear sessions, idle gaps, draft timesheet sessions, and unfinished report inputs.</p>
+          <h2>Review Queue</h2>
+          <p>Confirm, snooze, or ignore tasks, AI drafts, saved promises, source-marked replies, meeting actions, and away-time gaps with local evidence.</p>
         </div>
         <div className="screen-actions">
           <span className="mini-meter">{view.items.length} item{view.items.length === 1 ? "" : "s"}</span>
@@ -8363,7 +8483,7 @@ function NeedsReviewSimpleView({
 
       {view.lowDataMessage && (
         <section className="panel-block early-capture-panel">
-          <PanelHeader eyebrow="Needs Review" title="Review queue will grow with more activity" value="Simple Mode" />
+          <PanelHeader eyebrow="Review Queue" title="Decision queue will grow with more activity" value="Simple Mode" />
           <p>{view.lowDataMessage}</p>
         </section>
       )}
@@ -8696,7 +8816,7 @@ function RitualsView({
         <div className="screen-titlebar">
           <div>
             <h2>Reports</h2>
-            <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, focus drift, recovery rhythm, and review items.</p>
+            <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, focus drift, Smart Breaks, and review items.</p>
           </div>
           <div className="screen-actions">
             <button
@@ -8732,7 +8852,7 @@ function RitualsView({
               <div><span>Work sessions</span><strong>{reportView.includedWork.sessions}</strong></div>
               <div><span>Apps used</span><strong>{reportView.includedWork.apps}</strong></div>
               <div><span>AI tools detected</span><strong>{reportView.includedWork.aiTools}</strong></div>
-              <div><span>Needs review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
+              <div><span>To review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
             </div>
             <div className="report-input-actions">
               <button className="button compact" onClick={onRegenerateContext} type="button">
@@ -8801,7 +8921,7 @@ function RitualsView({
       <div className="screen-titlebar">
         <div>
           <h2>Reports</h2>
-          <p>Generate source-backed daily reports and weekly digests from captured work, focus drift, recovery rhythm, AI usage, and review items.</p>
+          <p>Generate source-backed daily reports and weekly digests from captured work, focus drift, Smart Breaks, AI usage, and review items.</p>
         </div>
         <div className="screen-actions">
           <button className="button compact" onClick={onOpenExports} type="button">
@@ -9138,7 +9258,22 @@ function SettingsView({
   const [activeSettings, setActiveSettings] = useState<
     "mode" | "capture" | "ai" | "privacy" | "integrations" | "storage" | "shortcuts" | "advanced" | "about"
   >("mode");
-  const settingsView = useMemo(() => buildSettingsView(settings), [settings]);
+  const [draftSettingsPatch, setDraftSettingsPatch] = useState<Partial<BackendSettings>>({});
+  useEffect(() => {
+    setDraftSettingsPatch({});
+  }, [settings]);
+  const optimisticSettings = useMemo(
+    () => ({
+      ...(settings ?? {}),
+      ...draftSettingsPatch,
+    }),
+    [draftSettingsPatch, settings],
+  );
+  const saveSettingsPatch = async (patch: Partial<BackendSettings>) => {
+    setDraftSettingsPatch((previous) => ({ ...previous, ...patch }));
+    await onSaveExperienceSettings(patch);
+  };
+  const settingsView = useMemo(() => buildSettingsView(optimisticSettings), [optimisticSettings]);
   const settingSections: Array<{
     id: typeof activeSettings;
     label: string;
@@ -9176,7 +9311,9 @@ function SettingsView({
   const checkState = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
     return checkForSource(source)?.status ?? "waiting";
   };
-  const retentionDays = storageInfo?.retentionDays ?? settings?.dataRetentionDays ?? 0;
+  const retentionDays = storageInfo?.retentionDays ?? optimisticSettings.dataRetentionDays ?? 0;
+  const recoveryEnabled = Boolean(optimisticSettings.recoveryEnabled);
+  const recoveryThresholdMinutes = optimisticSettings.recoveryThresholdMinutes ?? 30;
 
   return (
     <div className="view-frame settings-view">
@@ -9238,7 +9375,7 @@ function SettingsView({
                   aria-pressed={settingsView.mode === "simple"}
                   className="settings-action-row"
                   onClick={() =>
-                    onSaveExperienceSettings({
+                    saveSettingsPatch({
                       experienceMode: "simple",
                       showSystemApps: false,
                       showRawEvents: false,
@@ -9265,7 +9402,7 @@ function SettingsView({
                   aria-pressed={settingsView.mode === "pro"}
                   className="settings-action-row"
                   onClick={() =>
-                    onSaveExperienceSettings({
+                    saveSettingsPatch({
                       experienceMode: "pro",
                       showRawEvents: true,
                       showCaptureConfidence: true,
@@ -9296,7 +9433,7 @@ function SettingsView({
                   </span>
                   <input
                     checked={settingsView.showSystemApps}
-                    onChange={(event) => onSaveExperienceSettings({ showSystemApps: event.target.checked })}
+                    onChange={(event) => saveSettingsPatch({ showSystemApps: event.target.checked })}
                     type="checkbox"
                   />
                 </label>
@@ -9307,7 +9444,7 @@ function SettingsView({
                   </span>
                   <input
                     checked={settingsView.showRawEvents}
-                    onChange={(event) => onSaveExperienceSettings({ showRawEvents: event.target.checked })}
+                    onChange={(event) => saveSettingsPatch({ showRawEvents: event.target.checked })}
                     type="checkbox"
                   />
                 </label>
@@ -9318,7 +9455,7 @@ function SettingsView({
                   </span>
                   <input
                     checked={settingsView.showCaptureConfidence}
-                    onChange={(event) => onSaveExperienceSettings({ showCaptureConfidence: event.target.checked })}
+                    onChange={(event) => saveSettingsPatch({ showCaptureConfidence: event.target.checked })}
                     type="checkbox"
                   />
                 </label>
@@ -9355,6 +9492,53 @@ function SettingsView({
                   <div className="status-row" data-state="muted">
                     <span>To stop DayTrail completely</span>
                     <strong>Use Quit DayTrail</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <span>Smart breaks</span>
+                    <h2>Blink, posture, and break reminders</h2>
+                  </div>
+                  <strong>{recoveryEnabled ? `${recoveryThresholdMinutes}m` : "Off"}</strong>
+                </div>
+                <div className="status-matrix">
+                  <label className="settings-toggle-row">
+                    <span>
+                      <strong>Enable Smart Breaks</strong>
+                      <em>Use quiet system notifications when DayTrail sees sustained keyboard or mouse activity.</em>
+                    </span>
+                    <input
+                      checked={recoveryEnabled}
+                      onChange={(event) => saveSettingsPatch({ recoveryEnabled: event.target.checked })}
+                      type="checkbox"
+                    />
+                  </label>
+                  <div className="settings-preset-row">
+                    <span>Break reminder</span>
+                    <div className="settings-preset-buttons" role="group" aria-label="Break reminder">
+                      {SMART_BREAK_THRESHOLD_OPTIONS.map((minutes) => (
+                        <button
+                          aria-pressed={recoveryThresholdMinutes === minutes}
+                          className="settings-preset-button"
+                          disabled={!recoveryEnabled}
+                          key={minutes}
+                          onClick={() => saveSettingsPatch({ recoveryThresholdMinutes: minutes })}
+                          type="button"
+                        >
+                          {minutes}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="status-row" data-state={recoveryEnabled ? "ok" : "muted"}>
+                    <span>Reminder mix</span>
+                    <strong>Blink, posture, break</strong>
+                  </div>
+                  <div className="status-row" data-state={recoveryEnabled ? "ok" : "muted"}>
+                    <span>Context awareness</span>
+                    <strong>Quiet during calls</strong>
                   </div>
                 </div>
               </section>
@@ -10070,7 +10254,8 @@ type UpdateCheckResult = {
 
 const UPDATE_AUTO_CHECK_KEY = "daytrail:autoUpdate:lastCheckedAt";
 const UPDATE_DISMISSED_KEY_PREFIX = "daytrail:autoUpdate:dismissed:";
-const UPDATE_AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_REMIND_LATER_MS = 8 * 60 * 60 * 1000;
+const UPDATE_AUTO_CHECK_INTERVAL_MS = UPDATE_REMIND_LATER_MS;
 
 function updateDownloadUrl(result: UpdateCheckResult) {
   return result.downloadUrl || result.releaseUrl;
@@ -10123,11 +10308,13 @@ function rememberAutoUpdateCheck(now = Date.now()) {
 }
 
 function isAutoUpdateDismissed(result: UpdateCheckResult) {
-  return localStorageGetItem(updateDismissKey(result)) === "1";
+  const raw = localStorageGetItem(updateDismissKey(result));
+  const snoozedUntil = raw ? Number(raw) : 0;
+  return Number.isFinite(snoozedUntil) && snoozedUntil > Date.now();
 }
 
 function dismissAutoUpdate(result: UpdateCheckResult) {
-  localStorageSetItem(updateDismissKey(result), "1");
+  localStorageSetItem(updateDismissKey(result), String(Date.now() + UPDATE_REMIND_LATER_MS));
 }
 
 function UpdateChecker() {
@@ -10165,24 +10352,27 @@ function UpdateChecker() {
   const inlineMessage = (() => {
     if (status !== "result" || !result || dialogOpen) return null;
     if (result.error) return "Couldn't check right now.";
-    if (!result.updateAvailable) return "You're on the latest version.";
+    if (!result.updateAvailable) return "Up to date.";
     return null;
   })();
 
   return (
     <>
       <div className="settings-about-card">
-        <span className="settings-about-version">
-          DayTrail{version ? ` v${version}` : ""}
-        </span>
-        <button
-          className="button compact ghost"
-          type="button"
-          onClick={checkNow}
-          disabled={status === "checking"}
-        >
-          {status === "checking" ? "Checking…" : "Check for updates"}
-        </button>
+        <div className="settings-about-head">
+          <span className="settings-about-version">
+            DayTrail{version ? ` v${version}` : ""}
+          </span>
+          <button
+            className="button compact ghost"
+            type="button"
+            onClick={checkNow}
+            disabled={status === "checking"}
+          >
+            {status === "checking" ? "Checking..." : "Check now"}
+          </button>
+        </div>
+        <span className="settings-about-copy">Update alerts appear on startup. Snooze for 8h.</span>
         {inlineMessage && (
           <div className="settings-about-result">
             <span>{inlineMessage}</span>
@@ -10452,56 +10642,6 @@ function FocusMode() {
         </div>
       )}
     </div>
-  );
-}
-
-function SidebarRecovery({
-  recoverySummary,
-  onRecoveryAction,
-}: {
-  recoverySummary?: BackendRecoverySummary | null;
-  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
-}) {
-  const longestRunMs = recoverySummary?.longestUninterruptedMs ?? 0;
-  const currentStreakMs = recoverySummary?.currentStreakMs ?? 0;
-  const takenCount = recoverySummary?.takenCount ?? 0;
-  const skippedCount = recoverySummary?.skippedCount ?? 0;
-  const promptDue = recoverySummary?.nextPrompt?.action === "due";
-  const status = promptDue ? "Break due" : recoverySummary ? "On rhythm" : "Ready";
-  const detail = recoverySummary
-    ? `${formatDuration(currentStreakMs)} current · ${takenCount} taken`
-    : "Break nudges appear here";
-
-  return (
-    <section
-      aria-label="Smart recovery"
-      className={`sidebar-recovery${promptDue ? " sidebar-recovery-due" : ""}`}
-    >
-      <div className="sidebar-recovery-head">
-        <span>Recovery</span>
-        <strong>{status}</strong>
-        <em>{detail}</em>
-      </div>
-      {promptDue ? (
-        <div className="sidebar-recovery-actions">
-          <button className="button compact primary" onClick={() => onRecoveryAction("take_break")} type="button">
-            <Icon name="check" />
-            Take break
-          </button>
-          <button className="button compact" onClick={() => onRecoveryAction("snooze")} type="button">
-            Snooze
-          </button>
-          <button className="button compact ghost" onClick={() => onRecoveryAction("skip")} type="button">
-            Skip
-          </button>
-        </div>
-      ) : null}
-      {recoverySummary ? (
-        <span className="sidebar-recovery-meta">
-          Longest {formatDuration(longestRunMs)} · {skippedCount} skipped
-        </span>
-      ) : null}
-    </section>
   );
 }
 

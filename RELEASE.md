@@ -21,13 +21,15 @@ Also verify the installed desktop app manually:
   unless a connector or clear planned-block entry point is shipped.
 - Focus Mode nudges still work, and focus timer sessions are persisted with
   goal, target duration, elapsed time, and drift summary.
-- Smart Recovery shows the sidebar recovery status, sends local nudges after a
-  long uninterrupted screen run, and records take/snooze/skip actions when a
-  break is due without blocking apps.
+- Smart Breaks are optional, configurable in Settings, send blink/posture/break
+  system notifications after sustained input, reset on idle, and stay quiet in
+  calls or presentation-like contexts.
 - Away/resume gaps create idle recovery prompts without surfacing sleep-sized
   gaps as classification work.
+- Startup update checks surface available builds automatically and allow an
+  8-hour reminder pause.
 - Daily report, weekly digest, and replay/restore flows generate source-backed
-  output from the expected local date range, including weekly recovery rhythm.
+  output from the expected local date range, including weekly Smart Breaks.
 - Date-range export includes source-backed activity and AI contribution rows.
 
 ## Public README And Screenshots
@@ -39,8 +41,8 @@ Also verify the installed desktop app manually:
 - Focus Mode is documented with its current behavior: local distraction nudges,
   native notifications, duration choices, snooze/end controls, and no app
   blocking. Persisted focus timer/review behavior is also documented.
-- Smart Recovery is documented as local sustainable-focus nudges with due-state
-  take/snooze/skip controls, not as medical or eye-care advice.
+- Smart Breaks are documented as optional local sustainable-work nudges with
+  configurable timing and context awareness, not as medical or eye-care advice.
 - README does not claim user-facing calendar/planned-block support unless that
   workflow is actually shipped.
 - Regenerate `01-today.png` after UI layout changes so the screenshot matches

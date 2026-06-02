@@ -3166,6 +3166,19 @@ kbd {
   white-space: nowrap;
 }
 
+.early-capture-panel {
+  display: grid;
+  gap: 0;
+}
+
+.early-capture-panel > p {
+  margin: 0;
+  padding: 12px 14px 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
 .session-table,
 .decision-table,
 .source-list,
@@ -4510,6 +4523,56 @@ textarea {
   font-size: 13px;
   font-weight: 600;
   line-height: 18px;
+}
+
+.settings-preset-row {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-preset-row > span {
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.settings-preset-buttons {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-preset-button {
+  min-width: 52px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--bg-control);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.settings-preset-button[aria-pressed="true"] {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--accent-main) 58%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-main) 16%, var(--bg-control));
+}
+
+.settings-preset-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .settings-toggle-row {
@@ -6412,8 +6475,37 @@ textarea {
     flex: 1 1 100%;
   }
 
+  .quick-reminder-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quick-reminder-presets {
+    justify-content: flex-start;
+  }
+
+  .settings-preset-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .settings-preset-buttons {
+    width: 100%;
+  }
+
+  .settings-preset-button {
+    flex: 1 1 58px;
+  }
+
   .task-summary-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-about-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-about-card .button {
+    justify-content: center;
   }
 
   .task-row {
@@ -7104,19 +7196,40 @@ textarea {
 
 .settings-about-card {
   margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
-  display: flex;
-  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
+  display: grid;
   gap: 8px;
-  align-items: flex-start;
+  align-items: start;
+}
+
+.settings-about-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 
 .settings-about-version {
+  min-width: 0;
+  color: var(--text-main);
   font-size: 12px;
   font-weight: 600;
-  opacity: 0.75;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.settings-about-copy span {
+  color: var(--text-muted);
+}
+
+.settings-about-copy {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .settings-about-result {
@@ -7305,71 +7418,6 @@ textarea {
   padding: 0;
 }
 
-.sidebar-recovery {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 10px;
-  padding: 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-raised) 58%, transparent);
-}
-
-.sidebar-recovery-due {
-  border-color: color-mix(in srgb, var(--warning) 46%, var(--border-subtle));
-  background: color-mix(in srgb, var(--warning) 13%, transparent);
-}
-
-.sidebar-recovery-head {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.sidebar-recovery-head span {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-recovery-head strong {
-  overflow: hidden;
-  color: var(--text-main);
-  font-size: 12px;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-recovery-head em,
-.sidebar-recovery-meta {
-  overflow: hidden;
-  color: var(--text-soft);
-  font-size: 11px;
-  font-style: normal;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-recovery-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.sidebar-recovery-actions .button:first-child {
-  grid-column: 1 / -1;
-}
-
-.sidebar-recovery-actions .button {
-  min-width: 0;
-}
-
 .my-tasks-view {
   display: grid;
   gap: 16px;
@@ -7420,16 +7468,66 @@ textarea {
   gap: 10px;
 }
 
+.quick-reminder-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 76%, transparent);
+}
+
+.quick-reminder-panel label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quick-reminder-panel span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.quick-reminder-panel input,
+.task-snooze-select {
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+}
+
+.quick-reminder-panel input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.quick-reminder-presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .tasks-section {
   display: grid;
-  gap: 12px;
+  overflow: hidden;
 }
 
 .tasks-section-head {
   display: flex;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
 }
 
 .tasks-section-head h2 {
@@ -7441,6 +7539,7 @@ textarea {
 .tasks-list {
   display: grid;
   gap: 8px;
+  padding: 12px;
 }
 
 .task-row {
@@ -7496,6 +7595,11 @@ textarea {
   gap: 6px;
 }
 
+.task-snooze-select {
+  width: 96px;
+  padding: 0 8px;
+}
+
 .button.danger,
 .task-actions .button.danger,
 .task-actions .icon-button.danger {
@@ -7506,6 +7610,7 @@ textarea {
 .tasks-empty {
   display: grid;
   gap: 4px;
+  margin: 12px;
   padding: 14px;
   border: 1px dashed var(--border-subtle);
   border-radius: 8px;

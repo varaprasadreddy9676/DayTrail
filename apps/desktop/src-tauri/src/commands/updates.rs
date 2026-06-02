@@ -51,9 +51,9 @@ pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// On-demand update check. Asks GitHub for the latest release tag and compares
-/// it to the running version. Runs only when the user clicks "Check for
-/// updates" — DayTrail never phones home on its own.
+/// Update check used by the startup reminder and the manual Settings action.
+/// Asks GitHub for the latest release tag and compares it to the running
+/// version/build timestamp.
 #[tauri::command]
 pub fn check_for_updates() -> Result<UpdateInfo, CommandError> {
     let current = env!("CARGO_PKG_VERSION").to_string();

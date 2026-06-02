@@ -2,7 +2,7 @@
   "name": "daytrail",
   "version": "0.1.0",
   "private": false,
-  "description": "Local-first work memory, AI usage, and timesheet tracking for desktop teams.",
+  "description": "Local-first desktop work memory with AI usage review, timesheet tracking, and optional Smart Break nudges.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {

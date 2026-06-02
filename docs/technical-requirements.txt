@@ -1050,6 +1050,26 @@ sleep-sized gap suppression
 paused-tracking suppression
 ```
 
+### 14.3.1 Smart Break reminder engine
+
+Optional Smart Breaks run locally from the active-window watcher and settings.
+
+Rules:
+
+```text
+disabled by default
+threshold clamped to supported minute range
+staged blink/posture/break notification cadence
+recent HID activity required
+idle or paused tracking resets streak
+unknown foreground context has short grace before reset
+call and presentation contexts suppress reminders
+event types include blink_prompted, posture_prompted, break_prompted, taken, skipped, snoozed
+summary scoring uses the configured threshold
+no keystroke contents captured
+no blocking or full-screen interruption
+```
+
 ## 14.4 Calendar reconciliation engine
 
 Compares imported/local calendar events with observed work sessions.
@@ -1516,7 +1536,7 @@ The app must clearly explain permissions:
 ```text
 Accessibility: active window tracking
 Browser extension: active tab metadata
-Calendar/email: pending replies and meetings
+Calendar/email: optional source records for planned events, pending replies, and meetings
 Notifications: reminders and alerts
 Clipboard: optional context stitching
 Location/mobile: optional field visit detection

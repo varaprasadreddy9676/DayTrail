@@ -85,10 +85,16 @@ export function buildAiImpactView(snapshot: TodaySnapshotLike | null | undefined
   }));
   const mostActive = toolSummaries.slice().sort((left, right) => right.durationMs - left.durationMs)[0];
   const observedCount = events.filter((event) => detectAiToolsFromEvent(event).length > 0).length;
+  const hasAiEvidence = toolSummaries.length > 0 || observedCount > 0 || linkedSessionCount > 0 || ledger.length > 0;
 
   return {
+    hasAiEvidence,
+    lowDataEyebrow: hasAiEvidence ? "AI signals captured" : "AI impact",
+    lowDataTitle: hasAiEvidence ? "More activity needed for a useful breakdown" : "Waiting for AI activity",
     lowDataMessage: isLowData(snapshot)
-      ? "AI tools detected, but not enough activity for a useful breakdown."
+      ? hasAiEvidence
+        ? "AI signals are present, but DayTrail needs more captured work before showing a useful breakdown."
+        : "Use AI tools during captured work and DayTrail will build this view from local signals."
       : undefined,
     toolsDetected: toolSummaries.map((tool) => tool.tool),
     usedMostlyWith: snapshot?.workSessions?.find((session) => session.aiUsed)?.title ?? snapshot?.appUsageSummary?.apps?.[0]?.app ?? "No session yet",

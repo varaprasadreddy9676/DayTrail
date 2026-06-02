@@ -4,6 +4,20 @@ import { buildRangeSummaryView } from "../rangeSummaryViewModel";
 import { buildReviewView } from "../reviewViewModel";
 
 describe("buildAiImpactView", () => {
+  it("does not claim AI tools were detected when no AI evidence exists", () => {
+    const view = buildAiImpactView({
+      sourceEvents: [],
+      workSessions: [],
+      aiUsageSummary: { totalDurationMs: 0, tools: [] },
+      aiOutputLedger: [],
+    });
+
+    expect(view.hasAiEvidence).toBe(false);
+    expect(view.lowDataEyebrow).toBe("AI impact");
+    expect(view.lowDataTitle).toBe("Waiting for AI activity");
+    expect(view.lowDataMessage).toMatch(/use AI tools/i);
+  });
+
   it("uses evidence-based AI impact labels", () => {
     const view = buildAiImpactView({
       sourceEvents: [
@@ -38,6 +52,9 @@ describe("buildAiImpactView", () => {
     });
 
     expect(view.evidenceStatus).toBe("Needs review");
+    expect(view.hasAiEvidence).toBe(true);
+    expect(view.lowDataEyebrow).toBe("AI signals captured");
+    expect(view.lowDataTitle).toBe("More activity needed for a useful breakdown");
     expect(view.evidenceCounts.observed).toBe(1);
     expect(view.evidenceCounts.linkedToWork).toBe(1);
     expect(view.evidenceCounts.linkedOutputs).toBe(1);

@@ -133,6 +133,7 @@ fn watcher_tick(
             *recording = false;
         }
         if !focus_active {
+            crate::recovery::evaluate(app, store, None, false, idle_ms);
             return;
         }
     } else if !*recording {
@@ -145,9 +146,11 @@ fn watcher_tick(
     }
 
     let Some(info) = active_window_fallback() else {
+        crate::recovery::evaluate(app, store, None, false, idle_ms);
         return;
     };
     if is_self_app(&info.app_name) {
+        crate::recovery::evaluate(app, store, Some(&info), false, idle_ms);
         return;
     }
 
@@ -177,9 +180,9 @@ fn watcher_tick(
     // Focus Mode: nudge if the user has drifted onto a distraction. No-op unless
     // a focus session is active.
     crate::focus::evaluate(app, &info);
-    // Smart Recovery: local-only recovery nudges after long uninterrupted screen
+    // Smart Breaks: local-only nudges after long uninterrupted screen
     // work. No-op while paused or idle.
-    crate::recovery::evaluate(app, store, &info, can_record);
+    crate::recovery::evaluate(app, store, Some(&info), can_record, idle_ms);
 }
 
 fn duration_to_ms(duration: Duration) -> u64 {
