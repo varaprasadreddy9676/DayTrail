@@ -7,8 +7,8 @@ use worktrace_ai_desktop::{
     models::{
         AgentRunInput, BrowserBridgeEvent, CalendarEventInput, CommitmentInput, EmailThreadInput,
         ExportRangeInput, FieldVisitInput, FocusSessionInput, IdleBlockInput, MeetingInput,
-        ScratchpadNoteInput, SettingsPatch, SourceEventInput, StateSnapshotInput, TaskInput,
-        TaskStatus, TerminalBridgeMetadata, WorkOutputInput,
+        RecoveryEventInput, ScratchpadNoteInput, SettingsPatch, SourceEventInput,
+        StateSnapshotInput, TaskInput, TaskStatus, TerminalBridgeMetadata, WorkOutputInput,
     },
     native_messaging,
     platform::KeychainAdapter,
@@ -163,7 +163,201 @@ fn focus_sessions_measure_drift_from_the_declared_context() {
     assert_eq!(focus.actual_duration_ms, 30 * 60_000);
     assert_eq!(focus.matched_work_ms, 20 * 60_000);
     assert_eq!(focus.drift_ms, 10 * 60_000);
-    assert!(focus.drift_events.iter().any(|event| event.contains("YouTube")));
+    assert!(focus
+        .drift_events
+        .iter()
+        .any(|event| event.contains("YouTube")));
+}
+
+#[test]
+fn smart_recovery_scores_long_work_and_logged_breaks() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 90 * 60_000;
+    let first_end = start + 32 * 60_000;
+    let second_start = first_end;
+    let second_end = second_start + 24 * 60_000;
+    let break_start = second_end;
+    let break_end = break_start + 4 * 60_000;
+    let final_start = break_end;
+    let final_end = final_start + 18 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("recovery-code".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("Smart Recovery implementation".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(start),
+            ended_at: Some(first_end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record code");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("recovery-browser".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("Chrome".into()),
+            title: Some("Rust docs".into()),
+            url: Some("https://doc.rust-lang.org/std/time/".into()),
+            workspace_key: Some("doc.rust-lang.org".into()),
+            started_at: Some(second_start),
+            ended_at: Some(second_end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record browser");
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("recovery-code-after-break".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("Recovery panel".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(final_start),
+            ended_at: Some(final_end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record final code");
+    store
+        .record_recovery_event(RecoveryEventInput {
+            id: Some("recovery-break-1".into()),
+            event_type: "taken".into(),
+            started_at: break_start,
+            ended_at: Some(break_end),
+            note: Some("Looked away and stretched".into()),
+            evidence_json: None,
+        })
+        .expect("record recovery");
+
+    let today = store.today_snapshot().expect("today");
+
+    assert_eq!(today.recovery_summary.taken_count, 1);
+    assert_eq!(today.recovery_summary.skipped_count, 0);
+    assert_eq!(today.recovery_summary.longest_uninterrupted_ms, 56 * 60_000);
+    assert!(today.recovery_summary.score >= 70);
+    assert!(today.recovery_summary.score <= 100);
+    assert_eq!(
+        today
+            .recovery_summary
+            .next_prompt
+            .as_ref()
+            .map(|prompt| prompt.action.as_str()),
+        Some("ready")
+    );
+}
+
+#[test]
+fn weekly_review_includes_recovery_rhythm() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 2 * 60 * 60_000;
+    let end = start + 65 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("weekly-recovery-run".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("Long implementation block".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(start),
+            ended_at: Some(end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record source");
+    store
+        .record_recovery_event(RecoveryEventInput {
+            id: Some("weekly-recovery-skip".into()),
+            event_type: "skipped".into(),
+            started_at: end,
+            ended_at: None,
+            note: Some("Shipping build".into()),
+            evidence_json: None,
+        })
+        .expect("record skip");
+
+    let export = store
+        .export_data_range(ExportRangeInput {
+            from_date: Some(
+                chrono::Local::now()
+                    .date_naive()
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+            to_date: Some(
+                chrono::Local::now()
+                    .date_naive()
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+        })
+        .expect("export");
+    assert_eq!(export.recovery_summary.skipped_count, 1);
+    assert_eq!(export.recovery_events.len(), 1);
+    assert_eq!(export.recovery_events[0].id, "weekly-recovery-skip");
+
+    let review = store.generate_weekly_review().expect("weekly review");
+
+    assert!(review.body_markdown.contains("Recovery rhythm"));
+    assert!(review.body_markdown.contains("Longest uninterrupted"));
+    assert!(review.body_markdown.contains("1 skipped"));
+}
+
+#[test]
+fn recovery_breaks_split_overlapping_active_window_spans() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let start = chrono::Local::now().timestamp_millis() - 90 * 60_000;
+    let end = start + 60 * 60_000;
+    let break_start = start + 30 * 60_000;
+    let break_end = break_start + 5 * 60_000;
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("spanning-recovery-run".into()),
+            source: "active-window".into(),
+            event_type: "active_window".into(),
+            app: Some("VS Code".into()),
+            title: Some("One long captured span".into()),
+            url: None,
+            workspace_key: Some("DayTrail".into()),
+            started_at: Some(start),
+            ended_at: Some(end),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("record source");
+    store
+        .record_recovery_event(RecoveryEventInput {
+            id: Some("overlap-break".into()),
+            event_type: "taken".into(),
+            started_at: break_start,
+            ended_at: Some(break_end),
+            note: Some("Actual break inside a coalesced active-window span".into()),
+            evidence_json: None,
+        })
+        .expect("record break");
+
+    let today = store.today_snapshot().expect("today");
+
+    assert_eq!(today.recovery_summary.total_screen_ms, 55 * 60_000);
+    assert_eq!(today.recovery_summary.longest_uninterrupted_ms, 30 * 60_000);
+    assert_eq!(today.recovery_summary.taken_count, 1);
 }
 
 #[test]
@@ -195,7 +389,9 @@ fn weekly_review_uses_last_seven_days_not_only_today() {
     let review = store.generate_weekly_review().expect("weekly review");
 
     assert_eq!(review.report_type, "weekly_review");
-    assert!(review.body_markdown.contains("Refactored calendar reconciliation"));
+    assert!(review
+        .body_markdown
+        .contains("Refactored calendar reconciliation"));
     assert!(review.body_markdown.contains("AI weekly auto-draft"));
 }
 
@@ -214,7 +410,11 @@ fn records_unclassified_idle_gap_candidate_for_return_prompt() {
 
     assert!(!recorded.classified);
     assert!(recorded.category.is_none());
-    assert!(recorded.evidence_json.as_deref().unwrap_or("").contains("resume"));
+    assert!(recorded
+        .evidence_json
+        .as_deref()
+        .unwrap_or("")
+        .contains("resume"));
 
     let again = store
         .record_idle_gap_candidate("resume", start, end)
@@ -361,7 +561,10 @@ fn stores_tasks_notes_settings_and_exports_them() {
         })
         .expect("create task");
     assert_eq!(task.status, TaskStatus::Open);
-    assert_eq!(task.notes.as_deref(), Some("Include blockers and follow-ups"));
+    assert_eq!(
+        task.notes.as_deref(),
+        Some("Include blockers and follow-ups")
+    );
     assert_eq!(task.priority.as_deref(), Some("high"));
     assert_eq!(task.due_at, Some(1_716_454_800_000));
 
@@ -435,7 +638,10 @@ fn stores_tasks_notes_settings_and_exports_them() {
 
     let export = store.export_data().expect("export");
     assert_eq!(export.tasks.len(), 1);
-    assert_eq!(export.tasks[0].notes.as_deref(), Some("Include blockers and follow-ups"));
+    assert_eq!(
+        export.tasks[0].notes.as_deref(),
+        Some("Include blockers and follow-ups")
+    );
     assert_eq!(export.quick_notes[0].id, note.id);
     assert_eq!(export.commitments[0].id, "commitment-1");
     assert_eq!(export.pending_replies[0].id, "mail-thread-1");
@@ -490,16 +696,17 @@ fn manages_tasks_and_reminders_lifecycle() {
         .expect("due reminders after mark")
         .is_empty());
 
-    let snoozed = store
-        .snooze_task(task.id, 3_600_000)
-        .expect("snooze task");
+    let snoozed = store.snooze_task(task.id, 3_600_000).expect("snooze task");
     assert_eq!(snoozed.status, TaskStatus::Open);
     assert_eq!(snoozed.due_at, Some(3_600_000));
     assert!(snoozed.reminder_sent_at.is_none());
 
     let completed = store.complete_task(task.id).expect("complete task");
     assert_eq!(completed.status, TaskStatus::Done);
-    assert!(store.list_tasks(Some(TaskStatus::Open)).expect("open tasks").is_empty());
+    assert!(store
+        .list_tasks(Some(TaskStatus::Open))
+        .expect("open tasks")
+        .is_empty());
 
     let deleted = store.delete_task(task.id).expect("delete task");
     assert_eq!(deleted.deleted_rows, 1);
@@ -882,6 +1089,7 @@ fn migrates_core_fact_tables_from_technical_requirements() {
         "meetings",
         "field_visits",
         "idle_blocks",
+        "recovery_events",
         "ai_usage",
         "outputs",
         "decisions",
@@ -1295,6 +1503,16 @@ fn privacy_settings_block_excluded_capture_sources() {
             incognito: Some(false),
         })
         .expect("excluded domain should be ignored");
+    store
+        .record_active_window_context(
+            "Google Chrome",
+            Some("ChatGPT private thread"),
+            Some("https://chatgpt.com/c/active-window?token=secret"),
+            Some("chatgpt.com"),
+            None,
+            Some(Duration::from_secs(2)),
+        )
+        .expect("excluded active-window domain should be ignored");
 
     let conn = Connection::open(&db_path).expect("open database");
     let activity_count: i64 = conn
@@ -3106,7 +3324,10 @@ fn today_snapshot_shows_a_new_days_capture_and_excludes_prior_days() {
     let today = store.today_snapshot().expect("today snapshot");
 
     assert!(
-        today.source_events.iter().any(|event| event.id == "today-event"),
+        today
+            .source_events
+            .iter()
+            .any(|event| event.id == "today-event"),
         "a capture stamped today must appear in the new-day snapshot"
     );
     assert!(
@@ -3118,6 +3339,9 @@ fn today_snapshot_shows_a_new_days_capture_and_excludes_prior_days() {
     );
     assert_eq!(
         today.local_date,
-        chrono::Local::now().date_naive().format("%Y-%m-%d").to_string()
+        chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string()
     );
 }

@@ -18,6 +18,9 @@ It helps you answer questions like:
 - **Can I stay focused right now?** Start a focus block and get a gentle native
   nudge if you drift into WhatsApp, YouTube, Reddit, or other distractions;
   timer sessions are saved so you can review focus drift later.
+- **Am I working sustainably?** Smart Recovery notices long uninterrupted
+  screen runs, nudges you to take a short reset, and rolls taken/skipped breaks
+  into Today and the weekly digest.
 - **Can I recover after an interruption?** Replay your day and jump back to the
   app/project/context you were in before the break.
 - **How much of my work runs through AI** (ChatGPT, Claude, Codex, Copilot…) —
@@ -116,6 +119,8 @@ day with DayTrail it's obvious — "I thought I shipped features all morning, bu
 - **Cut the time-sinks** you didn't realize were so big (YouTube, inbox, doom-scrolling).
 - **Catch drift while it is happening** with Focus Mode nudges instead of only
   discovering the damage at the end of the day.
+- **Keep long work runs humane** with Smart Recovery nudges that can be taken,
+  snoozed, or skipped without blocking apps.
 - **Recover context after interruptions** with replay/restore views and
   unclassified away-time prompts.
 - **Compare planned vs actual work** when calendar events are supplied by a
@@ -138,8 +143,8 @@ local memory of your own work** that only you can see.
 
 One glance answers "what did I do today?": what you're on right now (with the real
 document/chat title, not just the app name), time tracked, active apps, AI time,
-calendar/focus reconciliation, and a 24-hour timeline you can drill into hour by
-hour.
+calendar/focus/recovery intelligence, and a 24-hour timeline you can drill into
+hour by hour.
 
 ### Focus Mode — a gentle nudge before a distraction becomes an hour
 
@@ -152,13 +157,23 @@ distractions. Persisted focus sessions can also be compared against the actual
 apps/projects used, so you can see whether a block stayed on track. It reminds
 you; it never blocks apps or sends data anywhere.
 
+### Smart Recovery — short resets before a long run burns the day
+
+Smart Recovery watches the same local foreground-window metadata as the rest of
+DayTrail. After a long uninterrupted screen run, it can send a native nudge and
+show a compact Today card with recovery score, longest run, taken breaks, and
+skips. Actions stay simple: take a short break, snooze, or skip. DayTrail records
+only local recovery events and uses them in weekly review; it does not make
+medical claims or lock your apps.
+
 ### Weekly digest and replay — source-backed updates without reconstructing memory
 
 Daily reports, weekly reviews, and replay/restore flows are generated from the
 same local evidence: work sessions, AI usage, outputs, meetings, idle recovery
-notes, focus sessions, and imported calendar events. With an AI provider
-configured, DayTrail can turn the last seven local days into a first draft for a
-standup, client update, or changelog while keeping the source trail visible.
+notes, focus sessions, Smart Recovery rhythm, and imported calendar events. With
+an AI provider configured, DayTrail can turn the last seven local days into a
+first draft for a standup, client update, or changelog while keeping the source
+trail visible.
 
 ### AI Impact — how much of your work actually flows through AI
 
@@ -207,6 +222,8 @@ work without storing private content unnecessarily.
 - Focus Mode and focus timer: active focus label, duration choice, persisted
   focus sessions, off-task time, nudge count, and distraction nudges based on
   local foreground-window metadata.
+- Smart Recovery: local recovery prompts, taken/snoozed/skipped break events,
+  longest uninterrupted screen run, and recovery rhythm score.
 
 ## What It Avoids
 
@@ -231,7 +248,9 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
 5. You can tag gaps, meetings, or current work context manually.
 6. Focus Mode can nudge you during an active focus block when a distraction
    pattern is detected.
-7. Daily reports, weekly digests, and replay/restore views summarize the
+7. Smart Recovery can nudge after long uninterrupted screen runs and records
+   taken, snoozed, or skipped resets locally.
+8. Daily reports, weekly digests, and replay/restore views summarize the
    captured facts and keep the source trail visible.
 
 ## Setup For A Real Trial
@@ -242,7 +261,8 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    domains.
 4. Install editor and terminal integrations if you want project, file, folder,
    and command context.
-5. Allow notifications if you want Focus Mode and away-time nudges.
+5. Allow notifications if you want Focus Mode, Smart Recovery, and away-time
+   nudges.
 6. Add calendar context through a local integration/import if you want planned
    vs actual reconciliation.
 7. Add an optional AI provider in Settings if you want generated report drafts

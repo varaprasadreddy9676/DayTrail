@@ -9,6 +9,7 @@ pub mod native_messaging;
 pub mod permissions;
 pub mod platform;
 pub mod project_detection;
+pub mod recovery;
 pub mod store;
 pub mod store_materialization;
 pub mod tray;
@@ -40,7 +41,11 @@ pub fn run() {
             ensure_notification_permission(app.handle());
             app.manage(store.clone());
             setup_tray(app, store.clone())?;
-            spawn_active_window_watcher(store.clone(), app.handle().clone(), Duration::from_secs(2));
+            spawn_active_window_watcher(
+                store.clone(),
+                app.handle().clone(),
+                Duration::from_secs(2),
+            );
             spawn_task_reminder_scheduler(
                 store.clone(),
                 app.handle().clone(),
@@ -89,11 +94,7 @@ fn ensure_notification_permission(app: &tauri::AppHandle) {
     }
 }
 
-fn spawn_task_reminder_scheduler(
-    store: WorktraceStore,
-    app: tauri::AppHandle,
-    interval: Duration,
-) {
+fn spawn_task_reminder_scheduler(store: WorktraceStore, app: tauri::AppHandle, interval: Duration) {
     std::thread::spawn(move || loop {
         std::thread::sleep(interval);
         let now = chrono::Utc::now().timestamp_millis();
@@ -144,7 +145,9 @@ fn install_panic_logger() {
             .name()
             .unwrap_or("unnamed")
             .to_string();
-        write_crash_log(&format!("thread '{thread}' panicked at {location}: {payload}"));
+        write_crash_log(&format!(
+            "thread '{thread}' panicked at {location}: {payload}"
+        ));
         default_hook(info);
     }));
 }
@@ -178,8 +181,9 @@ fn write_crash_log(message: &str) {
 fn spawn_retention_scheduler(store: WorktraceStore, interval: Duration) {
     std::thread::spawn(move || loop {
         std::thread::sleep(interval);
-        let outcome =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| store.apply_retention_policy()));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            store.apply_retention_policy()
+        }));
         match outcome {
             Ok(Ok(summary)) => {
                 if summary.deleted_rows > 0 {

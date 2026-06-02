@@ -6030,12 +6030,22 @@ textarea {
 @media (max-width: 760px) {
   html,
   body {
+    width: 100%;
+    max-width: 100vw;
     overflow: auto;
+    overflow-x: hidden;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100vw;
     overflow-x: hidden;
   }
 
   .app-shell {
     grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100vw;
     height: auto;
     min-height: 100vh;
     overflow: visible;
@@ -6045,6 +6055,8 @@ textarea {
     position: sticky;
     top: 0;
     z-index: 5;
+    width: 100%;
+    max-width: 100vw;
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
   }
@@ -6080,6 +6092,8 @@ textarea {
 
   .main-canvas,
   .content-pane {
+    width: 100%;
+    min-width: 0;
     max-width: 100vw;
     overflow: visible;
   }
@@ -6102,11 +6116,42 @@ textarea {
   .global-range-toolbar {
     align-items: stretch;
     flex-direction: column;
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .global-range-toolbar .custom-range-row,
   .global-range-status {
     margin-left: 0;
+  }
+
+  .range-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .range-chip {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .custom-range-row {
+    display: grid;
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .custom-range-row label,
+  .custom-range-row input {
+    min-width: 0;
+    width: 100%;
   }
 
   .command-trigger {
@@ -6129,7 +6174,50 @@ textarea {
   }
 
   .today-stat-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .today-zone,
+  .today-intelligence-grid,
+  .compact-intel-panel,
+  .tasks-reminder-panel {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .compact-intel-panel .output-actions,
+  .recovery-actions {
+    justify-content: stretch;
+  }
+
+  .compact-intel-panel .output-actions .button,
+  .recovery-actions .button {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .tasks-reminder-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .tasks-reminder-actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .tasks-reminder-actions .button {
+    flex: 1 1 100%;
+  }
+
+  .task-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .task-actions {
+    justify-content: flex-start;
   }
 
   .range-summary-grid,
@@ -6235,8 +6323,15 @@ textarea {
   }
 
   .view-frame {
+    width: 100%;
+    min-width: 0;
     max-width: 100vw;
     overflow: auto;
+  }
+
+  .today-view {
+    width: 100%;
+    min-width: 0;
   }
 
   .table-row {
@@ -6852,7 +6947,7 @@ textarea {
 
 .today-intelligence-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -6890,6 +6985,14 @@ textarea {
 
 .compact-intel-panel .range-list strong {
   line-height: 16px;
+}
+
+.recovery-actions {
+  flex-wrap: wrap;
+}
+
+.recovery-actions .button {
+  min-width: 0;
 }
 
 .compact-intel-panel .range-list span {
@@ -7012,9 +7115,23 @@ textarea {
   font-size: 13px;
 }
 
+@media (max-width: 1120px) {
+  .today-intelligence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recovery-panel {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 860px) {
   .today-intelligence-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recovery-panel {
+    grid-column: auto;
   }
 }
 

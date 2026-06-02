@@ -49,6 +49,106 @@ describe("DayTrail command center", () => {
     );
   });
 
+  it("renders Smart Recovery and records simple actions", async () => {
+    const user = userEvent.setup();
+    const settings = {
+      browserBridgeEnabled: true,
+      excludedDomains: [],
+      aiProvider: "Ollama Local",
+      aiModel: "llama3.1",
+      aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      aiRedactSecrets: true,
+      fullClipboardHistory: false,
+    };
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          calendarEvents: [],
+          calendarReconciliation: {
+            plannedEvents: 0,
+            matchedEvents: 0,
+            unmatchedEvents: 0,
+            plannedDurationMs: 0,
+            actualOverlapMs: 0,
+            items: [],
+          },
+          focusSessions: [],
+          recoverySummary: {
+            score: 82,
+            totalScreenMs: 3_600_000,
+            longestUninterruptedMs: 42 * 60_000,
+            currentStreakMs: 31 * 60_000,
+            takenCount: 2,
+            skippedCount: 1,
+            snoozedCount: 1,
+            promptedCount: 3,
+            nextPrompt: {
+              action: "due",
+              reason: "Long uninterrupted screen run",
+              streakMs: 31 * 60_000,
+              suggestedMinutes: 3,
+            },
+            recentEvents: [],
+          },
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+          appUsageSummary: { totalDurationMs: 0, apps: [] },
+          automationCandidates: [],
+          unclosedLoopInbox: [],
+          aiOutputLedger: [],
+          loopRisks: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings,
+          projectContext: null,
+          activeWorkContext: null,
+        };
+      }
+
+      if (["take_recovery_break", "snooze_recovery", "skip_recovery"].includes(command)) {
+        return { id: `event-${command}` };
+      }
+
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /recovery rhythm/i })).toBeInTheDocument();
+    expect(screen.getByText(/82/)).toBeInTheDocument();
+    expect(screen.getAllByText(/42m/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/2 taken/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 skipped/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /take break/i }));
+    await user.click(screen.getByRole("button", { name: /snooze/i }));
+    await user.click(screen.getByRole("button", { name: /skip/i }));
+
+    expect(invoke).toHaveBeenCalledWith("take_recovery_break", { minutes: 3 });
+    expect(invoke).toHaveBeenCalledWith("snooze_recovery", { minutes: 5 });
+    expect(invoke).toHaveBeenCalledWith("skip_recovery", undefined);
+  });
+
   it("monkey-clicks the primary navigation without extra onboarding burden", async () => {
     const user = userEvent.setup();
 
@@ -223,6 +323,34 @@ describe("DayTrail command center", () => {
           toDate: range.toDate,
           timesheetRows: [],
           aiContributionRows: [],
+          calendarEvents: [],
+          calendarReconciliation: {
+            plannedEvents: 0,
+            matchedEvents: 0,
+            unmatchedEvents: 0,
+            plannedDurationMs: 0,
+            actualOverlapMs: 0,
+            items: [],
+          },
+          focusSessions: [],
+          recoverySummary: {
+            score: 76,
+            totalScreenMs: endedAt - startedAt,
+            longestUninterruptedMs: endedAt - startedAt,
+            currentStreakMs: 0,
+            takenCount: 1,
+            skippedCount: 0,
+            snoozedCount: 0,
+            promptedCount: 1,
+            nextPrompt: {
+              action: "ready",
+              reason: "Recovery rhythm is available",
+              streakMs: 0,
+              suggestedMinutes: 3,
+            },
+            recentEvents: [],
+          },
+          recoveryEvents: [],
           sourceEvents: [
             {
               id: "single-day-vscode",
@@ -299,6 +427,9 @@ describe("DayTrail command center", () => {
     expect(screen.getByRole("heading", { name: /24-hour timeline/i })).toBeInTheDocument();
     expect(await screen.findByText(/showing 1 active hour/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/selected range summary/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /recovery rhythm/i })).toBeInTheDocument();
+    expect(screen.getByText(/range summary/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /take break/i })).not.toBeInTheDocument();
   });
 
   it("shows terminal bridge capability labels as Terminal", async () => {

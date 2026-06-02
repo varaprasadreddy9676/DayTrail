@@ -176,6 +176,9 @@ fn watcher_tick(
     // Focus Mode: nudge if the user has drifted onto a distraction. No-op unless
     // a focus session is active.
     crate::focus::evaluate(app, &info);
+    // Smart Recovery: local-only recovery nudges after long uninterrupted screen
+    // work. No-op while paused or idle.
+    crate::recovery::evaluate(app, store, &info, can_record);
 }
 
 fn duration_to_ms(duration: Duration) -> u64 {

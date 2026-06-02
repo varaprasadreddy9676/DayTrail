@@ -192,6 +192,7 @@ type BackendTodaySnapshot = {
   calendarEvents: BackendCalendarEvent[];
   calendarReconciliation: BackendCalendarReconciliation;
   focusSessions: BackendFocusSession[];
+  recoverySummary?: BackendRecoverySummary | null;
   meetings: Array<{ id: string; title: string; summary?: string | null }>;
   fieldVisits: Array<{ id: string; clientLabel?: string | null; locationLabel?: string | null; status: string }>;
   idleBlocks: BackendIdleBlock[];
@@ -329,6 +330,31 @@ type BackendFocusSession = {
   driftMs: number;
   evidenceEventIds: string[];
   driftEvents: string[];
+};
+
+type BackendRecoverySummary = {
+  score: number;
+  totalScreenMs: number;
+  longestUninterruptedMs: number;
+  currentStreakMs: number;
+  takenCount: number;
+  skippedCount: number;
+  snoozedCount: number;
+  promptedCount: number;
+  nextPrompt?: {
+    action: string;
+    reason: string;
+    streakMs: number;
+    suggestedMinutes: number;
+  } | null;
+  recentEvents?: Array<{
+    id: string;
+    eventType: string;
+    startedAt: number;
+    endedAt?: number | null;
+    durationMs: number;
+    note?: string | null;
+  }>;
 };
 
 type ActiveFocusTimer = {
@@ -587,6 +613,8 @@ type BackendExportPayload = {
   calendarEvents?: BackendCalendarEvent[];
   calendarReconciliation?: BackendCalendarReconciliation;
   focusSessions?: BackendFocusSession[];
+  recoverySummary?: BackendRecoverySummary | null;
+  recoveryEvents?: BackendRecoverySummary["recentEvents"];
   tasks?: BackendTodaySnapshot["tasks"];
   quickNotes?: BackendTodaySnapshot["quickNotes"];
   commitments?: BackendTodaySnapshot["commitments"];
@@ -929,6 +957,7 @@ function exportPayloadToSnapshot(
       items: [],
     },
     focusSessions: payload.focusSessions ?? [],
+    recoverySummary: payload.recoverySummary ?? fallback?.recoverySummary ?? null,
     meetings: [],
     fieldVisits: [],
     idleBlocks: payload.idleBlocks ?? [],
@@ -3505,6 +3534,36 @@ export default function App() {
     await refreshTodaySnapshot();
   }
 
+  async function handleRecoveryAction(action: "take_break" | "snooze" | "skip") {
+    const command =
+      action === "take_break"
+        ? "take_recovery_break"
+        : action === "snooze"
+          ? "snooze_recovery"
+          : "skip_recovery";
+    const args =
+      action === "take_break"
+        ? { minutes: 3 }
+        : action === "snooze"
+          ? { minutes: 5 }
+          : undefined;
+    const result = await invokeTauri(command, args);
+
+    if (!result) {
+      addToast("error", "Recovery action unavailable", "Could not update Smart Recovery.");
+      return;
+    }
+
+    const title =
+      action === "take_break"
+        ? "Recovery break logged"
+        : action === "snooze"
+          ? "Recovery snoozed"
+          : "Recovery skipped";
+    addToast("success", title);
+    await refreshTodaySnapshot();
+  }
+
   async function stopFocusTimer() {
     if (!activeFocusTimer) return;
     const context = effectiveSnapshot?.activeWorkContext;
@@ -4123,6 +4182,7 @@ export default function App() {
               onDeleteTask={deleteTask}
               onStartFocus={startFocusTimer}
               onStopFocus={stopFocusTimer}
+              onRecoveryAction={handleRecoveryAction}
               onIgnoreIdleBlock={ignoreIdleBlock}
               onOpenHour={(hour) => {
                 setActiveHourDetail(hour);
@@ -4903,6 +4963,7 @@ function TodayView({
   onIgnoreIdleBlock,
   onStartFocus,
   onStopFocus,
+  onRecoveryAction,
   onOpenHour,
   onOpenWorkContextEditor,
   onClearWorkContext,
@@ -4938,6 +4999,7 @@ function TodayView({
   onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
   onStartFocus: () => void;
   onStopFocus: () => void;
+  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
   onOpenHour: (hour: number) => void;
   onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
   onClearWorkContext: () => void;
@@ -5248,9 +5310,12 @@ function TodayView({
           activeFocusTimer={activeFocusTimer}
           calendar={snapshot?.calendarReconciliation}
           focusSessions={snapshot?.focusSessions ?? []}
+          isRecoveryActionable={rangePreset === "today"}
           onAddCalendarBlock={onOpenCalendarBlock}
+          recoverySummary={snapshot?.recoverySummary ?? null}
           onStartFocus={onStartFocus}
           onStopFocus={onStopFocus}
+          onRecoveryAction={onRecoveryAction}
         />
 
         <TasksReminderPanel
@@ -5673,16 +5738,22 @@ function CalendarFocusPanel({
   activeFocusTimer,
   calendar,
   focusSessions,
+  isRecoveryActionable,
   onAddCalendarBlock,
+  recoverySummary,
   onStartFocus,
   onStopFocus,
+  onRecoveryAction,
 }: {
   activeFocusTimer: ActiveFocusTimer | null;
   calendar?: BackendCalendarReconciliation;
   focusSessions: BackendFocusSession[];
+  isRecoveryActionable: boolean;
   onAddCalendarBlock: () => void;
+  recoverySummary?: BackendRecoverySummary | null;
   onStartFocus: () => void;
   onStopFocus: () => void;
+  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
 }) {
   const planned = calendar?.plannedEvents ?? 0;
   const matched = calendar?.matchedEvents ?? 0;
@@ -5693,7 +5764,7 @@ function CalendarFocusPanel({
   const missedItems = (calendar?.items ?? []).filter((item) => item.status !== "matched").slice(0, 3);
 
   return (
-    <section className="today-intelligence-grid" aria-label="Calendar and focus summary">
+    <section className="today-intelligence-grid" aria-label="Calendar, focus, and recovery summary">
       <div className="panel-block compact-intel-panel">
         <PanelHeader eyebrow="Calendar" title="Planned vs actual" value={planned ? `${matchRate}%` : "No plan"} />
         <div className="report-settings-list">
@@ -5760,6 +5831,12 @@ function CalendarFocusPanel({
           )}
         </div>
       </div>
+
+      <RecoveryPanel
+        isActionable={isRecoveryActionable}
+        recoverySummary={recoverySummary}
+        onRecoveryAction={onRecoveryAction}
+      />
     </section>
   );
 }
@@ -5845,6 +5922,59 @@ function TasksReminderPanel({
         </div>
       )}
     </section>
+  );
+}
+
+function RecoveryPanel({
+  isActionable,
+  recoverySummary,
+  onRecoveryAction,
+}: {
+  isActionable: boolean;
+  recoverySummary?: BackendRecoverySummary | null;
+  onRecoveryAction: (action: "take_break" | "snooze" | "skip") => void;
+}) {
+  const score = recoverySummary?.score;
+  const longestRunMs = recoverySummary?.longestUninterruptedMs ?? 0;
+  const currentStreakMs = recoverySummary?.currentStreakMs ?? 0;
+  const takenCount = recoverySummary?.takenCount ?? 0;
+  const skippedCount = recoverySummary?.skippedCount ?? 0;
+  const promptDue = recoverySummary?.nextPrompt?.action === "due";
+  const status = promptDue ? "Recovery due" : recoverySummary ? "On rhythm" : "Ready";
+
+  return (
+    <div className="panel-block compact-intel-panel recovery-panel">
+      <PanelHeader eyebrow="Recovery" title="Recovery rhythm" value={typeof score === "number" ? `${score}` : "Ready"} />
+      <div className="report-settings-list">
+        <div><span>Status</span><strong>{status}</strong></div>
+        <div><span>Longest run</span><strong>{formatDuration(longestRunMs)}</strong></div>
+        <div><span>Current</span><strong>{formatDuration(currentStreakMs)}</strong></div>
+      </div>
+      <div className="range-list">
+        <article>
+          <strong>{promptDue ? "Take a short reset" : "Recovery rhythm ready"}</strong>
+          <span>{takenCount} taken · {skippedCount} skipped · longest {formatDuration(longestRunMs)}</span>
+        </article>
+      </div>
+      {isActionable ? (
+        <div className="output-actions recovery-actions">
+          <button className="button compact primary" onClick={() => onRecoveryAction("take_break")} type="button">
+            <Icon name="check" />
+            Take break
+          </button>
+          <button className="button compact" onClick={() => onRecoveryAction("snooze")} type="button">
+            Snooze
+          </button>
+          <button className="button compact ghost" onClick={() => onRecoveryAction("skip")} type="button">
+            Skip
+          </button>
+        </div>
+      ) : (
+        <div className="output-actions recovery-actions recovery-actions-readonly">
+          <span>Range summary</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -9430,8 +9560,8 @@ function SettingsView({
                 </div>
               </div>
               <p className="privacy-exclusions-intro">
-                Anything you add here is never captured — not even its name. Use it for password managers,
-                personal chats, client work under NDA, or any project you don't want recorded.
+                Matching activity is skipped before it is recorded. The exclusion rules stay saved locally so
+                DayTrail can keep applying them to password managers, personal chats, NDA work, or private projects.
               </p>
               <div className="privacy-exclusions">
                 <ExclusionEditor

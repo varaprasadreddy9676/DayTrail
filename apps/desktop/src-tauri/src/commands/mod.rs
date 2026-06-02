@@ -12,6 +12,7 @@ pub mod permissions;
 pub mod planning;
 pub mod privacy;
 pub mod quick_note;
+pub mod recovery;
 pub mod report;
 pub mod review;
 pub mod search;
@@ -105,6 +106,12 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         focus::start_focus_session,
         focus::end_focus_session,
         focus::get_focus_session,
-        focus::snooze_focus_session
+        focus::snooze_focus_session,
+        recovery::record_recovery_event,
+        recovery::get_recovery_summary,
+        recovery::list_recovery_events,
+        recovery::snooze_recovery,
+        recovery::skip_recovery,
+        recovery::take_recovery_break
     ]
 }

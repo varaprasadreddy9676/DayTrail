@@ -21,10 +21,13 @@ Also verify the installed desktop app manually:
   reconcile against captured work as matched, missed, or partial.
 - Focus Mode nudges still work, and focus timer sessions are persisted with
   goal, target duration, elapsed time, and drift summary.
+- Smart Recovery shows the Today recovery card, sends local nudges after a long
+  uninterrupted screen run, and records take/snooze/skip actions in recovery
+  stats without blocking apps.
 - Away/resume gaps create idle recovery prompts without surfacing sleep-sized
   gaps as classification work.
 - Daily report, weekly digest, and replay/restore flows generate source-backed
-  output from the expected local date range.
+  output from the expected local date range, including weekly recovery rhythm.
 - Date-range export includes source-backed activity and AI contribution rows.
 
 ## Public README And Screenshots
@@ -36,6 +39,8 @@ Also verify the installed desktop app manually:
 - Focus Mode is documented with its current behavior: local distraction nudges,
   native notifications, duration choices, snooze/end controls, and no app
   blocking. Persisted focus timer/review behavior is also documented.
+- Smart Recovery is documented as local sustainable-focus nudges with
+  take/snooze/skip controls, not as medical or eye-care advice.
 - README claims about calendar support are limited to imported/local events; do
   not imply Google/Outlook sync unless that connector is actually shipped.
 - README mentions weekly digest, replay/restore, idle recovery, and

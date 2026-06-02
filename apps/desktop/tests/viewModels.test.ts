@@ -126,6 +126,38 @@ describe("Simple Mode view models", () => {
     expect(buildReviewView(lowDataSnapshot, baseSettings).lowDataMessage).toMatch(/more activity/i);
   });
 
+  it("builds recovery labels for the Today summary", () => {
+    const view = buildTodayView(
+      snapshot({
+        recoverySummary: {
+          score: 82,
+          totalScreenMs: 3_600_000,
+          longestUninterruptedMs: 42 * 60_000,
+          currentStreakMs: 31 * 60_000,
+          takenCount: 2,
+          skippedCount: 1,
+          snoozedCount: 1,
+          promptedCount: 3,
+          nextPrompt: {
+            action: "due",
+            reason: "Long uninterrupted screen run",
+            streakMs: 31 * 60_000,
+            suggestedMinutes: 3,
+          },
+          recentEvents: [],
+        },
+      }),
+      baseSettings,
+    );
+
+    expect(view.recovery.scoreLabel).toBe("82");
+    expect(view.recovery.statusLabel).toBe("Recovery due");
+    expect(view.recovery.longestRunLabel).toBe("42m");
+    expect(view.recovery.takenLabel).toBe("2 taken");
+    expect(view.recovery.skippedLabel).toBe("1 skipped");
+    expect(view.recovery.promptDue).toBe(true);
+  });
+
   it("builds multi-segment hour rows and hides raw details in simple mode", () => {
     const view = buildHourTimelineView(
       [

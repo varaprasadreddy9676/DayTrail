@@ -239,6 +239,7 @@ pub struct TodaySnapshot {
     pub calendar_events: Vec<CalendarEvent>,
     pub calendar_reconciliation: CalendarReconciliation,
     pub focus_sessions: Vec<FocusSessionSummary>,
+    pub recovery_summary: RecoverySummary,
     pub meetings: Vec<Meeting>,
     pub field_visits: Vec<FieldVisit>,
     pub idle_blocks: Vec<IdleBlock>,
@@ -483,6 +484,8 @@ pub struct ExportPayload {
     pub calendar_events: Vec<CalendarEvent>,
     pub calendar_reconciliation: CalendarReconciliation,
     pub focus_sessions: Vec<FocusSessionSummary>,
+    pub recovery_summary: RecoverySummary,
+    pub recovery_events: Vec<RecoveryEvent>,
     pub tasks: Vec<Task>,
     pub quick_notes: Vec<QuickNote>,
     pub commitments: Vec<Commitment>,
@@ -633,6 +636,55 @@ pub struct FocusSessionSummary {
     pub drift_events: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryEvent {
+    pub id: String,
+    pub event_type: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub duration_ms: i64,
+    pub note: Option<String>,
+    pub evidence_json: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryEventInput {
+    pub id: Option<String>,
+    pub event_type: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub note: Option<String>,
+    pub evidence_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryPrompt {
+    pub action: String,
+    pub reason: String,
+    pub streak_ms: i64,
+    pub suggested_minutes: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverySummary {
+    pub score: i64,
+    pub total_screen_ms: i64,
+    pub longest_uninterrupted_ms: i64,
+    pub current_streak_ms: i64,
+    pub taken_count: usize,
+    pub skipped_count: usize,
+    pub snoozed_count: usize,
+    pub prompted_count: usize,
+    pub next_prompt: Option<RecoveryPrompt>,
+    pub recent_events: Vec<RecoveryEvent>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
