@@ -704,6 +704,40 @@ fn manages_tasks_and_reminders_lifecycle() {
     assert_eq!(task.notes.as_deref(), Some("Check staging first"));
     assert_eq!(task.priority.as_deref(), Some("high"));
 
+    let updated = store
+        .update_task(
+            task.id,
+            TaskInput {
+                title: "Renew production certificate".into(),
+                due_date: Some("2026-06-05".into()),
+                due_at: None,
+                notes: Some("Coordinate maintenance window".into()),
+                priority: Some("medium".into()),
+                source: Some("manual".into()),
+                project_path: None,
+                client_label: Some("Ops".into()),
+                project_label: Some("Security".into()),
+            },
+        )
+        .expect("update task");
+    assert_eq!(updated.id, task.id);
+    assert_eq!(updated.title, "Renew production certificate");
+    assert_eq!(updated.due_date.as_deref(), Some("2026-06-05"));
+    assert_eq!(updated.due_at, None);
+    assert_eq!(updated.notes.as_deref(), Some("Coordinate maintenance window"));
+    assert_eq!(updated.priority.as_deref(), Some("medium"));
+    assert_eq!(updated.project_label.as_deref(), Some("Security"));
+
+    let due = store
+        .list_due_task_reminders(2_000_000)
+        .expect("due reminders");
+    assert!(due.is_empty());
+
+    let snoozed_for_reminder = store
+        .snooze_task(task.id, 1_800_000)
+        .expect("snooze task for reminder");
+    assert_eq!(snoozed_for_reminder.due_at, Some(1_800_000));
+
     let due = store
         .list_due_task_reminders(2_000_000)
         .expect("due reminders");

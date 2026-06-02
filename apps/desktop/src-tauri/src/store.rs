@@ -1105,6 +1105,52 @@ impl WorktraceStore {
         Self::get_task_locked(&conn, id)
     }
 
+    pub fn update_task(&self, id: i64, input: TaskInput) -> Result<Task> {
+        let title = input.title.trim();
+        anyhow::ensure!(!title.is_empty(), "task title is required");
+        let due_date = input
+            .due_date
+            .or_else(|| input.due_at.and_then(epoch_ms_to_local_date));
+        let priority = input.priority.as_deref().map(normalize_task_priority);
+        let now = now_utc();
+        let conn = self.lock()?;
+        conn.execute(
+            r#"
+            UPDATE tasks
+            SET title = ?1,
+                due_date = ?2,
+                due_at = ?3,
+                notes = ?4,
+                priority = ?5,
+                source = ?6,
+                project_path = ?7,
+                client_label = ?8,
+                project_label = ?9,
+                reminder_sent_at = NULL,
+                updated_at = ?10
+            WHERE id = ?11
+            "#,
+            params![
+                title,
+                due_date,
+                input.due_at,
+                input
+                    .notes
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty()),
+                priority,
+                input.source,
+                input.project_path,
+                input.client_label,
+                input.project_label,
+                now,
+                id
+            ],
+        )?;
+        Self::get_task_locked(&conn, id)
+    }
+
     pub fn draft_tasks_from_text(
         &self,
         text: &str,

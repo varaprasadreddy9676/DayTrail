@@ -171,6 +171,9 @@ describe("DayTrail command center", () => {
     expect(screen.queryByLabelText(/^from$/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /app range custom range/i })).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+    expect(screen.getByRole("heading", { level: 1, name: /^my tasks$/i })).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: /^activity$/i }));
     expect(screen.getByRole("heading", { level: 2, name: /activity/i })).toBeInTheDocument();
 
@@ -191,11 +194,12 @@ describe("DayTrail command center", () => {
     expect(screen.getAllByText(/today timeline/i).length).toBeGreaterThan(0);
   });
 
-  it("opens bulk task import directly from the sidebar", async () => {
+  it("opens bulk task import from My Tasks", async () => {
     const user = userEvent.setup();
 
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
     await user.click(screen.getByRole("button", { name: /^import tasks$/i }));
 
     expect(screen.getByRole("heading", { name: /^import tasks$/i })).toBeInTheDocument();
@@ -346,7 +350,7 @@ describe("DayTrail command center", () => {
     expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
   });
 
-  it("manages overall tasks and reminders from Today", async () => {
+  it("manages overall tasks and reminders from My Tasks", async () => {
     const user = userEvent.setup();
     const settings = { browserBridgeEnabled: true, excludedDomains: [] };
     const openTask = {
@@ -388,6 +392,9 @@ describe("DayTrail command center", () => {
       }
       if (command === "create_task") {
         return { ...openTask, id: 43, title: (args?.input as { title: string }).title };
+      }
+      if (command === "update_task") {
+        return { ...openTask, title: (args?.input as { title: string }).title };
       }
       if (command === "draft_tasks_from_text") {
         return [
@@ -434,13 +441,16 @@ describe("DayTrail command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /tasks & reminders/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /tasks & reminders/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+
+    expect(await screen.findByRole("heading", { name: /^my tasks$/i })).toBeInTheDocument();
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
 
-    const tasksPanel = screen.getByLabelText(/tasks and reminders/i);
-    await user.click(within(tasksPanel).getByRole("button", { name: /add task/i }));
-    await user.click(screen.getByRole("button", { name: /paste many/i }));
+    await user.click(screen.getByRole("button", { name: /^import tasks$/i }));
     await user.type(
       screen.getByLabelText(/paste tasks/i),
       "HER Health LIS Integration\nNOVA Path kind LIS Integration",
@@ -476,8 +486,7 @@ describe("DayTrail command center", () => {
       expect(screen.queryByRole("heading", { name: /^import tasks$/i })).not.toBeInTheDocument(),
     );
 
-    const refreshedTasksPanel = screen.getByLabelText(/tasks and reminders/i);
-    await user.click(within(refreshedTasksPanel).getByRole("button", { name: /add task/i }));
+    await user.click(screen.getByRole("button", { name: /^add task$/i }));
     await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");
     await user.type(screen.getByLabelText(/^notes$/i), "Ask whether PO is approved");
     fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: "2026-06-03" } });
@@ -495,16 +504,32 @@ describe("DayTrail command center", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /complete renew vendor contract/i }));
+    await user.click(screen.getByRole("button", { name: /^edit$/i }));
+    expect(screen.getByRole("heading", { name: /^edit task$/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Renew vendor agreement" } });
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_task", {
+        id: 42,
+        input: expect.objectContaining({
+          title: "Renew vendor agreement",
+          priority: "high",
+          source: "manual",
+        }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^complete$/i }));
     expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
 
-    await user.click(screen.getByRole("button", { name: /snooze renew vendor contract/i }));
+    await user.click(screen.getByRole("button", { name: /^snooze$/i }));
     expect(invoke).toHaveBeenCalledWith("snooze_task", {
       id: 42,
       dueAt: expect.any(Number),
     });
 
-    await user.click(screen.getByRole("button", { name: /delete renew vendor contract/i }));
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
     expect(invoke).toHaveBeenCalledWith("delete_task", { id: 42 });
   });
 

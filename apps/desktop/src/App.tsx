@@ -21,6 +21,7 @@ function nextToastId() { return ++_toastSeq; }
 
 type ViewKey =
   | "today"
+  | "tasks"
   | "hour"
   | "apps"
   | "loops"
@@ -747,6 +748,7 @@ type WorkspaceFolder = {
 
 const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "today", label: "Today", icon: "layout" },
+  { id: "tasks", label: "My Tasks", icon: "check" },
   { id: "apps", label: "Activity", icon: "apps" },
   { id: "ai", label: "AI Impact", icon: "ritual" },
   { id: "restore", label: "Replay", icon: "search" },
@@ -2340,6 +2342,24 @@ function defaultTaskForm(): TaskForm {
   };
 }
 
+function taskFormFromTask(task: BackendTask): TaskForm {
+  const dueAtDate = task.dueAt ? new Date(task.dueAt) : null;
+  const dueDate = task.dueDate ?? (dueAtDate ? formatLocalDateInput(dueAtDate) : "");
+  const dueTime = dueAtDate
+    ? `${String(dueAtDate.getHours()).padStart(2, "0")}:${String(dueAtDate.getMinutes()).padStart(2, "0")}`
+    : "";
+
+  return {
+    title: task.title,
+    notes: task.notes ?? "",
+    dueDate,
+    dueTime,
+    priority: task.priority === "high" || task.priority === "low" ? task.priority : "medium",
+    clientLabel: task.clientLabel ?? "",
+    projectLabel: task.projectLabel ?? "",
+  };
+}
+
 function draftTasksFromTextFallback(text: string, priority: TaskForm["priority"]): BackendTaskDraft[] {
   return text
     .split(/\r?\n/)
@@ -2590,6 +2610,7 @@ export default function App() {
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskModalMode, setTaskModalMode] = useState<"single" | "bulk">("single");
   const [taskForm, setTaskForm] = useState<TaskForm>(() => defaultTaskForm());
+  const [editingTask, setEditingTask] = useState<BackendTask | null>(null);
   const [bulkTaskText, setBulkTaskText] = useState("");
   const [bulkTaskPriority, setBulkTaskPriority] = useState<TaskForm["priority"]>("high");
   const [bulkTaskDrafts, setBulkTaskDrafts] = useState<BackendTaskDraft[]>([]);
@@ -3319,9 +3340,10 @@ export default function App() {
     }
   }
 
-  function openTaskModal(mode: "single" | "bulk" = "single") {
+  function openTaskModal(mode: "single" | "bulk" = "single", task?: BackendTask) {
     const entryMode = mode === "bulk" ? "bulk" : "single";
-    setTaskForm(defaultTaskForm());
+    setEditingTask(task ?? null);
+    setTaskForm(task ? taskFormFromTask(task) : defaultTaskForm());
     setTaskModalMode(entryMode);
     setBulkTaskText("");
     setBulkTaskPriority("high");
@@ -3333,6 +3355,7 @@ export default function App() {
     setTaskModalOpen(false);
     setTaskModalMode("single");
     setTaskForm(defaultTaskForm());
+    setEditingTask(null);
     setBulkTaskText("");
     setBulkTaskPriority("high");
     setBulkTaskDrafts([]);
@@ -3355,26 +3378,36 @@ export default function App() {
       return;
     }
 
-    const result = await invokeTauri<BackendTask>("create_task", {
-      input: {
-        title,
-        dueDate: taskForm.dueDate || null,
-        dueAt,
-        notes: taskForm.notes.trim() || null,
-        priority: taskForm.priority,
-        source: "manual",
-        projectPath: null,
-        clientLabel: taskForm.clientLabel.trim() || null,
-        projectLabel: taskForm.projectLabel.trim() || null,
-      },
-    });
+    const input = {
+      title,
+      dueDate: taskForm.dueDate || null,
+      dueAt,
+      notes: taskForm.notes.trim() || null,
+      priority: taskForm.priority,
+      source: editingTask?.source ?? "manual",
+      projectPath: editingTask?.projectPath ?? null,
+      clientLabel: taskForm.clientLabel.trim() || null,
+      projectLabel: taskForm.projectLabel.trim() || null,
+    };
+    const result = editingTask
+      ? await invokeTauri<BackendTask>("update_task", {
+          id: editingTask.id,
+          input,
+        })
+      : await invokeTauri<BackendTask>("create_task", {
+          input: {
+            ...input,
+            source: "manual",
+            projectPath: null,
+          },
+        });
 
     if (result) {
       closeTaskModal();
-      addToast("success", "Task added", title);
+      addToast("success", editingTask ? "Task updated" : "Task added", title);
       await refreshTodaySnapshot();
     } else {
-      addToast("error", "Could not add task", "Backend unavailable.");
+      addToast("error", editingTask ? "Could not update task" : "Could not add task", "Backend unavailable.");
     }
   }
 
@@ -4106,20 +4139,6 @@ export default function App() {
         <div className="sidebar-offline-action">
           <button
             className="button compact sidebar-log-offline"
-            onClick={() => openTaskModal("single")}
-            type="button"
-          >
-            + Add task
-          </button>
-          <button
-            className="button compact sidebar-log-offline sidebar-import-tasks"
-            onClick={() => openTaskModal("bulk")}
-            type="button"
-          >
-            Import tasks
-          </button>
-          <button
-            className="button compact sidebar-log-offline"
             onClick={() => {
               const now = new Date();
               const pad = (n: number) => String(n).padStart(2, "0");
@@ -4195,7 +4214,7 @@ export default function App() {
         </header>
 
         <section className="content-pane" aria-live="polite">
-          {activeView !== "settings" && (
+          {activeView !== "settings" && activeView !== "tasks" && (
             <GlobalRangeControls
               fromDate={timelineFromDate}
               onLoadRange={loadTimelineRange}
@@ -4211,10 +4230,6 @@ export default function App() {
               actions={displayActions}
               aiUsageSummary={effectiveSnapshot?.aiUsageSummary}
               appUsageSummary={effectiveSnapshot?.appUsageSummary}
-              onOpenTaskModal={openTaskModal}
-              onCompleteTask={completeTask}
-              onSnoozeTask={snoozeTask}
-              onDeleteTask={deleteTask}
               onIgnoreIdleBlock={ignoreIdleBlock}
               onOpenHour={(hour) => {
                 setActiveHourDetail(hour);
@@ -4239,6 +4254,17 @@ export default function App() {
               rangePreset={timelineRangePreset}
               rangeStatus={timelineRangeStatus}
               rangeToDate={timelineToDate}
+            />
+          )}
+          {activeView === "tasks" && (
+            <MyTasksView
+              onAddTask={() => openTaskModal("single")}
+              onCompleteTask={completeTask}
+              onDeleteTask={deleteTask}
+              onEditTask={(task) => openTaskModal("single", task)}
+              onImportTasks={() => openTaskModal("bulk")}
+              onSnoozeTask={snoozeTask}
+              tasks={effectiveSnapshot?.tasks ?? []}
             />
           )}
           {activeView === "hour" && (
@@ -4473,10 +4499,12 @@ export default function App() {
             onSubmit={submitTask}
           >
             <div className="task-modal-heading">
-              <h3>{taskModalMode === "bulk" ? "Import tasks" : "Add task"}</h3>
+              <h3>{taskModalMode === "bulk" ? "Import tasks" : editingTask ? "Edit task" : "Add task"}</h3>
               <p>
                 {taskModalMode === "bulk"
                   ? "Paste a backlog and create reviewed tasks in one step."
+                  : editingTask
+                    ? "Update the task details, priority, or reminder time."
                   : "Capture a backlog item or reminder that is not tied to current work."}
               </p>
             </div>
@@ -4615,7 +4643,7 @@ export default function App() {
             )}
             <div className="offline-modal-actions">
               {taskModalMode === "single" ? (
-                <button className="button" type="submit">Save task</button>
+                <button className="button" type="submit">{editingTask ? "Save changes" : "Save task"}</button>
               ) : (
                 <>
                   <button className="button" disabled={isDraftingTasks} onClick={draftBulkTasks} type="button">
@@ -5058,10 +5086,6 @@ function TodayView({
   appUsageSummary,
   idleGapCount,
   isPaused,
-  onOpenTaskModal,
-  onCompleteTask,
-  onSnoozeTask,
-  onDeleteTask,
   onIgnoreIdleBlock,
   onOpenHour,
   onOpenWorkContextEditor,
@@ -5087,10 +5111,6 @@ function TodayView({
   appUsageSummary?: BackendAppUsageSummary;
   idleGapCount: number;
   isPaused: boolean;
-  onOpenTaskModal: () => void;
-  onCompleteTask: (task: BackendTask) => void | Promise<void>;
-  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
-  onDeleteTask: (task: BackendTask) => void | Promise<void>;
   onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
   onOpenHour: (hour: number) => void;
   onOpenWorkContextEditor: (initialForm: WorkContextEditorState) => void;
@@ -5410,13 +5430,6 @@ function TodayView({
           ))}
         </section>
 
-        <TasksReminderPanel
-          onAddTask={onOpenTaskModal}
-          onCompleteTask={onCompleteTask}
-          onDeleteTask={onDeleteTask}
-          onSnoozeTask={onSnoozeTask}
-          tasks={snapshot?.tasks ?? []}
-        />
       </section>
 
       <section className="today-zone timeline-zone" aria-label="Today timeline">
@@ -5826,80 +5839,150 @@ function IdleRecoveryPrompt({
   );
 }
 
-function TasksReminderPanel({
+function MyTasksView({
   tasks,
   onAddTask,
+  onImportTasks,
+  onEditTask,
   onCompleteTask,
   onSnoozeTask,
   onDeleteTask,
 }: {
   tasks: BackendTask[];
   onAddTask: () => void;
+  onImportTasks: () => void;
+  onEditTask: (task: BackendTask) => void;
   onCompleteTask: (task: BackendTask) => void | Promise<void>;
   onSnoozeTask: (task: BackendTask) => void | Promise<void>;
   onDeleteTask: (task: BackendTask) => void | Promise<void>;
 }) {
-  const openTasks = tasks.filter((task) => task.status !== "done").slice(0, 6);
+  const openTasks = tasks.filter((task) => task.status !== "done");
+  const completedTasks = tasks.filter((task) => task.status === "done").slice(0, 20);
   const highCount = openTasks.filter((task) => task.priority === "high").length;
 
   return (
-    <section className="panel-block tasks-reminder-panel" aria-label="Tasks and reminders">
-      <div className="tasks-reminder-head">
+    <div className="view-frame my-tasks-view">
+      <section className="tasks-hero" aria-label="Task summary">
         <div>
           <span>Backlog</span>
-          <h2>Tasks &amp; Reminders</h2>
+          <h2>Tasks &amp; reminders</h2>
+          <p>Manage reminders, follow-ups, and imported backlog items outside the day timeline.</p>
         </div>
-        <div className="tasks-reminder-actions">
-          <strong>{openTasks.length} open</strong>
-          {highCount > 0 && <em>{highCount} high</em>}
-          <button className="button compact primary" type="button" onClick={onAddTask}>
+        <div className="tasks-hero-actions">
+          <button className="button primary" type="button" onClick={onAddTask}>
             <Icon name="plus" />
             Add task
           </button>
+          <button className="button" type="button" onClick={onImportTasks}>
+            <Icon name="copy" />
+            Import tasks
+          </button>
         </div>
-      </div>
+      </section>
 
-      {openTasks.length === 0 ? (
+      <section className="task-summary-grid" aria-label="Task counts">
+        <div className="stat-card">
+          <span>Open</span>
+          <strong>{openTasks.length}</strong>
+          <em>waiting</em>
+        </div>
+        <div className="stat-card">
+          <span>Urgent</span>
+          <strong>{highCount}</strong>
+          <em>high priority</em>
+        </div>
+        <div className="stat-card">
+          <span>Completed</span>
+          <strong>{completedTasks.length}</strong>
+          <em>recent</em>
+        </div>
+      </section>
+
+      <TaskListSection
+        emptyText="Add reminders, backlog items, or follow-ups that are not tied to current work."
+        onCompleteTask={onCompleteTask}
+        onDeleteTask={onDeleteTask}
+        onEditTask={onEditTask}
+        onSnoozeTask={onSnoozeTask}
+        tasks={openTasks}
+        title="Open tasks"
+      />
+
+      <TaskListSection
+        completed
+        emptyText="Completed tasks will appear here after you close them."
+        onCompleteTask={onCompleteTask}
+        onDeleteTask={onDeleteTask}
+        onEditTask={onEditTask}
+        onSnoozeTask={onSnoozeTask}
+        tasks={completedTasks}
+        title="Completed recently"
+      />
+    </div>
+  );
+}
+
+function TaskListSection({
+  completed = false,
+  emptyText,
+  onCompleteTask,
+  onDeleteTask,
+  onEditTask,
+  onSnoozeTask,
+  tasks,
+  title,
+}: {
+  completed?: boolean;
+  emptyText: string;
+  onCompleteTask: (task: BackendTask) => void | Promise<void>;
+  onDeleteTask: (task: BackendTask) => void | Promise<void>;
+  onEditTask: (task: BackendTask) => void;
+  onSnoozeTask: (task: BackendTask) => void | Promise<void>;
+  tasks: BackendTask[];
+  title: string;
+}) {
+  return (
+    <section className="tasks-section panel-block" aria-label={title}>
+      <header className="tasks-section-head">
+        <h2>{title}</h2>
+        <span>{tasks.length} item{tasks.length === 1 ? "" : "s"}</span>
+      </header>
+
+      {tasks.length === 0 ? (
         <div className="tasks-empty">
-          <strong>No pending tasks</strong>
-          <span>Add reminders, backlog items, or follow-ups that are not tied to current work.</span>
+          <strong>No tasks here</strong>
+          <span>{emptyText}</span>
         </div>
       ) : (
         <div className="tasks-list">
-          {openTasks.map((task) => (
-            <article className="task-row" data-priority={task.priority ?? "medium"} key={task.id}>
+          {tasks.map((task) => (
+            <article
+              className="task-row"
+              data-priority={task.priority ?? "medium"}
+              data-status={task.status}
+              key={task.id}
+            >
               <div className="task-main">
                 <strong>{task.title}</strong>
                 <span>{task.notes || taskContextLabel(task)}</span>
                 <em>{taskDueLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
               </div>
               <div className="task-actions">
-                <button
-                  aria-label={`Complete ${task.title}`}
-                  className="icon-button"
-                  onClick={() => void onCompleteTask(task)}
-                  title="Complete task"
-                  type="button"
-                >
-                  <Icon name="check" />
+                <button className="button compact" onClick={() => onEditTask(task)} type="button">
+                  Edit
                 </button>
-                <button
-                  aria-label={`Snooze ${task.title}`}
-                  className="icon-button"
-                  onClick={() => void onSnoozeTask(task)}
-                  title="Snooze to tomorrow"
-                  type="button"
-                >
-                  <Icon name="sync" />
-                </button>
-                <button
-                  aria-label={`Delete ${task.title}`}
-                  className="icon-button danger"
-                  onClick={() => void onDeleteTask(task)}
-                  title="Delete task"
-                  type="button"
-                >
-                  <Icon name="x" />
+                {!completed && (
+                  <>
+                    <button className="button compact" onClick={() => void onCompleteTask(task)} type="button">
+                      Complete
+                    </button>
+                    <button className="button compact" onClick={() => void onSnoozeTask(task)} type="button">
+                      Snooze
+                    </button>
+                  </>
+                )}
+                <button className="button compact danger" onClick={() => void onDeleteTask(task)} type="button">
+                  Delete
                 </button>
               </div>
             </article>

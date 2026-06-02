@@ -23,6 +23,15 @@ pub fn create_task(
 }
 
 #[tauri::command]
+pub fn update_task(
+    store: State<'_, WorktraceStore>,
+    id: i64,
+    input: TaskInput,
+) -> Result<Task, CommandError> {
+    store.update_task(id, input).map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn draft_tasks_from_text(
     store: State<'_, WorktraceStore>,
     text: String,
