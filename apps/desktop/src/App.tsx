@@ -264,6 +264,16 @@ type BackendTask = {
   updatedAt?: string | null;
 };
 
+type BackendTaskDraft = {
+  title: string;
+  dueDate?: string | null;
+  dueAt?: number | null;
+  notes?: string | null;
+  priority?: "high" | "medium" | "low" | string | null;
+  clientLabel?: string | null;
+  projectLabel?: string | null;
+};
+
 type TaskForm = {
   title: string;
   notes: string;
@@ -2330,6 +2340,24 @@ function defaultTaskForm(): TaskForm {
   };
 }
 
+function draftTasksFromTextFallback(text: string, priority: TaskForm["priority"]): BackendTaskDraft[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^\d+[.)]\s*/, "").trim())
+    .filter((line) => line.length > 1)
+    .slice(0, 50)
+    .map((title) => ({
+      title,
+      dueDate: null,
+      dueAt: null,
+      notes: null,
+      priority,
+      clientLabel: null,
+      projectLabel: null,
+    }));
+}
+
 function taskDueLabel(task: BackendTask) {
   if (task.dueAt) {
     return `Due ${formatTime(task.dueAt)}`;
@@ -2559,7 +2587,12 @@ export default function App() {
   const [logOfflineOpen, setLogOfflineOpen] = useState(false);
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskModalMode, setTaskModalMode] = useState<"single" | "bulk">("single");
   const [taskForm, setTaskForm] = useState<TaskForm>(() => defaultTaskForm());
+  const [bulkTaskText, setBulkTaskText] = useState("");
+  const [bulkTaskPriority, setBulkTaskPriority] = useState<TaskForm["priority"]>("high");
+  const [bulkTaskDrafts, setBulkTaskDrafts] = useState<BackendTaskDraft[]>([]);
+  const [isDraftingTasks, setIsDraftingTasks] = useState(false);
   const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
 
   // Review / timesheet state
@@ -3256,7 +3289,21 @@ export default function App() {
 
   function openTaskModal() {
     setTaskForm(defaultTaskForm());
+    setTaskModalMode("single");
+    setBulkTaskText("");
+    setBulkTaskPriority("high");
+    setBulkTaskDrafts([]);
     setTaskModalOpen(true);
+  }
+
+  function closeTaskModal() {
+    setTaskModalOpen(false);
+    setTaskModalMode("single");
+    setTaskForm(defaultTaskForm());
+    setBulkTaskText("");
+    setBulkTaskPriority("high");
+    setBulkTaskDrafts([]);
+    setIsDraftingTasks(false);
   }
 
   async function submitTask(e: FormEvent<HTMLFormElement>) {
@@ -3290,13 +3337,70 @@ export default function App() {
     });
 
     if (result) {
-      setTaskModalOpen(false);
-      setTaskForm(defaultTaskForm());
+      closeTaskModal();
       addToast("success", "Task added", title);
       await refreshTodaySnapshot();
     } else {
       addToast("error", "Could not add task", "Backend unavailable.");
     }
+  }
+
+  async function draftBulkTasks() {
+    const text = bulkTaskText.trim();
+    if (!text) {
+      addToast("error", "Paste tasks first", "Add one task per line or paste a rough backlog.");
+      return;
+    }
+
+    setIsDraftingTasks(true);
+    const drafted = await invokeTauri<BackendTaskDraft[]>("draft_tasks_from_text", {
+      text,
+      defaultPriority: bulkTaskPriority,
+    });
+    setIsDraftingTasks(false);
+
+    const drafts = drafted?.length ? drafted : draftTasksFromTextFallback(text, bulkTaskPriority);
+    if (drafts.length === 0) {
+      addToast("error", "No tasks found", "Paste one task per line and try again.");
+      return;
+    }
+
+    setBulkTaskDrafts(drafts);
+    addToast("success", "Task drafts ready", "Review the list before creating them.");
+  }
+
+  async function createBulkTasks() {
+    if (bulkTaskDrafts.length === 0) {
+      await draftBulkTasks();
+      return;
+    }
+
+    const created = await Promise.all(
+      bulkTaskDrafts.map((draft) =>
+        invokeTauri<BackendTask>("create_task", {
+          input: {
+            title: draft.title,
+            dueDate: draft.dueDate ?? null,
+            dueAt: draft.dueAt ?? null,
+            notes: draft.notes?.trim() || null,
+            priority: draft.priority || bulkTaskPriority,
+            source: "bulk-import",
+            projectPath: null,
+            clientLabel: draft.clientLabel?.trim() || null,
+            projectLabel: draft.projectLabel?.trim() || null,
+          },
+        }),
+      ),
+    );
+    const createdCount = created.filter(Boolean).length;
+    if (createdCount === 0) {
+      addToast("error", "Could not create tasks", "Backend unavailable.");
+      return;
+    }
+
+    closeTaskModal();
+    addToast("success", "Tasks added", `${createdCount} task${createdCount === 1 ? "" : "s"} added.`);
+    await refreshTodaySnapshot();
   }
 
   async function completeTask(task: BackendTask) {
@@ -4283,80 +4387,174 @@ export default function App() {
       )}
 
       {taskModalOpen && (
-        <div className="offline-modal-backdrop" onClick={() => setTaskModalOpen(false)}>
+        <div className="offline-modal-backdrop" onClick={closeTaskModal}>
           <form
             className="offline-modal task-modal"
             onClick={(e) => e.stopPropagation()}
             onSubmit={submitTask}
           >
-            <h3>Add task</h3>
-            <p>Capture a backlog item or reminder that is not tied to current work.</p>
-            <label className="offline-modal-full">
-              Title
-              <input
-                required
-                type="text"
-                value={taskForm.title}
-                onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))}
-              />
-            </label>
-            <label className="offline-modal-full">
-              Notes
-              <textarea
-                value={taskForm.notes}
-                onChange={(e) => setTaskForm((prev) => ({ ...prev, notes: e.target.value }))}
-              />
-            </label>
-            <div className="offline-modal-row">
-              <label>
-                Due date
-                <input
-                  type="date"
-                  value={taskForm.dueDate}
-                  onChange={(e) => setTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))}
-                />
-              </label>
-              <label>
-                Due time
-                <input
-                  type="time"
-                  value={taskForm.dueTime}
-                  onChange={(e) => setTaskForm((prev) => ({ ...prev, dueTime: e.target.value }))}
-                />
-              </label>
+            <div className="task-modal-heading">
+              <h3>{taskModalMode === "bulk" ? "Import tasks" : "Add task"}</h3>
+              <p>
+                {taskModalMode === "bulk"
+                  ? "Paste a backlog and create reviewed tasks in one step."
+                  : "Capture a backlog item or reminder that is not tied to current work."}
+              </p>
             </div>
-            <label className="offline-modal-full">
-              Priority
-              <select
-                value={taskForm.priority}
-                onChange={(e) => setTaskForm((prev) => ({ ...prev, priority: e.target.value as TaskForm["priority"] }))}
+            <div className="task-mode-toggle" role="group" aria-label="Task entry mode">
+              <button
+                aria-pressed={taskModalMode === "single"}
+                className="button compact"
+                onClick={() => setTaskModalMode("single")}
+                type="button"
               >
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </label>
-            <div className="offline-modal-row">
-              <label>
-                Client
-                <input
-                  type="text"
-                  value={taskForm.clientLabel}
-                  onChange={(e) => setTaskForm((prev) => ({ ...prev, clientLabel: e.target.value }))}
-                />
-              </label>
-              <label>
-                Project
-                <input
-                  type="text"
-                  value={taskForm.projectLabel}
-                  onChange={(e) => setTaskForm((prev) => ({ ...prev, projectLabel: e.target.value }))}
-                />
-              </label>
+                Single task
+              </button>
+              <button
+                aria-pressed={taskModalMode === "bulk"}
+                className="button compact"
+                onClick={() => setTaskModalMode("bulk")}
+                type="button"
+              >
+                Paste many
+              </button>
             </div>
+
+            {taskModalMode === "single" ? (
+              <>
+                <label className="offline-modal-full">
+                  Title
+                  <input
+                    required
+                    type="text"
+                    value={taskForm.title}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))}
+                  />
+                </label>
+                <label className="offline-modal-full">
+                  Notes
+                  <textarea
+                    value={taskForm.notes}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  />
+                </label>
+                <div className="offline-modal-row">
+                  <label>
+                    Due date
+                    <input
+                      type="date"
+                      value={taskForm.dueDate}
+                      onChange={(e) => setTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Due time
+                    <input
+                      type="time"
+                      value={taskForm.dueTime}
+                      onChange={(e) => setTaskForm((prev) => ({ ...prev, dueTime: e.target.value }))}
+                    />
+                  </label>
+                </div>
+                <label className="offline-modal-full">
+                  Priority
+                  <select
+                    value={taskForm.priority}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, priority: e.target.value as TaskForm["priority"] }))}
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <div className="offline-modal-row">
+                  <label>
+                    Client
+                    <input
+                      type="text"
+                      value={taskForm.clientLabel}
+                      onChange={(e) => setTaskForm((prev) => ({ ...prev, clientLabel: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Project
+                    <input
+                      type="text"
+                      value={taskForm.projectLabel}
+                      onChange={(e) => setTaskForm((prev) => ({ ...prev, projectLabel: e.target.value }))}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bulk-task-hint">
+                  <strong>AI-assisted</strong>
+                  <span>Uses your configured provider when available. If AI is offline, DayTrail safely imports one task per line.</span>
+                </div>
+                <label className="offline-modal-full">
+                  Paste tasks
+                  <textarea
+                    className="bulk-task-textarea"
+                    placeholder={"One task per line, or paste a rough backlog.\nExample: HER Health LIS Integration"}
+                    value={bulkTaskText}
+                    onChange={(e) => {
+                      setBulkTaskText(e.target.value);
+                      setBulkTaskDrafts([]);
+                    }}
+                  />
+                </label>
+                <label className="offline-modal-full">
+                  Default priority
+                  <select
+                    value={bulkTaskPriority}
+                    onChange={(e) => setBulkTaskPriority(e.target.value as TaskForm["priority"])}
+                  >
+                    <option value="high">High - urgent</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                {bulkTaskDrafts.length > 0 && (
+                  <section className="bulk-task-review" aria-label="Imported task drafts">
+                    <header>
+                      <strong>{bulkTaskDrafts.length} tasks ready</strong>
+                      <span>{bulkTaskPriority} priority</span>
+                    </header>
+                    <div>
+                      {bulkTaskDrafts.slice(0, 8).map((draft, index) => (
+                        <span key={`${draft.title}-${index}`}>
+                          <Icon name="check" />
+                          {draft.title}
+                        </span>
+                      ))}
+                      {bulkTaskDrafts.length > 8 && <em>+{bulkTaskDrafts.length - 8} more</em>}
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
             <div className="offline-modal-actions">
-              <button className="button" type="submit">Save task</button>
-              <button className="button ghost" onClick={() => setTaskModalOpen(false)} type="button">Cancel</button>
+              {taskModalMode === "single" ? (
+                <button className="button" type="submit">Save task</button>
+              ) : (
+                <>
+                  <button className="button" disabled={isDraftingTasks} onClick={draftBulkTasks} type="button">
+                    {isDraftingTasks ? "Drafting..." : "AI draft tasks"}
+                  </button>
+                  <button
+                    className="button primary"
+                    disabled={bulkTaskDrafts.length === 0}
+                    onClick={createBulkTasks}
+                    type="button"
+                  >
+                    {bulkTaskDrafts.length > 0
+                      ? `Create ${bulkTaskDrafts.length} task${bulkTaskDrafts.length === 1 ? "" : "s"}`
+                      : "Create tasks"}
+                  </button>
+                </>
+              )}
+              <button className="button ghost" onClick={closeTaskModal} type="button">Cancel</button>
             </div>
           </form>
         </div>

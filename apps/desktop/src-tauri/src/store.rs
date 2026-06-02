@@ -44,7 +44,7 @@ use crate::{
         RecoveryEventInput, RecoveryPrompt, RecoverySummary, ReportOutput, ReturnMarker,
         ReviewSessionInput, ScratchpadNote, ScratchpadNoteInput, SearchResult, Settings,
         SettingsConfigPayload, SettingsPatch, SourceEvent, SourceEventInput, StateSnapshot,
-        StateSnapshotInput, StorageLocationInfo, Task, TaskInput, TaskStatus,
+        StateSnapshotInput, StorageLocationInfo, Task, TaskDraft, TaskInput, TaskStatus,
         TerminalBridgeMetadata, TimesheetRow, TodaySnapshot, UnclosedLoopItem, WorkMemorySummary,
         WorkOutput, WorkOutputInput, WorkSessionSummary, WorkspaceContext,
     },
@@ -1103,6 +1103,59 @@ impl WorktraceStore {
         )?;
         let id = conn.last_insert_rowid();
         Self::get_task_locked(&conn, id)
+    }
+
+    pub fn draft_tasks_from_text(
+        &self,
+        text: &str,
+        default_priority: Option<String>,
+    ) -> Result<Vec<TaskDraft>> {
+        let text = text.trim();
+        anyhow::ensure!(!text.is_empty(), "task text is required");
+        let default_priority = default_priority
+            .as_deref()
+            .map(normalize_task_priority)
+            .unwrap_or_else(|| "high".to_string());
+        let fallback = parse_task_drafts_from_text(text, &default_priority);
+
+        let Some(ai_drafts) = self.try_draft_tasks_with_ai(text, &default_priority) else {
+            return Ok(fallback);
+        };
+
+        Ok(if ai_drafts.is_empty() {
+            fallback
+        } else {
+            ai_drafts
+        })
+    }
+
+    fn try_draft_tasks_with_ai(&self, text: &str, default_priority: &str) -> Option<Vec<TaskDraft>> {
+        let settings = self.get_settings().ok()?;
+        let endpoint = settings.ai_endpoint.trim();
+        let model = settings.ai_model.trim();
+        if endpoint.is_empty() || model.is_empty() {
+            return None;
+        }
+
+        let api_key = settings
+            .ai_api_key_ref
+            .as_deref()
+            .and_then(keychain_key_from_ref)
+            .and_then(|keychain_key| SystemKeychain.keychain_get(keychain_key).ok().flatten());
+        let instruction = format!(
+            "Extract backlog tasks from pasted user text. Return JSON only: an array of objects with keys title, notes, priority, clientLabel, projectLabel. Do not add due dates unless explicitly present. Use priority \"{default_priority}\" when the user says the items are urgent or no priority is provided. Do not invent tasks."
+        );
+        let generated = crate::llm::generate_text(
+            &settings.ai_provider,
+            endpoint,
+            model,
+            api_key.as_deref(),
+            &instruction,
+            text,
+        )
+        .ok()?;
+
+        parse_task_drafts_from_ai_output(&generated, default_priority)
     }
 
     pub fn list_tasks(&self, status: Option<TaskStatus>) -> Result<Vec<Task>> {
@@ -10181,6 +10234,126 @@ fn normalize_task_priority(value: &str) -> String {
         "low" => "low".to_string(),
         _ => "medium".to_string(),
     }
+}
+
+fn parse_task_drafts_from_text(text: &str, default_priority: &str) -> Vec<TaskDraft> {
+    text.lines()
+        .filter_map(clean_task_draft_title)
+        .take(50)
+        .map(|title| TaskDraft {
+            title,
+            due_date: None,
+            due_at: None,
+            notes: None,
+            priority: Some(default_priority.to_string()),
+            client_label: None,
+            project_label: None,
+        })
+        .collect()
+}
+
+fn parse_task_drafts_from_ai_output(output: &str, default_priority: &str) -> Option<Vec<TaskDraft>> {
+    let json_text = extract_json_payload(output);
+    let value: Value = serde_json::from_str(&json_text).ok()?;
+    let rows = value
+        .as_array()
+        .or_else(|| value.get("tasks").and_then(Value::as_array))?;
+    let drafts = rows
+        .iter()
+        .filter_map(|row| {
+            let title = row
+                .get("title")
+                .and_then(Value::as_str)
+                .and_then(clean_task_draft_title)?;
+            Some(TaskDraft {
+                title,
+                due_date: row
+                    .get("dueDate")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                due_at: row.get("dueAt").and_then(Value::as_i64),
+                notes: row
+                    .get("notes")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                priority: Some(
+                    row.get("priority")
+                        .and_then(Value::as_str)
+                        .map(normalize_task_priority)
+                        .unwrap_or_else(|| default_priority.to_string()),
+                ),
+                client_label: row
+                    .get("clientLabel")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                project_label: row
+                    .get("projectLabel")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .take(50)
+        .collect::<Vec<_>>();
+
+    Some(drafts)
+}
+
+fn extract_json_payload(output: &str) -> String {
+    let trimmed = output.trim();
+    if let Some(start) = trimmed.find("```") {
+        if let Some(end) = trimmed[start + 3..].find("```") {
+            let fenced = &trimmed[start + 3..start + 3 + end];
+            return fenced
+                .trim()
+                .strip_prefix("json")
+                .unwrap_or(fenced.trim())
+                .trim()
+                .to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn clean_task_draft_title(value: &str) -> Option<String> {
+    let mut title = value.trim();
+    if title.is_empty() {
+        return None;
+    }
+    title = title
+        .trim_start_matches(|c: char| c == '-' || c == '*' || c == '•' || c.is_whitespace())
+        .trim();
+    let digit_count = title
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digit_count > 0 {
+        let rest = &title[digit_count..];
+        if rest.starts_with('.') || rest.starts_with(')') {
+            title = rest[1..].trim();
+        }
+    }
+    title = title
+        .trim_start_matches("[ ]")
+        .trim_start_matches("[x]")
+        .trim_start_matches("[X]")
+        .trim();
+
+    let title = title
+        .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
+        .trim();
+    if title.len() < 2 {
+        return None;
+    }
+    Some(title.chars().take(160).collect())
 }
 
 fn task_priority_rank(task: &Task) -> i64 {

@@ -221,6 +221,28 @@ describe("DayTrail command center", () => {
       if (command === "create_task") {
         return { ...openTask, id: 43, title: (args?.input as { title: string }).title };
       }
+      if (command === "draft_tasks_from_text") {
+        return [
+          {
+            title: "HER Health LIS Integration",
+            dueDate: null,
+            dueAt: null,
+            notes: null,
+            priority: "high",
+            clientLabel: null,
+            projectLabel: null,
+          },
+          {
+            title: "NOVA Path kind LIS Integration",
+            dueDate: null,
+            dueAt: null,
+            notes: null,
+            priority: "high",
+            clientLabel: null,
+            projectLabel: null,
+          },
+        ];
+      }
       if (command === "complete_task") {
         return { ...openTask, status: "done" };
       }
@@ -247,6 +269,40 @@ describe("DayTrail command center", () => {
     expect(await screen.findByRole("heading", { name: /tasks & reminders/i })).toBeInTheDocument();
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add task/i }));
+    await user.click(screen.getByRole("button", { name: /paste many/i }));
+    await user.type(
+      screen.getByLabelText(/paste tasks/i),
+      "HER Health LIS Integration\nNOVA Path kind LIS Integration",
+    );
+    await user.click(screen.getByRole("button", { name: /draft tasks/i }));
+
+    expect(await screen.findByText(/2 tasks ready/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/her health lis integration/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/nova path kind lis integration/i).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /create 2 tasks/i }));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("draft_tasks_from_text", {
+        text: "HER Health LIS Integration\nNOVA Path kind LIS Integration",
+        defaultPriority: "high",
+      });
+      expect(invoke).toHaveBeenCalledWith("create_task", {
+        input: expect.objectContaining({
+          title: "HER Health LIS Integration",
+          priority: "high",
+          source: "bulk-import",
+        }),
+      });
+      expect(invoke).toHaveBeenCalledWith("create_task", {
+        input: expect.objectContaining({
+          title: "NOVA Path kind LIS Integration",
+          priority: "high",
+          source: "bulk-import",
+        }),
+      });
+    });
 
     await user.click(screen.getByRole("button", { name: /add task/i }));
     await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");

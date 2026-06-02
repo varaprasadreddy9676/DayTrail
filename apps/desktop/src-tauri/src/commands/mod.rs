@@ -34,6 +34,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         agents::list_loop_risks,
         tasks::list_tasks,
         tasks::create_task,
+        tasks::draft_tasks_from_text,
         tasks::complete_task,
         tasks::snooze_task,
         tasks::delete_task,

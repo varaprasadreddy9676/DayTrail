@@ -752,19 +752,29 @@ button {
 }
 
 .task-modal {
-  width: 420px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  gap: 16px;
+}
+
+.task-modal-heading {
+  display: grid;
+  gap: 6px;
 }
 
 .offline-modal h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 18px;
+  line-height: 1.2;
   font-weight: 700;
   color: var(--text-main);
 }
 
 .offline-modal p {
-  margin: -8px 0 0;
-  font-size: 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--text-soft);
 }
 
@@ -803,10 +813,119 @@ button {
   resize: vertical;
 }
 
+.task-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-surface) 76%, transparent);
+}
+
+.task-mode-toggle .button {
+  justify-content: center;
+  min-height: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.task-mode-toggle .button[aria-pressed="true"] {
+  border-color: var(--accent-main);
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--accent-main) 18%, var(--bg-surface));
+}
+
+.bulk-task-textarea {
+  min-height: 176px;
+  line-height: 1.45;
+}
+
+.bulk-task-hint {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-main) 10%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bulk-task-hint strong {
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.bulk-task-review {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+}
+
+.bulk-task-review header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bulk-task-review strong,
+.bulk-task-review header span {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.bulk-task-review header span {
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.bulk-task-review div {
+  display: grid;
+  gap: 6px;
+  max-height: 172px;
+  overflow: auto;
+}
+
+.bulk-task-review span,
+.bulk-task-review em {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.bulk-task-review .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--success);
+  flex: 0 0 auto;
+}
+
 .offline-modal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.task-modal .offline-modal-actions {
+  padding-top: 2px;
+}
+
+.task-modal .offline-modal-actions .button.primary {
+  min-width: 132px;
 }
 
 .sidebar-footer {

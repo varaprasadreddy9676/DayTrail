@@ -657,6 +657,28 @@ fn stores_tasks_notes_settings_and_exports_them() {
 }
 
 #[test]
+fn drafts_bulk_tasks_from_pasted_text_without_due_dates() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    let drafts = store
+        .draft_tasks_from_text(
+            "HER Health LIS Integration\n\n- Implementation issues\n2. NOVA Path kind LIS Integration",
+            Some("high".into()),
+        )
+        .expect("draft tasks");
+
+    assert_eq!(drafts.len(), 3);
+    assert_eq!(drafts[0].title, "HER Health LIS Integration");
+    assert_eq!(drafts[1].title, "Implementation issues");
+    assert_eq!(drafts[2].title, "NOVA Path kind LIS Integration");
+    assert!(drafts.iter().all(|draft| draft.priority.as_deref() == Some("high")));
+    assert!(drafts.iter().all(|draft| draft.due_date.is_none()));
+    assert!(drafts.iter().all(|draft| draft.due_at.is_none()));
+}
+
+#[test]
 fn manages_tasks_and_reminders_lifecycle() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");

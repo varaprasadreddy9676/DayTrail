@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::{
     error::CommandError,
-    models::{PrivacyDeleteSummary, Task, TaskInput, TaskStatus},
+    models::{PrivacyDeleteSummary, Task, TaskDraft, TaskInput, TaskStatus},
     store::WorktraceStore,
 };
 
@@ -20,6 +20,17 @@ pub fn create_task(
     input: TaskInput,
 ) -> Result<Task, CommandError> {
     store.create_task(input).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn draft_tasks_from_text(
+    store: State<'_, WorktraceStore>,
+    text: String,
+    default_priority: Option<String>,
+) -> Result<Vec<TaskDraft>, CommandError> {
+    store
+        .draft_tasks_from_text(&text, default_priority)
+        .map_err(Into::into)
 }
 
 #[tauri::command]

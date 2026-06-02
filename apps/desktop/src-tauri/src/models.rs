@@ -63,6 +63,18 @@ pub struct TaskInput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskDraft {
+    pub title: String,
+    pub due_date: Option<String>,
+    pub due_at: Option<i64>,
+    pub notes: Option<String>,
+    pub priority: Option<String>,
+    pub client_label: Option<String>,
+    pub project_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QuickNote {
     pub id: i64,
     pub body: String,
