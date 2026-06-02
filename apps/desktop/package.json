@@ -1,6 +1,6 @@
 {
   "name": "@daytrail/desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": false,
   "description": "DayTrail Tauri desktop application.",
   "license": "MIT OR Apache-2.0",

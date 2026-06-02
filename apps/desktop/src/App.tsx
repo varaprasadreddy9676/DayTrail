@@ -2530,6 +2530,7 @@ function WorkContextEditorModal({
 export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const [autoUpdateResult, setAutoUpdateResult] = useState<UpdateCheckResult | null>(null);
 
   const addToast = useCallback((kind: ToastKind, title: string, message?: string) => {
     const id = nextToastId();
@@ -2860,6 +2861,37 @@ export default function App() {
     return () => {
       ignore = true;
       window.clearInterval(refreshId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime() || !shouldRunAutoUpdateCheck()) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function checkForStartupUpdate() {
+      rememberAutoUpdateCheck();
+      const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
+
+      if (
+        ignore ||
+        !info ||
+        info.error ||
+        !info.updateAvailable ||
+        isAutoUpdateDismissed(info)
+      ) {
+        return;
+      }
+
+      setAutoUpdateResult(info);
+    }
+
+    void checkForStartupUpdate();
+
+    return () => {
+      ignore = true;
     };
   }, []);
 
@@ -3997,6 +4029,22 @@ export default function App() {
           permissionStatus={permissionStatus}
           summary={permissionSummary}
         />
+        {autoUpdateResult && (
+          <UpdatePrompt
+            result={autoUpdateResult}
+            onDismiss={() => {
+              dismissAutoUpdate(autoUpdateResult);
+              setAutoUpdateResult(null);
+            }}
+            onDownload={() => {
+              void invokeTauri("plugin:opener|open_url", {
+                url: updateDownloadUrl(autoUpdateResult),
+              });
+              dismissAutoUpdate(autoUpdateResult);
+              setAutoUpdateResult(null);
+            }}
+          />
+        )}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
@@ -4349,6 +4397,22 @@ export default function App() {
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      {autoUpdateResult && (
+        <UpdatePrompt
+          result={autoUpdateResult}
+          onDismiss={() => {
+            dismissAutoUpdate(autoUpdateResult);
+            setAutoUpdateResult(null);
+          }}
+          onDownload={() => {
+            void invokeTauri("plugin:opener|open_url", {
+              url: updateDownloadUrl(autoUpdateResult),
+            });
+            dismissAutoUpdate(autoUpdateResult);
+            setAutoUpdateResult(null);
+          }}
+        />
+      )}
 
       {logOfflineOpen && (
         <div className="offline-modal-backdrop" onClick={() => setLogOfflineOpen(false)}>
@@ -4604,6 +4668,40 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
         </div>
       ))}
     </div>
+  );
+}
+
+function UpdatePrompt({
+  result,
+  onDismiss,
+  onDownload,
+}: {
+  result: UpdateCheckResult;
+  onDismiss: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <aside className="update-prompt" aria-label="DayTrail update available" role="status">
+      <div className="update-prompt-icon">
+        <img alt="" src="/daytrail-icon.png" />
+      </div>
+      <div className="update-prompt-body">
+        <strong>{updatePromptLabel(result)}</strong>
+        <span>
+          {result.latestVersion
+            ? `DayTrail ${result.latestVersion} is ready to install.`
+            : "A newer DayTrail installer is ready."}
+        </span>
+      </div>
+      <div className="update-prompt-actions">
+        <button className="button compact primary" onClick={onDownload} type="button">
+          Download update
+        </button>
+        <button className="button compact ghost" onClick={onDismiss} type="button">
+          Later
+        </button>
+      </div>
+    </aside>
   );
 }
 
@@ -9851,6 +9949,68 @@ type UpdateCheckResult = {
   error?: string | null;
 };
 
+const UPDATE_AUTO_CHECK_KEY = "daytrail:autoUpdate:lastCheckedAt";
+const UPDATE_DISMISSED_KEY_PREFIX = "daytrail:autoUpdate:dismissed:";
+const UPDATE_AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function updateDownloadUrl(result: UpdateCheckResult) {
+  return result.downloadUrl || result.releaseUrl;
+}
+
+function updatePromptLabel(result: UpdateCheckResult) {
+  return result.latestVersion && result.latestVersion !== result.currentVersion
+    ? `Update available: v${result.latestVersion}`
+    : "New build available";
+}
+
+function updateDismissKey(result: UpdateCheckResult) {
+  return `${UPDATE_DISMISSED_KEY_PREFIX}${result.latestVersion ?? "unknown"}:${result.latestBuildAt ?? "release"}`;
+}
+
+function localStorageGetItem(key: string) {
+  try {
+    if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") {
+      return null;
+    }
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function localStorageSetItem(key: string, value: string) {
+  try {
+    if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") {
+      return;
+    }
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in private sessions or restricted test shells.
+  }
+}
+
+function shouldRunAutoUpdateCheck(now = Date.now()) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const raw = localStorageGetItem(UPDATE_AUTO_CHECK_KEY);
+  const lastCheckedAt = raw ? Number(raw) : 0;
+  return !Number.isFinite(lastCheckedAt) || now - lastCheckedAt >= UPDATE_AUTO_CHECK_INTERVAL_MS;
+}
+
+function rememberAutoUpdateCheck(now = Date.now()) {
+  localStorageSetItem(UPDATE_AUTO_CHECK_KEY, String(now));
+}
+
+function isAutoUpdateDismissed(result: UpdateCheckResult) {
+  return localStorageGetItem(updateDismissKey(result)) === "1";
+}
+
+function dismissAutoUpdate(result: UpdateCheckResult) {
+  localStorageSetItem(updateDismissKey(result), "1");
+}
+
 function UpdateChecker() {
   const [version, setVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "checking" | "result">("idle");
@@ -9876,10 +10036,7 @@ function UpdateChecker() {
   const openReleases = (url: string) => {
     void invokeTauri("plugin:opener|open_url", { url });
   };
-  const updateLabel =
-    result?.latestVersion && result.latestVersion !== result.currentVersion
-      ? `Update available: v${result.latestVersion} - Download`
-      : "New build available - Download";
+  const updateLabel = result ? `${updatePromptLabel(result)} - Download` : "Download update";
 
   return (
     <div className="settings-about-card">
@@ -9902,7 +10059,7 @@ function UpdateChecker() {
             <button
               className="button compact"
               type="button"
-              onClick={() => openReleases(result.downloadUrl || result.releaseUrl)}
+              onClick={() => openReleases(updateDownloadUrl(result))}
             >
               {updateLabel}
             </button>

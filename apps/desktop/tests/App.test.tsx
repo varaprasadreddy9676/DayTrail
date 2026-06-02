@@ -22,6 +22,19 @@ async function openAiSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /ai provider/i }));
 }
 
+function installLocalStorageMock() {
+  const values = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+}
+
 describe("DayTrail command center", () => {
   it("renders the native today shell and switches to app usage", async () => {
     const user = userEvent.setup();
@@ -192,6 +205,145 @@ describe("DayTrail command center", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("prompts for available updates from the automatic startup check", async () => {
+    const user = userEvent.setup();
+    installLocalStorageMock();
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          calendarEvents: [],
+          calendarReconciliation: {
+            plannedEvents: 0,
+            matchedEvents: 0,
+            unmatchedEvents: 0,
+            plannedDurationMs: 0,
+            actualOverlapMs: 0,
+            items: [],
+          },
+          focusSessions: [],
+          recoverySummary: null,
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+          appUsageSummary: { totalDurationMs: 0, apps: [] },
+          automationCandidates: [],
+          unclosedLoopInbox: [],
+          aiOutputLedger: [],
+          loopRisks: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings: { browserBridgeEnabled: true, excludedDomains: [] },
+          projectContext: null,
+          activeWorkContext: null,
+        };
+      }
+      if (command === "check_for_updates") {
+        return {
+          currentVersion: "0.1.2",
+          latestVersion: "0.1.3",
+          latestBuildAt: "2026-06-02T12:00:00Z",
+          updateAvailable: true,
+          releaseUrl: "https://github.com/example/releases/latest",
+          downloadUrl: "https://github.com/example/releases/download/v0.1.3/DayTrail.dmg",
+          error: null,
+        };
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByLabelText(/daytrail update available/i)).toBeInTheDocument();
+    expect(screen.getByText(/update available: v0.1.3/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /download update/i }));
+
+    expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
+      url: "https://github.com/example/releases/download/v0.1.3/DayTrail.dmg",
+    });
+    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
+  });
+
+  it("does not poll for updates again when the daily startup check already ran", async () => {
+    installLocalStorageMock();
+    window.localStorage.setItem("daytrail:autoUpdate:lastCheckedAt", String(Date.now()));
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          calendarEvents: [],
+          calendarReconciliation: {
+            plannedEvents: 0,
+            matchedEvents: 0,
+            unmatchedEvents: 0,
+            plannedDurationMs: 0,
+            actualOverlapMs: 0,
+            items: [],
+          },
+          focusSessions: [],
+          recoverySummary: null,
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+          appUsageSummary: { totalDurationMs: 0, apps: [] },
+          automationCandidates: [],
+          unclosedLoopInbox: [],
+          aiOutputLedger: [],
+          loopRisks: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings: { browserBridgeEnabled: true, excludedDomains: [] },
+          projectContext: null,
+          activeWorkContext: null,
+        };
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("check_for_updates", undefined);
+    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
   });
 
   it("manages overall tasks and reminders from Today", async () => {
