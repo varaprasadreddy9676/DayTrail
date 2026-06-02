@@ -5925,7 +5925,7 @@ textarea {
 
 .settings-action-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  grid-template-columns: 28px minmax(0, 1fr) 20px;
   align-items: center;
   gap: 10px;
   min-height: 58px;
@@ -5935,6 +5935,11 @@ textarea {
   color: inherit;
   background: transparent;
   text-align: left;
+}
+
+.settings-action-row[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent-main) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-main);
 }
 
 .settings-action-row strong,
@@ -5953,6 +5958,19 @@ textarea {
   color: var(--text-muted);
   font-style: normal;
   white-space: nowrap;
+}
+
+.settings-selection-mark {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.settings-selection-mark[data-state="selected"] {
+  color: var(--accent-main);
 }
 
 .storage-location-list .status-row {

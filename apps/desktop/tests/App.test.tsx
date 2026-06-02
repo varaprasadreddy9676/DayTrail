@@ -825,6 +825,82 @@ describe("DayTrail command center", () => {
     expect(screen.getByText(/openai compatible ready/i)).toBeInTheDocument();
   });
 
+  it("moves the visible mode checkmark when Pro Mode is selected", async () => {
+    const user = userEvent.setup();
+    const baseSettings = {
+      browserBridgeEnabled: true,
+      excludedDomains: [],
+      experienceMode: "simple",
+      showSystemApps: false,
+      showRawEvents: false,
+      showCaptureConfidence: false,
+      showAiDetails: "summary",
+      aiProvider: "Ollama Local",
+      aiModel: "llama3.1",
+      aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      aiRedactSecrets: true,
+      fullClipboardHistory: false,
+    };
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-02",
+          tasks: [],
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings: baseSettings,
+          projectContext: null,
+        };
+      }
+
+      if (command === "update_settings") {
+        return {
+          ...baseSettings,
+          ...(args?.patch as Record<string, unknown>),
+        };
+      }
+
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: {
+        invoke: invoke as unknown as <T>(
+          command: string,
+          args?: Record<string, unknown>,
+        ) => Promise<T>,
+      },
+    };
+
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /^settings$/i }));
+
+    const simpleModeButton = screen.getByRole("button", { name: /simple mode timeline/i });
+    const proModeButton = screen.getByRole("button", { name: /pro mode detailed activity/i });
+
+    expect(simpleModeButton).toHaveAttribute("aria-pressed", "true");
+    expect(simpleModeButton.querySelector(".settings-selection-mark")?.getAttribute("data-state")).toBe("selected");
+    expect(proModeButton.querySelector(".settings-selection-mark")?.getAttribute("data-state")).toBe("available");
+
+    await user.click(proModeButton);
+
+    await waitFor(() => expect(proModeButton).toHaveAttribute("aria-pressed", "true"));
+    expect(simpleModeButton).toHaveAttribute("aria-pressed", "false");
+    expect(simpleModeButton.querySelector(".settings-selection-mark")?.getAttribute("data-state")).toBe("available");
+    expect(proModeButton.querySelector(".settings-selection-mark")?.getAttribute("data-state")).toBe("selected");
+  });
+
   it("saves launch-at-login from capture settings", async () => {
     const user = userEvent.setup();
     const settings = {

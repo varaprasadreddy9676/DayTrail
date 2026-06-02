@@ -9253,7 +9253,13 @@ function SettingsView({
                     <strong>Simple Mode</strong>
                     <em>Timeline, sessions, reports, and review items without technical detail.</em>
                   </span>
-                  <Icon name="check" />
+                  <span
+                    aria-hidden="true"
+                    className="settings-selection-mark"
+                    data-state={settingsView.mode === "simple" ? "selected" : "available"}
+                  >
+                    <Icon name={settingsView.mode === "simple" ? "check" : "arrow"} />
+                  </span>
                 </button>
                 <button
                   aria-pressed={settingsView.mode === "pro"}
@@ -9273,7 +9279,13 @@ function SettingsView({
                     <strong>Pro Mode</strong>
                     <em>Detailed activity rows, confidence, technical exports, and evidence inspection.</em>
                   </span>
-                  <Icon name="arrow" />
+                  <span
+                    aria-hidden="true"
+                    className="settings-selection-mark"
+                    data-state={settingsView.mode === "pro" ? "selected" : "available"}
+                  >
+                    <Icon name={settingsView.mode === "pro" ? "check" : "arrow"} />
+                  </span>
                 </button>
               </div>
               <div className="status-matrix">
