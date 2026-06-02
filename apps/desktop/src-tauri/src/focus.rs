@@ -7,6 +7,7 @@
 //!   * on-task  — matches the chosen focus target (app or project), OR is neutral
 //!     (we don't nag on neutral apps when the AI adjudicator is off);
 //!   * off-task — matches the distraction list (apps/domains).
+//!
 //! An optional AI adjudicator for the neutral "gray zone" can be layered on top
 //! later; it is off by default.
 

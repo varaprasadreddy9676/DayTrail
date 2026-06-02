@@ -17,11 +17,11 @@ const SERVICE_NAME: &str = "ai.daytrail.desktop";
 pub(crate) fn notification_sound() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        return "Glass";
+        "Glass"
     }
     #[cfg(target_os = "windows")]
     {
-        return "Default";
+        "Default"
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
