@@ -5,10 +5,12 @@
 /// are cached in memory so each icon is only extracted once per session.
 use std::{
     collections::HashMap,
-    path::PathBuf,
     process::Command,
     sync::{Mutex, OnceLock},
 };
+
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -21,7 +23,9 @@ fn icon_cache() -> &'static Mutex<HashMap<String, String>> {
 }
 
 /// Canonical `.app` bundle folder names for apps whose display name differs
-/// from their bundle file name.
+/// from their bundle file name. Used by the macOS bundle lookup and by the
+/// shared display-name test.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn canonical_bundle_folder(app_name: &str) -> &str {
     match app_name {
         "Visual Studio Code" | "VS Code" | "Code" => "Visual Studio Code",
@@ -425,9 +429,12 @@ pub fn app_icon_data_url(_app_name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
     use std::path::Path;
 
-    use super::{app_icon_data_url, canonical_bundle_folder};
+    #[cfg(target_os = "macos")]
+    use super::app_icon_data_url;
+    use super::canonical_bundle_folder;
 
     #[test]
     fn maps_common_display_names_to_bundle_folders() {
