@@ -254,7 +254,171 @@ pub fn app_icon_data_url(app_name: &str) -> Option<String> {
     result
 }
 
-#[cfg(not(target_os = "macos"))]
+// ── Windows icon extraction ─────────────────────────────────────────────────
+//
+// Strategy: locate the app's `.exe` (running process by name → common install
+// dirs fallback), then ask PowerShell to extract the associated icon via the
+// .NET `System.Drawing.Icon.ExtractAssociatedIcon` API and emit a base64 PNG.
+// No new crate dependencies — uses the PowerShell that ships with Windows.
+
+/// Sanitize an app name into a safe filename stem for disk caching.
+#[cfg(target_os = "windows")]
+fn sanitize_for_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn extract_icon_via_powershell(app_name: &str) -> Option<String> {
+    // Reuse a cached PNG on disk if we already extracted this app's icon before.
+    let safe = sanitize_for_filename(app_name);
+    if safe.is_empty() {
+        return None;
+    }
+    let out_png = std::env::temp_dir().join(format!("daytrail_icon_v1_{}.png", safe));
+
+    if out_png.exists() && out_png.metadata().map(|m| m.len() > 100).unwrap_or(false) {
+        let bytes = std::fs::read(&out_png).ok()?;
+        let encoded = BASE64.encode(&bytes);
+        return Some(format!("data:image/png;base64,{}", encoded));
+    }
+
+    // PowerShell single-shot script:
+    //   1. Try to find the exe path of a running process matching the app name.
+    //   2. Fall back to walking common install locations for `<name>.exe`.
+    //   3. Extract associated icon, resample to 64x64, write PNG, emit base64.
+    //
+    // All input is parameterized via -ArgumentList so the app name cannot be
+    // interpreted as PowerShell syntax.
+    let script = r#"
+param([string]$AppName, [string]$OutPng)
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Type -AssemblyName System.Drawing | Out-Null
+
+  function Get-Candidate {
+    param([string]$Name)
+
+    # 1. Running process whose ProcessName (without .exe) equals the app name.
+    $p = Get-Process -Name $Name -ErrorAction SilentlyContinue |
+         Where-Object { $_.Path } | Select-Object -First 1
+    if ($p) { return $p.Path }
+
+    # 2. Common install directories.
+    $roots = @()
+    if ($env:ProgramFiles)         { $roots += $env:ProgramFiles }
+    if (${env:ProgramFiles(x86)})  { $roots += ${env:ProgramFiles(x86)} }
+    if ($env:LOCALAPPDATA)         { $roots += (Join-Path $env:LOCALAPPDATA 'Programs') }
+    if ($env:APPDATA)              { $roots += $env:APPDATA }
+    $exeName = "$Name.exe"
+
+    foreach ($root in $roots) {
+      if (-not (Test-Path -LiteralPath $root)) { continue }
+      try {
+        $found = Get-ChildItem -LiteralPath $root -Filter $exeName -Recurse -ErrorAction SilentlyContinue -Depth 4 |
+                 Select-Object -First 1
+        if ($found) { return $found.FullName }
+      } catch {}
+    }
+    return $null
+  }
+
+  $exePath = Get-Candidate -Name $AppName
+  if (-not $exePath) {
+    # Special-case Windows Explorer.
+    if ($AppName -ieq 'explorer') { $exePath = "$env:WINDIR\explorer.exe" }
+  }
+  if (-not $exePath) { exit 2 }
+
+  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exePath)
+  if (-not $icon) { exit 3 }
+
+  $bmp = $icon.ToBitmap()
+  $target = New-Object System.Drawing.Bitmap 64, 64
+  $g = [System.Drawing.Graphics]::FromImage($target)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.DrawImage($bmp, 0, 0, 64, 64)
+  $g.Dispose()
+  $bmp.Dispose()
+  $icon.Dispose()
+  $target.Save($OutPng, [System.Drawing.Imaging.ImageFormat]::Png)
+  $target.Dispose()
+  exit 0
+} catch {
+  Write-Error $_.Exception.Message
+  exit 1
+}
+"#;
+
+    // Write the script to a temp file so we can invoke it with -File (avoids
+    // long -EncodedCommand and quoting headaches).
+    let script_path = std::env::temp_dir().join("daytrail_extract_icon.ps1");
+    if std::fs::write(&script_path, script).is_err() {
+        return None;
+    }
+
+    let status = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &script_path.to_string_lossy(),
+            "-AppName",
+            app_name,
+            "-OutPng",
+            &out_png.to_string_lossy(),
+        ])
+        .output()
+        .ok()?;
+
+    if !status.status.success() {
+        return None;
+    }
+
+    let bytes = std::fs::read(&out_png).ok()?;
+    if bytes.len() < 100 {
+        return None;
+    }
+    let encoded = BASE64.encode(&bytes);
+    Some(format!("data:image/png;base64,{}", encoded))
+}
+
+#[cfg(target_os = "windows")]
+pub fn app_icon_data_url(app_name: &str) -> Option<String> {
+    {
+        let cache = icon_cache().lock().ok()?;
+        if let Some(cached) = cache.get(app_name) {
+            return if cached.is_empty() {
+                None
+            } else {
+                Some(cached.clone())
+            };
+        }
+    }
+
+    let result = extract_icon_via_powershell(app_name);
+
+    if let Ok(mut cache) = icon_cache().lock() {
+        cache.insert(app_name.to_string(), result.clone().unwrap_or_default());
+    }
+
+    result
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn app_icon_data_url(_app_name: &str) -> Option<String> {
     None
 }
