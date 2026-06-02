@@ -5455,6 +5455,15 @@ textarea {
   min-height: 0;
 }
 
+.simple-reports-workspace {
+  align-items: start;
+  grid-template-columns: minmax(280px, 0.34fr) minmax(0, 1fr);
+}
+
+.simple-reports-workspace .report-output-panel {
+  min-height: 360px;
+}
+
 .report-type-tabs {
   display: flex;
   width: fit-content;
@@ -5562,6 +5571,15 @@ textarea {
   white-space: pre-wrap;
 }
 
+.empty-report-preview {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: normal;
+}
+
 .report-export-actions {
   grid-template-columns: 1fr;
   align-content: start;
@@ -5577,6 +5595,7 @@ textarea {
 
 .report-settings-list {
   display: grid;
+  align-content: start;
   padding: 10px 14px;
   gap: 9px;
 }
@@ -6832,7 +6851,34 @@ textarea {
   margin-top: 10px;
 }
 
+.compact-intel-panel .range-list article {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+}
+
+.compact-intel-panel .range-list strong,
+.compact-intel-panel .range-list span {
+  overflow: visible;
+  text-overflow: initial;
+  white-space: normal;
+}
+
+.compact-intel-panel .range-list strong {
+  line-height: 16px;
+}
+
+.compact-intel-panel .range-list span {
+  line-height: 17px;
+}
+
 .compact-intel-panel .output-actions {
+  justify-content: flex-end;
   margin-top: 10px;
 }
 

@@ -5347,8 +5347,8 @@ function CalendarFocusPanel({
             </article>
           ) : (
             <article>
-              <strong>Start a focused block from current context</strong>
-              <span>DayTrail will compare captured work against client/project/task signals.</span>
+              <strong>Ready to focus</strong>
+              <span>Uses the current client, project, and task as the target when available.</span>
             </article>
           )}
         </div>
@@ -8053,11 +8053,19 @@ function RitualsView({
             <p>Generate readable daily reports and weekly digests from sessions, apps, AI tools, calendar matches, focus drift, and review items.</p>
           </div>
           <div className="screen-actions">
-            <button className="button compact" onClick={onGenerateDaily} type="button">
+            <button
+              className={activeRitual === "daily" ? "button compact primary" : "button compact"}
+              onClick={onGenerateDaily}
+              type="button"
+            >
               <Icon name="plus" />
               Daily
             </button>
-            <button className="button compact primary" onClick={onGenerateWeekly} type="button">
+            <button
+              className={activeRitual === "weekly" ? "button compact primary" : "button compact"}
+              onClick={onGenerateWeekly}
+              type="button"
+            >
               <Icon name="archive" />
               Weekly
             </button>
@@ -8071,7 +8079,7 @@ function RitualsView({
           </section>
         )}
 
-        <div className="reports-workspace">
+        <div className="reports-workspace simple-reports-workspace">
           <section className="panel-block report-input-panel">
             <PanelHeader eyebrow="1. Included work" title="What will be summarized" value={`${reportView.includedWork.sessions} session${reportView.includedWork.sessions === 1 ? "" : "s"}`} />
             <div className="report-settings-list">
@@ -8090,8 +8098,10 @@ function RitualsView({
 
           <section className="panel-block report-output-panel">
             <PanelHeader eyebrow={activeRitual === "weekly" ? "2. Weekly digest" : "2. Daily report"} title={activeRitual === "weekly" ? "Weekly Work Review" : "Daily Work Report"} value="Markdown" />
-            <pre className="report-preview" aria-label="Generated report markdown">
-              {simpleReportMarkdown || "Generate today’s report after DayTrail captures a work session."}
+            <pre className={simpleReportMarkdown ? "report-preview" : "report-preview empty-report-preview"} aria-label="Generated report markdown">
+              {simpleReportMarkdown || (activeRitual === "weekly"
+                ? "Generate a weekly digest after DayTrail captures work across the last seven local days."
+                : "Generate today’s report after DayTrail captures a work session.")}
             </pre>
             <div className="output-actions">
               <button aria-label="Generate" className="button compact primary" onClick={onGenerateReport} type="button">
@@ -8114,7 +8124,7 @@ function RitualsView({
               <button
                 className="button compact"
                 disabled={!simpleReportMarkdown}
-                onClick={() => downloadTextFile("daytrail-daily-report.md", simpleReportMarkdown, "text/markdown")}
+                onClick={() => downloadTextFile(activeRitual === "weekly" ? "daytrail-weekly-digest.md" : "daytrail-daily-report.md", simpleReportMarkdown, "text/markdown")}
                 type="button"
               >
                 <Icon name="archive" />
@@ -9577,7 +9587,8 @@ function FocusMode() {
   return (
     <div className="focus-card">
       <button className="button compact sidebar-log-offline" type="button" onClick={() => setComposing(true)}>
-        ◎ Start focus
+        <Icon name="ritual" />
+        Start focus
       </button>
       {summary && (
         <div className="focus-summary">
