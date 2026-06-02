@@ -114,6 +114,8 @@ type BackendSettings = {
   terminalBridgePath?: string | null;
   launchAtLogin?: boolean;
   excludedDomains: string[];
+  excludedApps?: string[];
+  excludedProjects?: string[];
   aiProvider?: string;
   aiModel?: string;
   aiEndpoint?: string;
@@ -255,6 +257,14 @@ type BackendCalendarEvent = {
   location?: string | null;
   status: string;
   plannedWorkType?: string | null;
+};
+
+type CalendarBlockForm = {
+  title: string;
+  date: string;
+  start: string;
+  end: string;
+  plannedWorkType: string;
 };
 
 type BackendCalendarReconciliation = {
@@ -2259,6 +2269,16 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
   };
 }
 
+function defaultCalendarBlockForm(date = formatLocalDateInput(new Date())): CalendarBlockForm {
+  return {
+    title: "",
+    date,
+    start: "",
+    end: "",
+    plannedWorkType: "meeting",
+  };
+}
+
 // ── Work Context Editor ───────────────────────────────────────────────────────
 
 interface WorkContextForm {
@@ -2473,6 +2493,8 @@ export default function App() {
   const [permissionSetupDismissed, setPermissionSetupDismissed] = useState(false);
   const [logOfflineOpen, setLogOfflineOpen] = useState(false);
   const [offlineForm, setOfflineForm] = useState({ start: "", end: "", category: "Away from desk" });
+  const [calendarBlockOpen, setCalendarBlockOpen] = useState(false);
+  const [calendarBlockForm, setCalendarBlockForm] = useState<CalendarBlockForm>(() => defaultCalendarBlockForm());
   const [workContextEditor, setWorkContextEditor] = useState<WorkContextEditorState | null>(null);
 
   // Review / timesheet state
@@ -3165,6 +3187,54 @@ export default function App() {
       await refreshTodaySnapshot();
     } else {
       addToast("error", "Could not log offline time", "Backend unavailable.");
+    }
+  }
+
+  function openCalendarBlockModal() {
+    const date = todaySnapshot?.localDate && /^\d{4}-\d{2}-\d{2}$/.test(todaySnapshot.localDate)
+      ? todaySnapshot.localDate
+      : formatLocalDateInput(new Date());
+    setCalendarBlockForm(defaultCalendarBlockForm(date));
+    setCalendarBlockOpen(true);
+  }
+
+  async function submitCalendarBlock(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const startedAt = new Date(`${calendarBlockForm.date}T${calendarBlockForm.start}:00`).getTime();
+    const endedAt = new Date(`${calendarBlockForm.date}T${calendarBlockForm.end}:00`).getTime();
+    const title = calendarBlockForm.title.trim();
+
+    if (!title) {
+      addToast("error", "Missing title", "Add a short label for the planned block.");
+      return;
+    }
+    if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt <= startedAt) {
+      addToast("error", "Invalid time range", "End time must be after start time.");
+      return;
+    }
+
+    const result = await invokeTauri<BackendCalendarEvent>("upsert_calendar_event", {
+      input: {
+        id: null,
+        source: "manual",
+        externalId: null,
+        calendarName: "Manual plan",
+        title,
+        startsAt: startedAt,
+        endsAt: endedAt,
+        location: null,
+        status: "confirmed",
+        plannedWorkType: calendarBlockForm.plannedWorkType,
+      },
+    });
+
+    if (result) {
+      setCalendarBlockOpen(false);
+      setCalendarBlockForm(defaultCalendarBlockForm(calendarBlockForm.date));
+      addToast("success", "Calendar block added", `${title} saved as planned time.`);
+      await refreshTodaySnapshot();
+    } else {
+      addToast("error", "Could not add calendar block", "Backend unavailable.");
     }
   }
 
@@ -3902,6 +3972,7 @@ export default function App() {
               appUsageSummary={effectiveSnapshot?.appUsageSummary}
               onGenerateReport={generateDailyReport}
               onGenerateWeeklyReport={generateWeeklyReport}
+              onOpenCalendarBlock={openCalendarBlockModal}
               onStartFocus={startFocusTimer}
               onStopFocus={stopFocusTimer}
               onIgnoreIdleBlock={ignoreIdleBlock}
@@ -4134,6 +4205,75 @@ export default function App() {
             <div className="offline-modal-actions">
               <button className="button" type="submit">Save block</button>
               <button className="button ghost" onClick={() => setLogOfflineOpen(false)} type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {calendarBlockOpen && (
+        <div className="offline-modal-backdrop" onClick={() => setCalendarBlockOpen(false)}>
+          <form
+            className="offline-modal calendar-block-modal"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={submitCalendarBlock}
+          >
+            <h3>Add planned block</h3>
+            <p>Use this for meetings, focus blocks, calls, or planned offline work.</p>
+            <label className="offline-modal-full">
+              Title
+              <input
+                required
+                type="text"
+                placeholder="e.g. Customer call, Focus block"
+                value={calendarBlockForm.title}
+                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, title: e.target.value }))}
+              />
+            </label>
+            <label className="offline-modal-full">
+              Date
+              <input
+                required
+                type="date"
+                value={calendarBlockForm.date}
+                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, date: e.target.value }))}
+              />
+            </label>
+            <div className="offline-modal-row">
+              <label>
+                Start
+                <input
+                  required
+                  type="time"
+                  value={calendarBlockForm.start}
+                  onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, start: e.target.value }))}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  required
+                  type="time"
+                  value={calendarBlockForm.end}
+                  onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, end: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="offline-modal-full">
+              Type
+              <select
+                value={calendarBlockForm.plannedWorkType}
+                onChange={(e) => setCalendarBlockForm((prev) => ({ ...prev, plannedWorkType: e.target.value }))}
+              >
+                <option value="meeting">Meeting</option>
+                <option value="focus">Focus block</option>
+                <option value="call">Call</option>
+                <option value="planning">Planning</option>
+                <option value="offline-work">Offline work</option>
+              </select>
+            </label>
+            <div className="offline-modal-actions">
+              <button className="button" type="submit">Save planned block</button>
+              <button className="button ghost" onClick={() => setCalendarBlockOpen(false)} type="button">Cancel</button>
             </div>
           </form>
         </div>
@@ -4527,6 +4667,7 @@ function TodayView({
   isPaused,
   onGenerateReport,
   onGenerateWeeklyReport,
+  onOpenCalendarBlock,
   onIgnoreIdleBlock,
   onStartFocus,
   onStopFocus,
@@ -4557,6 +4698,7 @@ function TodayView({
   isPaused: boolean;
   onGenerateReport: () => void;
   onGenerateWeeklyReport: () => void;
+  onOpenCalendarBlock: () => void;
   onIgnoreIdleBlock: (gap: IdleGap & { id: string; idleBlockId?: string | null }) => Promise<void>;
   onStartFocus: () => void;
   onStopFocus: () => void;
@@ -4870,6 +5012,7 @@ function TodayView({
           activeFocusTimer={activeFocusTimer}
           calendar={snapshot?.calendarReconciliation}
           focusSessions={snapshot?.focusSessions ?? []}
+          onAddCalendarBlock={onOpenCalendarBlock}
           onStartFocus={onStartFocus}
           onStopFocus={onStopFocus}
         />
@@ -5286,12 +5429,14 @@ function CalendarFocusPanel({
   activeFocusTimer,
   calendar,
   focusSessions,
+  onAddCalendarBlock,
   onStartFocus,
   onStopFocus,
 }: {
   activeFocusTimer: ActiveFocusTimer | null;
   calendar?: BackendCalendarReconciliation;
   focusSessions: BackendFocusSession[];
+  onAddCalendarBlock: () => void;
   onStartFocus: () => void;
   onStopFocus: () => void;
 }) {
@@ -5317,6 +5462,11 @@ function CalendarFocusPanel({
             <article>
               <strong>{planned ? "Calendar matches look clean" : "Import or add calendar blocks"}</strong>
               <span>{planned ? "No missed planned work detected" : "DayTrail will reconcile planned time with captured work"}</span>
+              {!planned && (
+                <button className="button compact" type="button" onClick={onAddCalendarBlock}>
+                  Add planned block
+                </button>
+              )}
             </article>
           ) : missedItems.map((item) => (
             <article key={item.id}>
@@ -8944,6 +9094,40 @@ function SettingsView({
                 <div className="status-row" data-state="muted"><span>File contents</span><strong>Not captured by default</strong></div>
                 <div className="status-row" data-state={excludedDomainCount > 0 ? "warning" : "ok"}><span>Excluded browser domains</span><strong>{excludedDomainCount}</strong></div>
               </div>
+
+              <div className="settings-section-header privacy-exclusions-header">
+                <div>
+                  <span>Exclusions</span>
+                  <h2>Keep specific apps, sites, and projects out of tracking</h2>
+                </div>
+              </div>
+              <p className="privacy-exclusions-intro">
+                Anything you add here is never captured — not even its name. Use it for password managers,
+                personal chats, client work under NDA, or any project you don't want recorded.
+              </p>
+              <div className="privacy-exclusions">
+                <ExclusionEditor
+                  title="Excluded apps"
+                  hint="These apps are never recorded."
+                  placeholder="App name, e.g. 1Password"
+                  items={settings?.excludedApps ?? []}
+                  onChange={(next) => void onSaveExperienceSettings({ excludedApps: next })}
+                />
+                <ExclusionEditor
+                  title="Excluded browser domains"
+                  hint="Tabs on these domains aren't tracked."
+                  placeholder="Domain, e.g. mybank.com"
+                  items={settings?.excludedDomains ?? []}
+                  onChange={(next) => void onSaveExperienceSettings({ excludedDomains: next })}
+                />
+                <ExclusionEditor
+                  title="Excluded projects / folders"
+                  hint="Work in these paths isn't tracked."
+                  placeholder="Path, e.g. /Users/you/private-repo"
+                  items={settings?.excludedProjects ?? []}
+                  onChange={(next) => void onSaveExperienceSettings({ excludedProjects: next })}
+                />
+              </div>
             </section>
           )}
 
@@ -9601,6 +9785,79 @@ function FocusMode() {
             Dismiss
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ExclusionEditor({
+  title,
+  hint,
+  placeholder,
+  items,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  placeholder: string;
+  items: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const value = draft.trim();
+    if (!value) {
+      return;
+    }
+    if (!items.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      onChange([...items, value]);
+    }
+    setDraft("");
+  };
+
+  const remove = (value: string) => onChange(items.filter((item) => item !== value));
+
+  return (
+    <div className="exclusion-editor">
+      <div className="exclusion-head">
+        <strong>{title}</strong>
+        <span>{hint}</span>
+      </div>
+      <div className="exclusion-input-row">
+        <input
+          className="exclusion-input"
+          value={draft}
+          placeholder={placeholder}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button className="button compact" type="button" onClick={add} disabled={!draft.trim()}>
+          Add
+        </button>
+      </div>
+      {items.length > 0 ? (
+        <div className="exclusion-chips">
+          {items.map((item) => (
+            <span className="exclusion-chip" key={item}>
+              {item}
+              <button
+                type="button"
+                aria-label={`Remove ${item}`}
+                onClick={() => remove(item)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="exclusion-empty">Nothing excluded — everything is tracked.</span>
       )}
     </div>
   );

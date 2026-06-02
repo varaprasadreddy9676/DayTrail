@@ -751,6 +751,10 @@ button {
   gap: 14px;
 }
 
+.calendar-block-modal {
+  width: 380px;
+}
+
 .offline-modal h3 {
   margin: 0;
   font-size: 15px;
@@ -6862,6 +6866,11 @@ textarea {
   background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
 
+.compact-intel-panel .range-list article .button {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .compact-intel-panel .range-list strong,
 .compact-intel-panel .range-list span {
   overflow: visible;
@@ -6887,3 +6896,63 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.privacy-exclusions-header { margin-top: 24px; }
+.privacy-exclusions-intro {
+  margin: 0 0 12px;
+  font-size: 12px;
+  opacity: 0.75;
+  max-width: 60ch;
+}
+.privacy-exclusions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.exclusion-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+}
+.exclusion-head { display: flex; flex-direction: column; gap: 2px; }
+.exclusion-head strong { font-size: 13px; }
+.exclusion-head span { font-size: 11px; opacity: 0.7; }
+.exclusion-input-row { display: flex; gap: 8px; }
+.exclusion-input {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: inherit;
+  font-size: 12px;
+}
+.exclusion-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.exclusion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: var(--warning-bg, rgba(229, 160, 60, 0.16));
+  color: var(--warning, #e5a03c);
+  font-size: 12px;
+}
+.exclusion-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.exclusion-empty { font-size: 11px; opacity: 0.55; }
