@@ -296,19 +296,24 @@ describe("DayTrail command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText(/daytrail update available/i)).toBeInTheDocument();
-    expect(screen.getByText(/update available: v0.1.3/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /remind me in 8h/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("v0.1.2")).toBeInTheDocument();
+    expect(screen.getByText("v0.1.3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /later/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /download update/i }));
 
     expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
       url: "https://github.com/example/releases/download/v0.1.3/DayTrail.dmg",
     });
-    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
+    ).not.toBeInTheDocument();
   });
 
-  it("does not poll for updates again before the 8-hour startup check window", async () => {
+  it("checks for updates on startup even if a previous check happened recently", async () => {
     installLocalStorageMock();
     window.localStorage.setItem("daytrail:autoUpdate:lastCheckedAt", String(Date.now()));
     const invoke = vi.fn(async (command: string) => {
@@ -350,6 +355,17 @@ describe("DayTrail command center", () => {
           activeWorkContext: null,
         };
       }
+      if (command === "check_for_updates") {
+        return {
+          currentVersion: "0.1.2",
+          latestVersion: "0.1.2",
+          latestBuildAt: null,
+          updateAvailable: false,
+          releaseUrl: "https://github.com/example/releases/latest",
+          downloadUrl: null,
+          error: null,
+        };
+      }
       return null;
     });
 
@@ -365,8 +381,8 @@ describe("DayTrail command center", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
-    expect(invoke).not.toHaveBeenCalledWith("check_for_updates", undefined);
-    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("check_for_updates", undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("snoozes an available startup update for 8 hours", async () => {
@@ -437,14 +453,18 @@ describe("DayTrail command center", () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText(/daytrail update available/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /remind me in 8h/i }));
+    expect(
+      await screen.findByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /later/i }));
 
     const snoozedUntil = Number(
       window.localStorage.getItem("daytrail:autoUpdate:dismissed:0.1.3:2026-06-02T12:00:00Z"),
     );
     expect(snoozedUntil).toBeGreaterThanOrEqual(now + 8 * 60 * 60 * 1000 - 5_000);
-    expect(screen.queryByLabelText(/daytrail update available/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("manages overall tasks and reminders from My Tasks", async () => {

@@ -2973,14 +2973,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!hasTauriRuntime() || !shouldRunAutoUpdateCheck()) {
+    if (!hasTauriRuntime()) {
       return;
     }
 
     let ignore = false;
 
     async function checkForStartupUpdate() {
-      rememberAutoUpdateCheck();
       const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
 
       if (
@@ -4162,9 +4161,9 @@ export default function App() {
           summary={permissionSummary}
         />
         {autoUpdateResult && (
-          <UpdatePrompt
+          <UpdateAvailableDialog
             result={autoUpdateResult}
-            onDismiss={() => {
+            onClose={() => {
               dismissAutoUpdate(autoUpdateResult);
               setAutoUpdateResult(null);
             }}
@@ -4520,9 +4519,9 @@ export default function App() {
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {autoUpdateResult && (
-        <UpdatePrompt
+        <UpdateAvailableDialog
           result={autoUpdateResult}
-          onDismiss={() => {
+          onClose={() => {
             dismissAutoUpdate(autoUpdateResult);
             setAutoUpdateResult(null);
           }}
@@ -4792,40 +4791,6 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
         </div>
       ))}
     </div>
-  );
-}
-
-function UpdatePrompt({
-  result,
-  onDismiss,
-  onDownload,
-}: {
-  result: UpdateCheckResult;
-  onDismiss: () => void;
-  onDownload: () => void;
-}) {
-  return (
-    <aside className="update-prompt" aria-label="DayTrail update available" role="status">
-      <div className="update-prompt-icon">
-        <img alt="" src="/daytrail-icon.png" />
-      </div>
-      <div className="update-prompt-body">
-        <strong>{updatePromptLabel(result)}</strong>
-        <span>
-          {result.latestVersion
-            ? `DayTrail ${result.latestVersion} is ready to install.`
-            : "A newer DayTrail installer is ready."}
-        </span>
-      </div>
-      <div className="update-prompt-actions">
-        <button className="button compact primary" onClick={onDownload} type="button">
-          Download update
-        </button>
-        <button className="button compact ghost" onClick={onDismiss} type="button">
-          Remind me in 8h
-        </button>
-      </div>
-    </aside>
   );
 }
 
@@ -10288,19 +10253,11 @@ type UpdateCheckResult = {
   error?: string | null;
 };
 
-const UPDATE_AUTO_CHECK_KEY = "daytrail:autoUpdate:lastCheckedAt";
 const UPDATE_DISMISSED_KEY_PREFIX = "daytrail:autoUpdate:dismissed:";
 const UPDATE_REMIND_LATER_MS = 8 * 60 * 60 * 1000;
-const UPDATE_AUTO_CHECK_INTERVAL_MS = UPDATE_REMIND_LATER_MS;
 
 function updateDownloadUrl(result: UpdateCheckResult) {
   return result.downloadUrl || result.releaseUrl;
-}
-
-function updatePromptLabel(result: UpdateCheckResult) {
-  return result.latestVersion && result.latestVersion !== result.currentVersion
-    ? `Update available: v${result.latestVersion}`
-    : "New build available";
 }
 
 function updateDismissKey(result: UpdateCheckResult) {
@@ -10327,20 +10284,6 @@ function localStorageSetItem(key: string, value: string) {
   } catch {
     // Storage can be unavailable in private sessions or restricted test shells.
   }
-}
-
-function shouldRunAutoUpdateCheck(now = Date.now()) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const raw = localStorageGetItem(UPDATE_AUTO_CHECK_KEY);
-  const lastCheckedAt = raw ? Number(raw) : 0;
-  return !Number.isFinite(lastCheckedAt) || now - lastCheckedAt >= UPDATE_AUTO_CHECK_INTERVAL_MS;
-}
-
-function rememberAutoUpdateCheck(now = Date.now()) {
-  localStorageSetItem(UPDATE_AUTO_CHECK_KEY, String(now));
 }
 
 function isAutoUpdateDismissed(result: UpdateCheckResult) {
@@ -10450,9 +10393,7 @@ function UpdateAvailableDialog({
   const headline = result.latestVersion
     ? `DayTrail ${result.latestVersion} is available`
     : "A new DayTrail build is available";
-  const downloadLabel = result.latestVersion
-    ? `Download v${result.latestVersion}`
-    : "Download update";
+  const downloadLabel = "Download update";
 
   return (
     <div
@@ -10470,16 +10411,21 @@ function UpdateAvailableDialog({
           <img alt="" className="update-dialog-icon" src="/daytrail-icon.png" />
           <div className="update-dialog-heading">
             <h3 id="update-dialog-title">{headline}</h3>
-            <p className="update-dialog-versions">
-              You're on <strong>v{result.currentVersion}</strong>
-              {result.latestVersion && (
-                <>
-                  {" "}— update to <strong>v{result.latestVersion}</strong>
-                </>
-              )}
-            </p>
+            <p className="update-dialog-copy">A newer build is ready. Download it from GitHub Releases and install it over your current copy.</p>
           </div>
         </div>
+        <dl className="update-dialog-versions">
+          <div>
+            <dt>Current</dt>
+            <dd>v{result.currentVersion}</dd>
+          </div>
+          {result.latestVersion && (
+            <div>
+              <dt>Available</dt>
+              <dd>v{result.latestVersion}</dd>
+            </div>
+          )}
+        </dl>
         {notes && (
           <div className="update-dialog-notes" aria-label="Release notes">
             <span className="update-dialog-notes-label">What's new</span>

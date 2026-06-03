@@ -6810,73 +6810,6 @@ textarea {
   to   { opacity: 0; transform: translateY(8px); }
 }
 
-.update-prompt {
-  position: fixed;
-  top: 64px;
-  right: 16px;
-  z-index: 9998;
-  width: min(420px, calc(100vw - 32px));
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-main) 32%, var(--border-subtle));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-raised) 94%, var(--accent-main));
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.26);
-}
-
-.update-prompt-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--surface-2);
-}
-
-.update-prompt-icon img {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.update-prompt-body {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.update-prompt-body strong {
-  color: var(--text-main);
-  font-size: 13px;
-  line-height: 18px;
-}
-
-.update-prompt-body span {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.update-prompt-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-@media (max-width: 760px) {
-  .update-prompt {
-    left: 16px;
-    grid-template-columns: auto 1fr;
-  }
-
-  .update-prompt-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
-  }
-}
-
 /* ── Review / Timesheet View ────────────────────────────────────────────────── */
 
 .review-view {
@@ -7240,10 +7173,10 @@ textarea {
 /* ── Update available dialog ──────────────────────────────────────────── */
 
 .update-dialog {
-  width: min(460px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 32px));
   max-height: calc(100vh - 56px);
-  gap: 16px;
-  padding: 22px;
+  gap: 18px;
+  padding: 24px;
   overflow: hidden;
 }
 
@@ -7264,28 +7197,56 @@ textarea {
 .update-dialog-heading {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .update-dialog-heading h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.25;
   font-weight: 700;
   color: var(--text-main);
 }
 
-.update-dialog-versions {
+.update-dialog-copy {
   margin: 0;
-  font-size: 12px;
+  max-width: 360px;
+  font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
-.update-dialog-versions strong {
+.update-dialog-versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.update-dialog-versions div {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-control);
+}
+
+.update-dialog-versions dt {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.update-dialog-versions dd {
+  margin: 0;
   color: var(--text-main);
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .update-dialog-notes {
@@ -7319,10 +7280,47 @@ textarea {
 }
 
 .update-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(160px, max-content);
+  justify-content: end;
+  gap: 10px;
   margin-top: 2px;
+}
+
+.update-dialog-actions .button {
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.update-dialog-actions .button.primary {
+  min-width: 160px;
+}
+
+@media (max-width: 520px) {
+  .update-dialog {
+    padding: 20px;
+  }
+
+  .update-dialog-header {
+    gap: 12px;
+  }
+
+  .update-dialog-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .update-dialog-versions,
+  .update-dialog-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .update-dialog-actions .button,
+  .update-dialog-actions .button.primary {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .focus-card {
