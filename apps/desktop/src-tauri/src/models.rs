@@ -273,6 +273,7 @@ pub struct TodaySnapshot {
     pub ai_usage_summary: AiUsageSummary,
     pub app_usage_summary: AppUsageSummary,
     pub automation_candidates: Vec<AutomationCandidate>,
+    pub inferred_work_blocks: Vec<InferredWorkBlock>,
     pub capture_health: CaptureHealthSummary,
     pub unclosed_loop_inbox: Vec<UnclosedLoopItem>,
     pub ai_output_ledger: Vec<AiOutputLedgerItem>,
@@ -283,6 +284,25 @@ pub struct TodaySnapshot {
     pub settings: Settings,
     pub project_context: Option<ProjectContext>,
     pub active_work_context: Option<ActiveWorkContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InferredWorkBlock {
+    pub id: String,
+    pub category: String,
+    pub title: String,
+    pub detail: String,
+    pub confidence: String,
+    pub confidence_percent: i64,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub duration_ms: i64,
+    pub primary_app: String,
+    pub primary_context: String,
+    pub reason: String,
+    pub evidence_ids: Vec<String>,
+    pub suggested_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -522,6 +542,7 @@ pub struct ExportPayload {
     pub app_usage_summary: AppUsageSummary,
     pub ai_usage_summary: AiUsageSummary,
     pub automation_candidates: Vec<AutomationCandidate>,
+    pub inferred_work_blocks: Vec<InferredWorkBlock>,
     pub unclosed_loop_inbox: Vec<UnclosedLoopItem>,
     pub settings: Settings,
     pub pause_state: PauseState,

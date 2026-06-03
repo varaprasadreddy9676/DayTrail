@@ -37,15 +37,15 @@ use crate::{
         CaptureHealthCheck, CaptureHealthSummary, Commitment, CommitmentInput,
         DatabaseTransferResult, EmailThread, EmailThreadInput, ExportPayload, ExportRangeInput,
         FieldVisit, FieldVisitInput, FileUsage, FocusSessionInput, FocusSessionSummary, IdleBlock,
-        IdleBlockInput, LoopAction, LoopActionInput, LoopRisk, Meeting, MeetingInput,
-        MenuBarSummary, NextBestAction, ParallelStreamSummary, PauseState, PlanningItem,
-        PlanningOutput, PrivacyDeleteSummary, ProjectContext, QuickNote, RecoveryEvent,
-        RecoveryEventInput, RecoveryPrompt, RecoverySummary, ReportOutput, ReturnMarker,
-        ReviewSessionInput, ScratchpadNote, ScratchpadNoteInput, SearchResult, Settings,
-        SettingsConfigPayload, SettingsPatch, SourceEvent, SourceEventInput, StateSnapshot,
-        StateSnapshotInput, StorageLocationInfo, Task, TaskDraft, TaskInput, TaskStatus,
-        TerminalBridgeMetadata, TimesheetRow, TodaySnapshot, UnclosedLoopItem, WorkMemorySummary,
-        WorkOutput, WorkOutputInput, WorkSessionSummary, WorkspaceContext,
+        IdleBlockInput, InferredWorkBlock, LoopAction, LoopActionInput, LoopRisk, Meeting,
+        MeetingInput, MenuBarSummary, NextBestAction, ParallelStreamSummary, PauseState,
+        PlanningItem, PlanningOutput, PrivacyDeleteSummary, ProjectContext, QuickNote,
+        RecoveryEvent, RecoveryEventInput, RecoveryPrompt, RecoverySummary, ReportOutput,
+        ReturnMarker, ReviewSessionInput, ScratchpadNote, ScratchpadNoteInput, SearchResult,
+        Settings, SettingsConfigPayload, SettingsPatch, SourceEvent, SourceEventInput,
+        StateSnapshot, StateSnapshotInput, StorageLocationInfo, Task, TaskDraft, TaskInput,
+        TaskStatus, TerminalBridgeMetadata, TimesheetRow, TodaySnapshot, UnclosedLoopItem,
+        WorkMemorySummary, WorkOutput, WorkOutputInput, WorkSessionSummary, WorkspaceContext,
     },
     platform::{
         keychain_key_for_ai_provider, keychain_key_from_ref, set_launch_at_login, KeychainAdapter,
@@ -2172,6 +2172,12 @@ impl WorktraceStore {
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
         let app_usage_summary = build_app_usage_summary(&source_events);
         let automation_candidates = build_automation_candidates(&source_events);
+        let inferred_work_blocks = build_inferred_work_blocks(
+            &source_events,
+            &calendar_events,
+            Some(day_start),
+            Some(day_end),
+        );
         let loop_risks = self.detect_loop_risks()?;
         let hidden_loop_ids = self.hidden_loop_ids()?;
         let pause_state = self.pause_state()?;
@@ -2233,6 +2239,7 @@ impl WorktraceStore {
             ai_usage_summary,
             app_usage_summary,
             automation_candidates,
+            inferred_work_blocks,
             capture_health,
             unclosed_loop_inbox,
             ai_output_ledger,
@@ -2773,6 +2780,8 @@ impl WorktraceStore {
         let ai_usage_summary = build_ai_usage_summary(&source_events, &ai_usage, ai_outputs.len());
         let app_usage_summary = build_app_usage_summary(&source_events);
         let automation_candidates = build_automation_candidates(&source_events);
+        let inferred_work_blocks =
+            build_inferred_work_blocks(&source_events, &calendar_events, from_ms, to_ms);
         let loop_risks = if range_unbounded(from_ms, to_ms) {
             self.detect_loop_risks()?
         } else {
@@ -2826,6 +2835,7 @@ impl WorktraceStore {
             app_usage_summary,
             ai_usage_summary,
             automation_candidates,
+            inferred_work_blocks,
             unclosed_loop_inbox,
             settings: self.get_settings()?,
             pause_state: self.pause_state()?,
@@ -8463,6 +8473,313 @@ fn build_automation_candidates(events: &[SourceEvent]) -> Vec<AutomationCandidat
     candidates
 }
 
+#[derive(Debug, Clone)]
+struct InferenceEvidence<'a> {
+    event: &'a SourceEvent,
+    key: String,
+    clean_title: String,
+}
+
+fn build_inferred_work_blocks(
+    events: &[SourceEvent],
+    calendar_events: &[CalendarEvent],
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+) -> Vec<InferredWorkBlock> {
+    let mut evidence = events
+        .iter()
+        .filter(|event| event_duration_ms(event) > 0)
+        .filter(|event| from_ms.map_or(true, |from| event.ended_at > from))
+        .filter(|event| to_ms.map_or(true, |to| event.started_at < to))
+        .filter_map(|event| {
+            presentation_inference_key(event).map(|(key, clean_title)| InferenceEvidence {
+                event,
+                key,
+                clean_title,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    evidence.sort_by_key(|item| (item.key.clone(), item.event.started_at));
+
+    let mut blocks = Vec::new();
+    let mut current: Vec<InferenceEvidence<'_>> = Vec::new();
+    for item in evidence {
+        let split = current.last().is_some_and(|previous| {
+            previous.key != item.key
+                || item
+                    .event
+                    .started_at
+                    .saturating_sub(previous.event.ended_at)
+                    > 15 * 60_000
+        });
+        if split {
+            if let Some(block) = build_presentation_inferred_block(&current, calendar_events) {
+                blocks.push(block);
+            }
+            current.clear();
+        }
+        current.push(item);
+    }
+    if let Some(block) = build_presentation_inferred_block(&current, calendar_events) {
+        blocks.push(block);
+    }
+
+    blocks.sort_by_key(|block| (block.started_at, std::cmp::Reverse(block.duration_ms)));
+    blocks.truncate(12);
+    blocks
+}
+
+fn build_presentation_inferred_block(
+    evidence: &[InferenceEvidence<'_>],
+    calendar_events: &[CalendarEvent],
+) -> Option<InferredWorkBlock> {
+    if evidence.is_empty() {
+        return None;
+    }
+
+    let started_at = evidence
+        .iter()
+        .map(|item| item.event.started_at)
+        .min()
+        .unwrap_or_default();
+    let ended_at = evidence
+        .iter()
+        .map(|item| item.event.ended_at)
+        .max()
+        .unwrap_or(started_at);
+    let span_ms = ended_at.saturating_sub(started_at);
+    let active_ms = merged_interval_duration_ms(
+        evidence
+            .iter()
+            .map(|item| (item.event.started_at, item.event.ended_at))
+            .collect(),
+    );
+    if active_ms < 20 * 60_000 || span_ms < 30 * 60_000 {
+        return None;
+    }
+
+    let title = evidence
+        .iter()
+        .max_by_key(|item| event_duration_ms(item.event))
+        .map(|item| item.clean_title.clone())
+        .unwrap_or_else(|| "presentation".to_string());
+    let primary_app = dominant_label(
+        evidence
+            .iter()
+            .filter_map(|item| {
+                item.event
+                    .app
+                    .as_deref()
+                    .and_then(clean_app_label)
+                    .map(|label| (label, event_duration_ms(item.event)))
+            }),
+    )
+    .unwrap_or_else(|| "Captured activity".to_string());
+    let primary_context = dominant_label(
+        evidence
+            .iter()
+            .map(|item| (source_event_context_label(item.event), event_duration_ms(item.event))),
+    )
+    .unwrap_or_else(|| source_event_context_label(evidence[0].event));
+    let calendar_support = calendar_events
+        .iter()
+        .filter(|event| !calendar_event_cancelled(event))
+        .any(|event| {
+            event.starts_at < ended_at
+                && event.ends_at > started_at
+                && calendar_event_looks_like_meeting(event)
+        });
+    let mut confidence_percent = 60;
+    if evidence.iter().any(|item| source_mentions_google_slides(item.event)) {
+        confidence_percent += 15;
+    }
+    if active_ms >= 45 * 60_000 || span_ms >= 60 * 60_000 {
+        confidence_percent += 10;
+    }
+    if calendar_support {
+        confidence_percent += 10;
+    }
+    if evidence.len() >= 3 {
+        confidence_percent += 5;
+    }
+    confidence_percent = confidence_percent.min(92);
+    if confidence_percent < 60 {
+        return None;
+    }
+
+    let confidence = if confidence_percent >= 75 {
+        "high"
+    } else {
+        "medium"
+    };
+    let evidence_ids = evidence
+        .iter()
+        .map(|item| item.event.id.clone())
+        .collect::<Vec<_>>();
+    let detail = format!(
+        "{} of sustained presentation activity from {} to {}. Confirm whether this was a meeting, demo, review, or preparation.",
+        format_duration_words(active_ms),
+        format_clock_time(started_at),
+        format_clock_time(ended_at)
+    );
+    let reason = if calendar_support {
+        "Google Slides stayed active for a sustained block and overlaps calendar meeting time."
+            .to_string()
+    } else {
+        "Google Slides stayed active for a sustained block; DayTrail needs confirmation before marking it as meeting time."
+            .to_string()
+    };
+
+    Some(InferredWorkBlock {
+        id: format!(
+            "inferred-presentation-{}-{}",
+            started_at,
+            stable_id_part(&title)
+        ),
+        category: "presentation_meeting".to_string(),
+        title: format!("Possible meeting or presentation: {title}"),
+        detail,
+        confidence: confidence.to_string(),
+        confidence_percent,
+        started_at,
+        ended_at,
+        duration_ms: span_ms.max(active_ms),
+        primary_app,
+        primary_context,
+        reason,
+        evidence_ids,
+        suggested_actions: vec![
+            "Confirm as meeting".to_string(),
+            "Mark as presentation prep".to_string(),
+            "Ignore suggestion".to_string(),
+        ],
+    })
+}
+
+fn presentation_inference_key(event: &SourceEvent) -> Option<(String, String)> {
+    if !source_looks_like_presentation(event) {
+        return None;
+    }
+    let clean_title = event
+        .title
+        .as_deref()
+        .and_then(clean_capture_label)
+        .map(clean_presentation_title)
+        .filter(|title| title.len() >= 3)
+        .or_else(|| event.workspace_key.as_deref().and_then(clean_capture_label))
+        .or_else(|| event.domain.as_deref().and_then(clean_capture_label))
+        .unwrap_or_else(|| "presentation".to_string());
+    let key = stable_id_part(&clean_title);
+    if key.is_empty() {
+        None
+    } else {
+        Some((key, clean_title))
+    }
+}
+
+fn source_looks_like_presentation(event: &SourceEvent) -> bool {
+    let combined = [
+        event.title.as_deref(),
+        event.domain.as_deref(),
+        event.url_redacted.as_deref(),
+        event.workspace_key.as_deref(),
+        event.app.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|value| value.to_ascii_lowercase())
+    .collect::<Vec<_>>()
+    .join(" ");
+
+    combined.contains("google slides")
+        || combined.contains("docs.google.com/presentation")
+        || combined.contains("presentation/d/")
+        || combined.contains("powerpoint")
+        || combined.contains("keynote")
+        || combined.contains("slide deck")
+}
+
+fn source_mentions_google_slides(event: &SourceEvent) -> bool {
+    let combined = [
+        event.title.as_deref(),
+        event.domain.as_deref(),
+        event.url_redacted.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|value| value.to_ascii_lowercase())
+    .collect::<Vec<_>>()
+    .join(" ");
+    combined.contains("google slides")
+        || combined.contains("docs.google.com/presentation")
+        || combined.contains("presentation/d/")
+}
+
+fn clean_presentation_title(value: String) -> String {
+    let mut title = value
+        .replace(" - Google Slides", "")
+        .replace(" - PowerPoint", "")
+        .replace(" - Keynote", "")
+        .replace(" | Google Slides", "")
+        .replace(" · Google Slides", "");
+    title = clean_report_text(&title);
+    if title.is_empty() {
+        value
+    } else {
+        title
+    }
+}
+
+fn calendar_event_looks_like_meeting(event: &CalendarEvent) -> bool {
+    let text = [
+        Some(event.title.as_str()),
+        event.location.as_deref(),
+        event.planned_work_type.as_deref(),
+        event.calendar_name.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|value| value.to_ascii_lowercase())
+    .collect::<Vec<_>>()
+    .join(" ");
+    [
+        "meeting",
+        "call",
+        "demo",
+        "presentation",
+        "review",
+        "sync",
+        "standup",
+        "discussion",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+fn dominant_label<I>(items: I) -> Option<String>
+where
+    I: IntoIterator<Item = (String, i64)>,
+{
+    let mut buckets: HashMap<String, i64> = HashMap::new();
+    for (label, duration_ms) in items {
+        if let Some(cleaned) = clean_capture_label(&label) {
+            *buckets.entry(cleaned).or_default() += duration_ms.max(0);
+        }
+    }
+    buckets
+        .into_iter()
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+        .map(|(label, _)| label)
+}
+
+fn format_clock_time(value: i64) -> String {
+    match Local.timestamp_millis_opt(value).single() {
+        Some(time) => time.format("%-I:%M %p").to_string(),
+        None => "unknown time".to_string(),
+    }
+}
+
 fn automation_suggested_steps(examples: &[String], ai_tools: &[String]) -> Vec<String> {
     let has_browser = examples
         .iter()
@@ -10634,7 +10951,7 @@ fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
                 .map(|session| session.drift_ms)
                 .sum()
         ),
-        export.unclosed_loop_inbox.len()
+        export.unclosed_loop_inbox.len() + export.inferred_work_blocks.len()
     ));
     markdown.push_str(&format!(
         "- Smart Break score {}, longest uninterrupted {}, {} taken, {} skipped.\n",
@@ -10754,6 +11071,7 @@ fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
 
     markdown.push_str("\n## Risks and follow-ups\n");
     if export.unclosed_loop_inbox.is_empty()
+        && export.inferred_work_blocks.is_empty()
         && export.pending_replies.is_empty()
         && export.commitments.is_empty()
     {
@@ -10765,6 +11083,14 @@ fn build_weekly_review_markdown_from_export(export: &ExportPayload) -> String {
                 clean_report_text(&item.category),
                 clean_report_text(&item.title),
                 clean_report_text(&item.detail)
+            ));
+        }
+        for block in export.inferred_work_blocks.iter().take(8) {
+            markdown.push_str(&format!(
+                "- Confirm inferred block: {} - {} ({})\n",
+                clean_report_text(&block.title),
+                clean_report_text(&block.reason),
+                format_duration_words(block.duration_ms)
             ));
         }
         for reply in export.pending_replies.iter().take(5) {
@@ -10802,6 +11128,7 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
         snapshot.app_usage_summary.total_duration_ms.max(0)
     };
     let needs_review_count = snapshot.unclosed_loop_inbox.len()
+        + snapshot.inferred_work_blocks.len()
         + snapshot.loop_risks.len()
         + snapshot
             .idle_blocks
@@ -10980,6 +11307,14 @@ fn build_daily_report_markdown(snapshot: &TodaySnapshot, include_system_apps: bo
                 "- {} - {}\n",
                 clean_report_text(&risk.title),
                 clean_report_text(&risk.reason)
+            ));
+        }
+        for block in snapshot.inferred_work_blocks.iter().take(5) {
+            markdown.push_str(&format!(
+                "- Confirm inferred block: {} - {} ({})\n",
+                clean_report_text(&block.title),
+                clean_report_text(&block.reason),
+                format_duration_words(block.duration_ms)
             ));
         }
         for block in snapshot
@@ -11395,6 +11730,21 @@ fn build_export_analysis_markdown(export: &ExportPayload) -> String {
                 candidate.occurrences,
                 format_duration_words(candidate.duration_ms),
                 clean_report_text(&candidate.reason)
+            ));
+        }
+    }
+
+    markdown.push_str("\n## Inferred blocks to confirm\n");
+    if export.inferred_work_blocks.is_empty() {
+        markdown.push_str("- No inferred work blocks need confirmation in this range.\n");
+    } else {
+        for block in export.inferred_work_blocks.iter().take(8) {
+            markdown.push_str(&format!(
+                "- {}: {} confidence, {}. {}\n",
+                clean_report_text(&block.title),
+                clean_report_text(&block.confidence),
+                format_duration_words(block.duration_ms),
+                clean_report_text(&block.reason)
             ));
         }
     }

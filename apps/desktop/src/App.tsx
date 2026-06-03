@@ -185,6 +185,23 @@ type BackendCapturePermissionCheck = {
   actionLabel?: string | null;
 };
 
+type BackendInferredWorkBlock = {
+  id: string;
+  category: string;
+  title: string;
+  detail: string;
+  confidence: string;
+  confidencePercent: number;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  primaryApp: string;
+  primaryContext: string;
+  reason: string;
+  evidenceIds: string[];
+  suggestedActions: string[];
+};
+
 type BackendTodaySnapshot = {
   localDate: string;
   tasks: BackendTask[];
@@ -203,6 +220,7 @@ type BackendTodaySnapshot = {
   aiUsageSummary?: BackendAiUsageSummary;
   appUsageSummary?: BackendAppUsageSummary;
   automationCandidates?: BackendAutomationCandidate[];
+  inferredWorkBlocks?: BackendInferredWorkBlock[];
   captureHealth?: BackendCaptureHealthSummary;
   unclosedLoopInbox?: BackendUnclosedLoopItem[];
   aiOutputLedger?: BackendAiOutputLedgerItem[];
@@ -641,6 +659,7 @@ type BackendExportPayload = {
   appUsageSummary: BackendAppUsageSummary;
   aiUsageSummary: BackendAiUsageSummary;
   automationCandidates: BackendAutomationCandidate[];
+  inferredWorkBlocks: BackendInferredWorkBlock[];
   unclosedLoopInbox: BackendUnclosedLoopItem[];
   settings?: BackendSettings;
   pauseState?: BackendTodaySnapshot["pauseState"];
@@ -967,6 +986,7 @@ function exportPayloadToSnapshot(
     aiUsageSummary: payload.aiUsageSummary,
     appUsageSummary: payload.appUsageSummary,
     automationCandidates: payload.automationCandidates ?? [],
+    inferredWorkBlocks: payload.inferredWorkBlocks ?? [],
     captureHealth: fallback?.captureHealth,
     unclosedLoopInbox: payload.unclosedLoopInbox ?? [],
     aiOutputLedger: fallback?.aiOutputLedger ?? [],
@@ -2012,6 +2032,17 @@ function mapActions(snapshot: BackendTodaySnapshot | null): ActionItem[] {
       reason: item.detail || "A local source record needs a quick decision.",
       primaryAction: item.primaryAction || "Review",
       evidenceCount: item.evidenceIds.length,
+      state: "open" as const,
+    })),
+  );
+  actions.push(
+    ...(snapshot.inferredWorkBlocks ?? []).slice(0, 4).map((block) => ({
+      id: `inferred-${block.id}`,
+      title: block.title,
+      source: block.primaryApp || formatLoopLabel(block.category),
+      reason: block.reason || block.detail,
+      primaryAction: block.suggestedActions[0] || "Confirm",
+      evidenceCount: block.evidenceIds.length,
       state: "open" as const,
     })),
   );
@@ -8857,7 +8888,7 @@ function RitualsView({
               <div><span>Work sessions</span><strong>{reportView.includedWork.sessions}</strong></div>
               <div><span>Apps used</span><strong>{reportView.includedWork.apps}</strong></div>
               <div><span>AI tools detected</span><strong>{reportView.includedWork.aiTools}</strong></div>
-              <div><span>To review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
+              <div><span>To review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.inferredWorkBlocks?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
             </div>
             <div className="report-input-actions">
               <button className="button compact" onClick={onRegenerateContext} type="button">

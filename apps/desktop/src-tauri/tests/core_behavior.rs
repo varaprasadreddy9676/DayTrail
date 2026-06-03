@@ -111,6 +111,70 @@ fn calendar_events_reconcile_planned_vs_actual_work() {
 }
 
 #[test]
+fn infers_presentation_meeting_blocks_from_sustained_slides_activity() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+    let now = test_today_noon_ms();
+    let start = now - 60 * 60_000;
+
+    for (index, offset_minutes, duration_minutes, domain) in [
+        (0, 0, 29, "docs.google.com"),
+        (1, 31, 24, "medicsprime.in"),
+        (2, 57, 8, "docs.google.com"),
+    ] {
+        store
+            .record_source_event(SourceEventInput {
+                id: Some(format!("slides-{index}")),
+                source: "active-window".into(),
+                event_type: "browser_tab".into(),
+                app: Some("ChatGPT Atlas".into()),
+                title: Some("Client_Engagement 3rd June - Google Slides".into()),
+                url: Some(format!("https://{domain}/presentation/d/client-engagement")),
+                workspace_key: Some(domain.into()),
+                started_at: Some(start + offset_minutes * 60_000),
+                ended_at: Some(start + (offset_minutes + duration_minutes) * 60_000),
+                sensitivity: None,
+                metadata_json: None,
+            })
+            .expect("slides event");
+    }
+
+    store
+        .record_source_event(SourceEventInput {
+            id: Some("gitlab-short".into()),
+            source: "active-window".into(),
+            event_type: "browser_tab".into(),
+            app: Some("ChatGPT Atlas".into()),
+            title: Some("Review requests - GitLab".into()),
+            url: Some("https://gitlab.example/review".into()),
+            workspace_key: Some("gitlab.example".into()),
+            started_at: Some(start + 65 * 60_000),
+            ended_at: Some(start + 66 * 60_000),
+            sensitivity: None,
+            metadata_json: None,
+        })
+        .expect("short event");
+
+    let today = store.today_snapshot().expect("today snapshot");
+    let inferred = today
+        .inferred_work_blocks
+        .iter()
+        .find(|block| block.category == "presentation_meeting")
+        .expect("presentation meeting inference");
+
+    assert!(inferred.title.contains("Client_Engagement 3rd June"));
+    assert!(inferred.duration_ms >= 60 * 60_000);
+    assert!(inferred.confidence_percent >= 70);
+    assert!(inferred.reason.contains("Google Slides"));
+    assert!(inferred.evidence_ids.contains(&"slides-0".to_string()));
+    assert!(inferred
+        .suggested_actions
+        .iter()
+        .any(|action| action.contains("meeting")));
+}
+
+#[test]
 fn focus_sessions_measure_drift_from_the_declared_context() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("worktrace.sqlite3");

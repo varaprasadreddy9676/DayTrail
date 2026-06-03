@@ -40,6 +40,22 @@ export type TodaySnapshotLike = {
     primaryAction?: string | null;
     evidenceIds?: string[];
   }> | null;
+  inferredWorkBlocks?: Array<{
+    id?: string;
+    category?: string | null;
+    title?: string | null;
+    detail?: string | null;
+    confidence?: string | null;
+    confidencePercent?: number | null;
+    startedAt?: number;
+    endedAt?: number;
+    durationMs?: number;
+    primaryApp?: string | null;
+    primaryContext?: string | null;
+    reason?: string | null;
+    evidenceIds?: string[];
+    suggestedActions?: string[];
+  }> | null;
 };
 
 export function buildTodayView(snapshot: TodaySnapshotLike | null | undefined, settings?: ExperienceSettingsLike | null) {
@@ -53,6 +69,7 @@ export function buildTodayView(snapshot: TodaySnapshotLike | null | undefined, s
   const aiTools = snapshot?.aiUsageSummary?.tools ?? [];
   const reviewCount =
     (snapshot?.unclosedLoopInbox?.length ?? 0) +
+    (snapshot?.inferredWorkBlocks?.length ?? 0) +
     (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0);
 
   return {

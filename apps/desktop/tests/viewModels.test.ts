@@ -126,6 +126,29 @@ describe("Simple Mode view models", () => {
     expect(buildReviewView(lowDataSnapshot, baseSettings).lowDataMessage).toMatch(/more activity/i);
   });
 
+  it("counts inferred work blocks as review decisions", () => {
+    const view = buildTodayView(
+      snapshot({
+        inferredWorkBlocks: [
+          {
+            id: "slides-review",
+            category: "presentation_meeting",
+            title: "Possible meeting / presentation",
+            detail: "Google Slides was active for most of this block.",
+            confidence: "high",
+            confidencePercent: 82,
+            primaryApp: "ChatGPT Atlas",
+            evidenceIds: ["slides-1"],
+            suggestedActions: ["Confirm as meeting"],
+          },
+        ],
+      }),
+      baseSettings,
+    );
+
+    expect(view.reviewCount).toBe(1);
+  });
+
   it("builds multi-segment hour rows and hides raw details in simple mode", () => {
     const view = buildHourTimelineView(
       [

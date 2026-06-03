@@ -14,6 +14,7 @@ type RangeExportLike = {
   timesheetRows?: Array<{ id?: string; durationMs?: number | null; app?: string | null }> | null;
   aiContributionRows?: Array<{ id?: string; status?: string | null; durationMs?: number | null; tool?: string | null }> | null;
   unclosedLoopInbox?: unknown[] | null;
+  inferredWorkBlocks?: unknown[] | null;
 };
 
 function topByDuration<T extends { label: string; durationMs: number }>(items: T[], limit: number) {
@@ -49,6 +50,7 @@ export function buildRangeSummaryView(payload: RangeExportLike | null | undefine
 
   const needsReviewCount =
     (payload?.unclosedLoopInbox?.length ?? 0) +
+    (payload?.inferredWorkBlocks?.length ?? 0) +
     aiRows.filter((row) => ["needs_review", "review", "blocked", "failed"].includes((row.status ?? "").toLowerCase())).length;
 
   return {

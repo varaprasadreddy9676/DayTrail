@@ -53,7 +53,11 @@ export function buildDeterministicReportMarkdown(
     ? snapshot?.appUsageSummary?.apps ?? []
     : (snapshot?.appUsageSummary?.apps ?? []).filter((app) => isSimpleVisibleApp(app.app, app.category));
   const tools = snapshot?.aiUsageSummary?.tools ?? [];
-  const reviewCount = (snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0);
+  const reviewCount =
+    (snapshot?.unclosedLoopInbox?.length ?? 0) +
+    (snapshot?.inferredWorkBlocks?.length ?? 0) +
+    (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0);
+  const inferredBlocks = snapshot?.inferredWorkBlocks ?? [];
 
   return [
     "# Daily Work Report",
@@ -86,6 +90,15 @@ export function buildDeterministicReportMarkdown(
     ...(tools.length
       ? tools.slice(0, 8).map((tool) => `- ${tool.tool} - ${formatDuration(tool.durationMs ?? 0)}`)
       : ["- No AI activity detected yet."]),
+    "",
+    "## Inferred blocks to confirm",
+    ...(inferredBlocks.length
+      ? inferredBlocks
+          .slice(0, 5)
+          .map((block) =>
+            `- ${block.title ?? "Possible work block"} - ${formatDuration(block.durationMs ?? 0)} - ${block.reason ?? "Needs confirmation."}`,
+          )
+      : ["- No inferred work blocks are waiting for confirmation."]),
     "",
     "## Needs review",
     reviewCount ? `- ${reviewCount} item${reviewCount === 1 ? "" : "s"} need review.` : "- No review items detected from current sessions.",

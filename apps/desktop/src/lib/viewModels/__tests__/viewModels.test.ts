@@ -88,6 +88,36 @@ describe("buildReviewView", () => {
       evidenceCount: 2,
     });
   });
+
+  it("surfaces inferred presentation blocks as reviewable suggestions", () => {
+    const view = buildReviewView({
+      inferredWorkBlocks: [
+        {
+          id: "inferred-slides",
+          category: "presentation_meeting",
+          title: "Possible meeting / presentation",
+          detail: "11:00 AM - 1:00 PM around Client_Engagement 3rd June.",
+          confidence: "high",
+          confidencePercent: 82,
+          primaryApp: "ChatGPT Atlas",
+          reason: "Google Slides stayed active for most of the block.",
+          evidenceIds: ["slides-1", "slides-2"],
+          suggestedActions: ["Confirm as meeting", "Mark presentation prep", "Ignore"],
+        },
+      ],
+    });
+
+    expect(view.items[0]).toMatchObject({
+      id: "inferred-slides",
+      title: "Possible meeting / presentation",
+      source: "ChatGPT Atlas",
+      reason: "Google Slides stayed active for most of the block.",
+      primaryAction: "Confirm as meeting",
+      evidenceCount: 2,
+      priority: "medium",
+      confidence: "high",
+    });
+  });
 });
 
 describe("buildRangeSummaryView", () => {

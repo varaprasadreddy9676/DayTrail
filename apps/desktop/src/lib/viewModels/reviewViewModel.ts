@@ -32,12 +32,24 @@ export function buildReviewView(snapshot: TodaySnapshotLike | null | undefined, 
     priority: (item.risk ?? "medium").toLowerCase(),
     status: item.status ?? "open",
   }));
+  const inferredItems = (snapshot?.inferredWorkBlocks ?? []).map((block, index) => ({
+    id: block.id ?? `inferred-${index}`,
+    title: block.title ?? "Possible work block detected",
+    detail: block.detail ?? "Confirm whether this inferred block should be added to your day.",
+    source: block.primaryApp ?? label(block.category, "Inferred work"),
+    reason: block.reason ?? "DayTrail found a sustained activity pattern and needs confirmation.",
+    primaryAction: block.suggestedActions?.[0] ?? "Confirm or ignore",
+    evidenceCount: block.evidenceIds?.length ?? 0,
+    priority: (block.confidence === "high" ? "medium" : "low") as "medium" | "low",
+    status: "open",
+    confidence: block.confidence ?? "medium",
+  }));
 
   return {
     lowDataMessage: isLowData(snapshot)
       ? "Review Queue becomes more useful after more activity is captured."
       : undefined,
-    items: [...loopItems, ...idleItems],
+    items: [...loopItems, ...inferredItems, ...idleItems],
     emptyTitle: "No decisions waiting",
     emptyCopy: "Tasks, AI drafts, saved promises, source-marked replies, meeting actions, and away-time gaps appear here only when DayTrail has a local record to review.",
   };
