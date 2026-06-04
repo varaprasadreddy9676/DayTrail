@@ -3,7 +3,7 @@ name: Update download badge
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "*/30 * * * *"
 
 permissions:
   contents: write
