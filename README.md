@@ -45,7 +45,7 @@ the dashboard defaults to today, but the whole history is yours to slice.
 
 <p align="center">
   <a href="https://github.com/varaprasadreddy9676/DayTrail/releases">
-    <img alt="Total downloads" src="https://img.shields.io/github/downloads/varaprasadreddy9676/DayTrail/total?label=Total%20Downloads&style=for-the-badge&color=2ea44f&logo=github&cacheSeconds=300">
+    <img alt="Total downloads" src="docs/badges/total-downloads.svg">
   </a>
   <a href="https://github.com/varaprasadreddy9676/DayTrail/releases/latest">
     <img alt="Latest release downloads" src="https://img.shields.io/github/downloads/varaprasadreddy9676/DayTrail/latest/total?label=latest%20release&style=for-the-badge&color=0969da&logo=github">
