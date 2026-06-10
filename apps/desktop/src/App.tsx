@@ -10860,31 +10860,45 @@ function UpdateAvailableDialog({
     ? `DayTrail ${result.latestVersion} is available`
     : "A new DayTrail build is available";
   const isHomebrew = result.homebrewManaged === true;
-  const downloadLabel = isHomebrew ? "Copy brew command" : "Download update";
-  const dialogCopy = isHomebrew
-    ? "Run this command in Terminal to update:"
-    : "A newer build is ready. Download it from GitHub Releases and install it over your current copy.";
-  const brewCommand = "brew upgrade --cask daytrail";
 
-  const [copied, setCopied] = useState(false);
+  type BrewState = "idle" | "upgrading" | "done" | "error";
+  const [brewState, setBrewState] = useState<BrewState>("idle");
+  const [brewError, setBrewError] = useState<string | null>(null);
 
-  function handleAction() {
+  async function handleUpdate() {
     if (isHomebrew) {
-      void navigator.clipboard.writeText(brewCommand).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
+      setBrewState("upgrading");
+      setBrewError(null);
+      try {
+        await invokeTauriStrict("brew_upgrade_daytrail");
+        setBrewState("done");
+      } catch (err) {
+        setBrewState("error");
+        setBrewError(errorMessage(err));
+      }
     } else {
       onDownload();
     }
   }
+
+  function handleRestart() {
+    void invokeTauri("restart_app");
+  }
+
+  const dialogCopy = isHomebrew
+    ? brewState === "done"
+      ? "Update installed. Restart to run the new version."
+      : brewState === "upgrading"
+        ? "Installing update…"
+        : "DayTrail will install the update for you."
+    : "A newer build is ready. Download it from GitHub Releases and install it over your current copy.";
 
   return (
     <div
       aria-labelledby="update-dialog-title"
       aria-modal="true"
       className="offline-modal-backdrop"
-      onClick={onClose}
+      onClick={brewState === "upgrading" ? undefined : onClose}
       role="dialog"
     >
       <div
@@ -10898,8 +10912,8 @@ function UpdateAvailableDialog({
             <p className="update-dialog-copy">{dialogCopy}</p>
           </div>
         </div>
-        {isHomebrew && (
-          <pre className="update-dialog-brew-cmd">{brewCommand}</pre>
+        {brewState === "error" && brewError && (
+          <p className="update-dialog-error">{brewError}</p>
         )}
         <dl className="update-dialog-versions">
           <div>
@@ -10913,27 +10927,41 @@ function UpdateAvailableDialog({
             </div>
           )}
         </dl>
-        {notes && (
+        {notes && brewState === "idle" && (
           <div className="update-dialog-notes" aria-label="Release notes">
             <span className="update-dialog-notes-label">What's new</span>
             <pre className="update-dialog-notes-body">{notes}</pre>
           </div>
         )}
         <div className="update-dialog-actions">
-          <button
-            className="button compact ghost"
-            onClick={onClose}
-            type="button"
-          >
-            Later
-          </button>
-          <button
-            className="button compact primary"
-            onClick={handleAction}
-            type="button"
-          >
-            {copied ? "Copied!" : downloadLabel}
-          </button>
+          {brewState !== "done" && (
+            <button
+              className="button compact ghost"
+              onClick={onClose}
+              disabled={brewState === "upgrading"}
+              type="button"
+            >
+              Later
+            </button>
+          )}
+          {brewState === "done" ? (
+            <button
+              className="button compact primary"
+              onClick={handleRestart}
+              type="button"
+            >
+              Restart now
+            </button>
+          ) : (
+            <button
+              className="button compact primary"
+              onClick={handleUpdate}
+              disabled={brewState === "upgrading"}
+              type="button"
+            >
+              {brewState === "upgrading" ? "Installing…" : "Update now"}
+            </button>
+          )}
         </div>
       </div>
     </div>

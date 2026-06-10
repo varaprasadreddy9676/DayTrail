@@ -116,6 +116,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         review::export_timesheet_markdown,
         updates::check_for_updates,
         updates::app_version,
+        updates::brew_upgrade_daytrail,
         focus::start_focus_session,
         focus::end_focus_session,
         focus::get_focus_session,

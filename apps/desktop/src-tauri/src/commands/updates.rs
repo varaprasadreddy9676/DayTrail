@@ -231,6 +231,50 @@ fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+/// Run `brew upgrade --cask daytrail` in the background and return the combined
+/// stdout+stderr so the UI can show progress. Errors are surfaced as a
+/// CommandError so the UI can display them inline.
+#[tauri::command]
+pub fn brew_upgrade_daytrail() -> Result<String, CommandError> {
+    let brew = find_brew_binary()
+        .ok_or_else(|| CommandError::from("brew binary not found"))?;
+
+    let output = std::process::Command::new(&brew)
+        .args(["upgrade", "--cask", "daytrail"])
+        .output()
+        .map_err(|e| CommandError::from(format!("failed to launch brew: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{stdout}{stderr}").trim().to_string();
+
+    if output.status.success() {
+        Ok(combined)
+    } else {
+        Err(CommandError::from(if combined.is_empty() {
+            "brew upgrade failed".to_string()
+        } else {
+            combined
+        }))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn find_brew_binary() -> Option<std::path::PathBuf> {
+    for path in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
+        let p = std::path::Path::new(path);
+        if p.exists() {
+            return Some(p.to_owned());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_brew_binary() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// True when a Homebrew Caskroom receipt exists for daytrail, meaning the app
 /// was installed (and should be updated) via `brew upgrade --cask daytrail`.
 fn is_homebrew_managed() -> bool {
