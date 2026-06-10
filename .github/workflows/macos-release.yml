@@ -189,3 +189,27 @@ jobs:
           overwrite_files: true
           tag_name: ${{ steps.release_target.outputs.tag }}
           files: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Update Homebrew cask
+        if: steps.release_target.outputs.tag != ''
+        shell: bash
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAG: ${{ steps.release_target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          dmg="apps/desktop/src-tauri/target/release/bundle/dmg/DayTrail_${version}_aarch64.dmg"
+          sha256=$(shasum -a 256 "$dmg" | awk '{print $1}')
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/varaprasadreddy9676/homebrew-tap.git" /tmp/homebrew-tap
+          sed -i '' \
+            -e "s/version \".*\"/version \"${version}\"/" \
+            -e "s/sha256 \".*\"/sha256 \"${sha256}\"/" \
+            /tmp/homebrew-tap/Casks/daytrail.rb
+          cd /tmp/homebrew-tap
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add Casks/daytrail.rb
+          git diff --cached --quiet || git commit -m "chore: update DayTrail cask to ${version}"
+          git push

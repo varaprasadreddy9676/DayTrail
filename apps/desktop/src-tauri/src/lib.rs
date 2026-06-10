@@ -33,6 +33,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Remove the macOS quarantine xattr from the app bundle so users
+            // don't have to run `xattr -dr com.apple.quarantine` manually after
+            // every install/update. Best-effort — failure is non-fatal.
+            #[cfg(target_os = "macos")]
+            strip_quarantine();
+
             let store = WorktraceStore::open_default(app.handle())?;
             if let Err(error) = store.ensure_default_launch_at_login() {
                 eprintln!("failed to enable launch at login by default: {error:#}");
@@ -209,4 +215,29 @@ fn spawn_retention_scheduler(store: WorktraceStore, interval: Duration) {
             Err(_) => eprintln!("retention sweep panicked — recovered, continuing"),
         }
     });
+}
+
+/// Strip the macOS quarantine xattr from the running app bundle. This removes
+/// the need for users to run `xattr -dr com.apple.quarantine` manually after
+/// installing or updating from a GitHub release DMG.
+#[cfg(target_os = "macos")]
+fn strip_quarantine() {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    // Walk up from .app/Contents/MacOS/binary → .app bundle root.
+    let app_path = exe.ancestors().find(|p| {
+        p.extension()
+            .map(|e| e.eq_ignore_ascii_case("app"))
+            .unwrap_or(false)
+    });
+    let target = match app_path {
+        Some(p) => p.to_owned(),
+        None => exe, // fallback: strip from the binary itself
+    };
+    let _ = std::process::Command::new("xattr")
+        .args(["-dr", "com.apple.quarantine"])
+        .arg(&target)
+        .status();
 }
