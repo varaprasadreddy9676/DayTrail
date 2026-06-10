@@ -3032,7 +3032,7 @@ export default function App() {
 
     let ignore = false;
 
-    async function checkForStartupUpdate() {
+    async function checkForUpdate() {
       const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
 
       if (
@@ -3048,10 +3048,27 @@ export default function App() {
       setAutoUpdateResult(info);
     }
 
-    void checkForStartupUpdate();
+    // Check on startup.
+    void checkForUpdate();
+
+    // Re-check whenever the window becomes visible (app focus, un-hide, etc.).
+    // Throttled: at most once per hour so we don't hammer the GitHub API.
+    const FOCUS_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+    let lastFocusCheck = Date.now();
+
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusCheck < FOCUS_CHECK_INTERVAL_MS) return;
+      lastFocusCheck = now;
+      void checkForUpdate();
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       ignore = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
@@ -10799,7 +10816,7 @@ function UpdateChecker() {
             {status === "checking" ? "Checking..." : "Check now"}
           </button>
         </div>
-        <span className="settings-about-copy">Update alerts appear on startup. Snooze for 8h.</span>
+        <span className="settings-about-copy">Checks on startup and when you return to the app. Snooze for 8h.</span>
         {inlineMessage && (
           <div className="settings-about-result">
             <span>{inlineMessage}</span>
