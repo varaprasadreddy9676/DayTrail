@@ -30,6 +30,12 @@ It helps you answer questions like:
   manually, or set up match rules (keyword, wildcard, regex) to auto-link them
   as they are captured.
 - **What routines do I repeat daily** that might be worth streamlining?
+- **What is AI noticing in my work patterns?** DayTrail periodically runs its
+  own analysis and surfaces proactive insights — context-switching spikes, focus
+  droughts, accumulating loops, commitments at risk — without you having to ask.
+- **Can I just ask a question about my day?** The Ask AI chat lets you query
+  your captured data in plain language: "How many hours was I in meetings?",
+  "Which tasks are overdue?", "What did I work on Tuesday afternoon?"
 
 Look at **today, yesterday, the last 7 days, this month, or any custom range** —
 the dashboard defaults to today, but the whole history is yours to slice.
@@ -148,6 +154,11 @@ day with DayTrail it's obvious — "I thought I shipped features all morning, bu
 - **Find the routines** you repeat every day and decide what to automate or drop.
 - **Back your standup / invoice / changelog / weekly update with facts**, not
   memory.
+- **Get proactive nudges** — DayTrail runs its own AI analysis every few hours
+  and tells you what it noticed (focus droughts, accumulating loops, overdue
+  commitments) so you don't have to remember to check.
+- **Ask anything about your day** in the built-in chat — no dashboards to
+  navigate, just a question and a data-backed answer.
 
 Instead of starting and stopping timers, DayTrail builds the trail automatically
 from system metadata: a timeline you can drill into by the hour, app/project/AI
@@ -184,6 +195,30 @@ interacting for a few minutes, and stays quiet during calls or presentation-like
 contexts. Reminders are staged: a blink check, a posture reset, then a short
 break notification at the interval you choose. It does not make medical claims,
 capture keystrokes, block apps, or add another card to the Today screen.
+
+### Proactive AI Insights — the AI surfaces patterns before you notice them
+
+With an AI provider configured, DayTrail runs a background analysis every few
+hours (7am–10pm, during your work hours) and generates 1–3 data-backed
+observations: unusually high context-switching, a week without a real focus
+block, commitments due soon with nothing started, AI tool usage spikes, or
+late-night work streaks. High-priority insights fire a native OS notification;
+all insights appear in the **Insights** view with priority badges, an optional
+action hint, and a one-click **Explore in chat** button.
+
+### Ask AI — query your work data in plain language
+
+The **Ask AI** chat view connects the LLM to DayTrail's captured data — today's
+sessions, this week's activity, open tasks, commitments, and loop risks — so you
+can ask natural questions and get answers grounded in your actual recorded work:
+
+> "How long was I in deep work today?"  
+> "Which tasks are overdue?"  
+> "What pattern did I repeat most this week?"  
+> "How much billable time have I logged?"
+
+Works with any configured provider: Claude, GPT-4, Gemini, or a local Ollama
+model.
 
 ### Weekly digest and replay — source-backed updates without reconstructing memory
 
@@ -266,8 +301,14 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    pattern is detected.
 7. Optional Smart Breaks can nudge after sustained input with blink, posture,
    and break reminders configured in Settings.
-8. Daily reports, weekly digests, and replay/restore views summarize the
-   captured facts and keep the source trail visible.
+8. The background AI engine runs every few hours during work hours (configurable),
+   generates 1–3 proactive insights from live data, and fires OS notifications
+   for high-priority findings.
+9. The Ask AI chat answers natural-language questions by routing them to the
+   relevant captured data (today's snapshot, this week's activity, tasks,
+   commitments) and passing a compact structured context to the configured LLM.
+10. Daily reports, weekly digests, and replay/restore views summarize the
+    captured facts and keep the source trail visible.
 
 ## Setup For A Real Trial
 
@@ -277,13 +318,15 @@ See [PRIVACY.md](PRIVACY.md) for the full privacy model.
    domains.
 4. Install editor and terminal integrations if you want project, file, folder,
    and command context.
-5. Allow notifications if you want Focus Mode, Smart Breaks, and away-time
-   nudges.
+5. Allow notifications if you want Focus Mode, Smart Breaks, away-time nudges,
+   and proactive AI insight alerts.
 6. DayTrail checks for available releases on startup and whenever you return to
    the app, and can remind you again after 8 hours when an update is available.
-7. Add an optional AI provider in Settings if you want generated report drafts
-   and weekly digests.
-8. Leave DayTrail running from startup so the day is captured automatically.
+7. Add an optional AI provider in Settings if you want generated report drafts,
+   weekly digests, proactive insights, and Ask AI chat answers.
+8. Optionally configure **working hours** in Settings → Capture Health so
+   DayTrail never asks "were you away?" for off-hours gaps.
+9. Leave DayTrail running from startup so the day is captured automatically.
 
 DayTrail is most useful after one full workday of capture.
 

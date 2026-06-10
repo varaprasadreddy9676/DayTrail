@@ -39,11 +39,22 @@ Also verify the installed desktop app manually:
   calls or presentation-like contexts.
 - Away/resume gaps create idle recovery prompts without surfacing sleep-sized
   gaps as classification work.
+- Working hours setting: gaps outside the configured window are auto-classified
+  as off-hours (no "were you away?" prompt at 1am or on weekends).
 - Startup and focus-return update checks surface available builds automatically
   and allow an 8-hour reminder pause.
 - Daily report, weekly digest, and replay/restore flows generate source-backed
   output from the expected local date range, including weekly Smart Breaks.
+- Report generate buttons disable and show a loading state during LLM calls;
+  Refresh buttons show "Refreshing…" while context is being rebuilt.
 - Date-range export includes source-backed activity and AI contribution rows.
+- Proactive AI insights: with an AI provider configured, the background scheduler
+  runs every 3 hours (7am–10pm local), generates 1–3 data-backed observations,
+  fires OS notifications for high-priority findings, and surfaces all insights in
+  the Insights nav view with dismiss and "Explore in chat" actions.
+- Ask AI chat: queries are routed to the relevant captured data and answered by
+  the configured LLM; conversation history is maintained within the session;
+  eight suggested starter prompts are shown in the empty state.
 
 ## Public README And Screenshots
 
@@ -56,12 +67,15 @@ Also verify the installed desktop app manually:
   blocking. Persisted focus timer/review behavior is also documented.
 - Smart Breaks are documented as optional local sustainable-work nudges with
   configurable timing and context awareness, not as medical or eye-care advice.
+- Proactive AI insights and Ask AI chat are documented as requiring an AI
+  provider to be configured in Settings.
 - README does not claim user-facing calendar/planned-block support unless that
   workflow is actually shipped.
 - Regenerate `01-today.png` after UI layout changes so the screenshot matches
   the current Today screen.
-- README mentions weekly digest, replay/restore, idle recovery, and
-  interruption-friendly positioning consistently with the app UI.
+- README mentions weekly digest, replay/restore, idle recovery, proactive
+  insights, Ask AI chat, and interruption-friendly positioning consistently with
+  the app UI.
 - Screenshots use realistic demo data and do not expose secrets, private
   customers, private email addresses, internal IPs, or local-only paths.
 - Platform status and known limitations are accurate for the release being
