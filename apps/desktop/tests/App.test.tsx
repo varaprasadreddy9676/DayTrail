@@ -2164,6 +2164,71 @@ describe("activity ↔ task linking", () => {
     expect(screen.getByText(/no activities linked yet/i)).toBeInTheDocument();
   });
 
+  it("links an existing activity to a task by hand via the picker", async () => {
+    const user = userEvent.setup();
+
+    let linked: Array<Record<string, unknown>> = [];
+    const candidate = {
+      id: "evt-9",
+      source: "browser",
+      eventType: "browser",
+      app: "Chrome",
+      title: "Acme dashboard",
+      domain: "acme.test",
+      urlRedacted: null,
+      workspaceKey: null,
+      startedAt: Date.parse("2026-06-02T09:00:00Z"),
+      endedAt: Date.parse("2026-06-02T09:30:00Z"),
+      durationMs: 1_800_000,
+      sensitivity: "normal",
+      metadataJson: null,
+      createdAt: 1,
+    };
+
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      switch (command) {
+        case "today":
+          return snapshotWithTasks([{ id: 7, title: "Acme", status: "open" }]);
+        case "list_task_rules":
+          return [];
+        case "list_task_activities":
+          return linked;
+        case "search_recent_activities":
+          return [candidate];
+        case "link_activity_to_task":
+          expect(args).toEqual({ sourceEventId: "evt-9", taskId: 7 });
+          linked = [
+            { ...candidate, linkId: 1, origin: "manual", ruleId: null, linkedAt: 1 },
+          ];
+          return { id: 1, sourceEventId: "evt-9", taskId: 7, origin: "manual", ruleId: null, createdAt: 1 };
+        default:
+          return null;
+      }
+    });
+
+    installInvoke(invoke);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+    await user.click(await screen.findByRole("button", { name: /links & rules/i }));
+    await user.click(await screen.findByRole("button", { name: /link an activity/i }));
+
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    const result = await screen.findByText(/acme dashboard/i);
+    expect(result).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^link$/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("link_activity_to_task", {
+        sourceEventId: "evt-9",
+        taskId: 7,
+      }),
+    );
+    expect(await screen.findByText(/activity linked\./i)).toBeInTheDocument();
+    // The newly linked activity now shows as a Manual link in the list.
+    expect(await screen.findByText(/^Manual ·/)).toBeInTheDocument();
+  });
+
   it("surfaces backend validation errors when a rule pattern is invalid", async () => {
     const user = userEvent.setup();
 

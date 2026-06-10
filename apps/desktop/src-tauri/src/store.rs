@@ -534,7 +534,8 @@ impl WorktraceStore {
                 rule_id INTEGER,
                 created_at INTEGER NOT NULL,
                 UNIQUE (source_event_id, task_id),
-                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_event_id) REFERENCES source_events(id) ON DELETE CASCADE
             );
 
             -- Per-task rules that auto-link matching activities.
@@ -1421,6 +1422,42 @@ impl WorktraceStore {
             activities.push(activity?);
         }
         Ok(activities)
+    }
+
+    /// Recent recorded activities, optionally filtered by a case-insensitive
+    /// substring over title/url/app/domain. Used by the manual-link picker so
+    /// users can attach an existing activity to a task after the fact.
+    pub fn search_recent_activities(
+        &self,
+        query: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<SourceEvent>> {
+        let needle = query
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty());
+        let like = needle.as_ref().map(|value| format!("%{value}%"));
+        let limit = limit.clamp(1, 200) as i64;
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, source, event_type, app, title, domain, url_redacted, workspace_key,
+                   started_at, ended_at, duration_ms, sensitivity, metadata_json, created_at
+            FROM source_events
+            WHERE ?1 IS NULL
+               OR lower(COALESCE(title, '')) LIKE ?1
+               OR lower(COALESCE(url_redacted, '')) LIKE ?1
+               OR lower(COALESCE(app, '')) LIKE ?1
+               OR lower(COALESCE(domain, '')) LIKE ?1
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?2
+            "#,
+        )?;
+        let rows = stmt.query_map(params![like, limit], Self::source_event_from_row)?;
+        let mut events = Vec::new();
+        for event in rows {
+            events.push(event?);
+        }
+        Ok(events)
     }
 
     /// All tasks linked to a given activity.
@@ -5040,6 +5077,8 @@ impl WorktraceStore {
             "clipboard_events",
             "agent_runs",
             "activity_events",
+            "activity_task_links",
+            "task_match_rules",
             "tasks",
             "quick_notes",
             "commitments",
@@ -12815,6 +12854,55 @@ mod tests {
         let summary = store.apply_task_rules(Some(task.id)).unwrap();
         assert_eq!(summary.linked, 1);
         assert_eq!(store.list_task_activities(task.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_recent_activities_filters_by_substring() {
+        let (_dir, store) = temp_store();
+        seed_event(&store, "e1", "Acme planning sync");
+        seed_event(&store, "e2", "lunch break");
+
+        let all = store.search_recent_activities(None, 25).unwrap();
+        assert_eq!(all.len(), 2);
+
+        let filtered = store
+            .search_recent_activities(Some("acme".into()), 25)
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "e1");
+
+        // Blank query is treated as no filter.
+        assert_eq!(store.search_recent_activities(Some("  ".into()), 25).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pruning_a_source_event_cascades_its_links() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        // Record an old event (ended_at well in the past) and link it.
+        store
+            .record_source_event(SourceEventInput {
+                id: Some("old".into()),
+                source: "window".into(),
+                event_type: "window".into(),
+                app: Some("Editor".into()),
+                title: Some("ancient work".into()),
+                url: None,
+                workspace_key: None,
+                started_at: Some(1_000),
+                ended_at: Some(2_000),
+                sensitivity: None,
+                metadata_json: None,
+            })
+            .unwrap();
+        store.link_activity_to_task("old", task.id).unwrap();
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 1);
+
+        // Retention pruning deletes the source event; its link must go too.
+        store.prune_captured_data_older_than_days(1).unwrap();
+        assert!(store.list_task_activities(task.id).unwrap().is_empty());
+        // The task itself survives.
+        assert!(store.list_tasks(None).unwrap().iter().any(|t| t.id == task.id));
     }
 
     #[test]

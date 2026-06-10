@@ -6239,6 +6239,10 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<TaskMatchRuleInput>(EMPTY_RULE_DRAFT);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerResults, setPickerResults] = useState<BackendSourceEvent[]>([]);
+  const [pickerSearched, setPickerSearched] = useState(false);
 
   const refresh = useCallback(async () => {
     const [nextActivities, nextRules] = await Promise.all([
@@ -6318,13 +6322,103 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
       });
     }, "Activity unlinked.");
 
+  const searchActivities = async () => {
+    const results = await invokeTauri<BackendSourceEvent[]>("search_recent_activities", {
+      query: pickerQuery.trim() || null,
+      limit: 25,
+    });
+    setPickerResults(results ?? []);
+    setPickerSearched(true);
+  };
+
+  const linkActivity = (activity: BackendSourceEvent) =>
+    runMutation(async () => {
+      await invokeTauriStrict<unknown>("link_activity_to_task", {
+        sourceEventId: activity.id,
+        taskId: task.id,
+      });
+    }, "Activity linked.");
+
+  const linkedIds = new Set(activities.map((activity) => activity.id));
+
   return (
     <div className="task-links-panel" aria-label={`Links and rules for ${task.title}`}>
       <section className="task-links-section">
         <header>
           <h4>Linked activities</h4>
-          <span>{activities.length}</span>
+          <button
+            aria-expanded={pickerOpen}
+            className="button compact"
+            disabled={busy}
+            onClick={() => setPickerOpen((open) => !open)}
+            type="button"
+          >
+            {pickerOpen ? "Close" : "Link an activity"}
+          </button>
         </header>
+
+        {pickerOpen && (
+          <div className="task-link-picker">
+            <div className="task-link-picker-search">
+              <input
+                aria-label="Search activities"
+                disabled={busy}
+                onChange={(event) => setPickerQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void searchActivities();
+                  }
+                }}
+                placeholder="Search recorded activities…"
+                type="text"
+                value={pickerQuery}
+              />
+              <button
+                className="button compact"
+                disabled={busy}
+                onClick={() => void searchActivities()}
+                type="button"
+              >
+                Search
+              </button>
+            </div>
+            {pickerSearched && pickerResults.length === 0 ? (
+              <p className="task-links-empty">No matching activities.</p>
+            ) : (
+              <ul className="task-links-list">
+                {pickerResults.map((activity) => {
+                  const alreadyLinked = linkedIds.has(activity.id);
+                  return (
+                    <li key={activity.id}>
+                      <div className="task-link-activity">
+                        <strong>
+                          {compactDisplayLabel(activity.title) ||
+                            compactDisplayLabel(activity.domain) ||
+                            compactDisplayLabel(activity.app) ||
+                            activity.source}
+                        </strong>
+                        <span>
+                          {new Date(activity.startedAt).toLocaleString()} ·{" "}
+                          {formatDuration(activity.durationMs)}
+                        </span>
+                      </div>
+                      <button
+                        className="button compact primary"
+                        disabled={busy || alreadyLinked}
+                        onClick={() => void linkActivity(activity)}
+                        type="button"
+                      >
+                        {alreadyLinked ? "Linked" : "Link"}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
         {loaded && activities.length === 0 ? (
           <p className="task-links-empty">
             No activities linked yet. Add a rule below, or use “Apply rules to history” to scan past

@@ -42,6 +42,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         tasks::delete_task,
         links::link_activity_to_task,
         links::unlink_activity_from_task,
+        links::search_recent_activities,
         links::list_task_activities,
         links::list_activity_tasks,
         links::list_task_rules,

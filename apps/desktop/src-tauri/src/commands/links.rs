@@ -3,11 +3,22 @@ use tauri::State;
 use crate::{
     error::CommandError,
     models::{
-        ActivityTaskLink, ApplyRulesSummary, LinkedActivity, PrivacyDeleteSummary, Task,
-        TaskMatchRule, TaskMatchRuleInput,
+        ActivityTaskLink, ApplyRulesSummary, LinkedActivity, PrivacyDeleteSummary, SourceEvent,
+        Task, TaskMatchRule, TaskMatchRuleInput,
     },
     store::WorktraceStore,
 };
+
+#[tauri::command]
+pub fn search_recent_activities(
+    store: State<'_, WorktraceStore>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<SourceEvent>, CommandError> {
+    store
+        .search_recent_activities(query, limit.unwrap_or(25))
+        .map_err(Into::into)
+}
 
 #[tauri::command]
 pub fn link_activity_to_task(
