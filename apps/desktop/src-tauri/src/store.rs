@@ -3764,6 +3764,16 @@ impl WorktraceStore {
             .and_then(keychain_key_from_ref)
             .and_then(|k| SystemKeychain.keychain_get(k).ok().flatten());
 
+        // Local endpoints (Ollama, LM Studio) don't require a key. All cloud
+        // providers (Anthropic, OpenAI, Gemini, Groq…) do — skip generation
+        // rather than waste a request that will return 401.
+        let is_local_endpoint = ["localhost", "127.0.0.1", "::1"]
+            .iter()
+            .any(|h| settings.ai_endpoint.contains(h));
+        if api_key.is_none() && !is_local_endpoint {
+            return Ok(vec![]);
+        }
+
         let snapshot = self.today_snapshot()?;
         let today = Local::now().date_naive();
         let from_date = (today - ChronoDuration::days(6)).format("%Y-%m-%d").to_string();
