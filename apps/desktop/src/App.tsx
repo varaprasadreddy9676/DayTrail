@@ -1,5 +1,7 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "./components/Icon";
 import { dateRangeForPreset, formatLocalDateInput, rangePresetLabel, type RangePreset } from "./lib/dateRanges";
@@ -2675,7 +2677,6 @@ function WorkContextEditorModal({
 export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
-  const [autoUpdateResult, setAutoUpdateResult] = useState<UpdateCheckResult | null>(null);
 
   const addToast = useCallback((kind: ToastKind, title: string, message?: string, dedupeKey?: string) => {
     const id = nextToastId();
@@ -3025,52 +3026,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!hasTauriRuntime()) {
-      return;
-    }
-
-    let ignore = false;
-
-    async function checkForUpdate() {
-      const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
-
-      if (
-        ignore ||
-        !info ||
-        info.error ||
-        !info.updateAvailable ||
-        isAutoUpdateDismissed(info)
-      ) {
-        return;
-      }
-
-      setAutoUpdateResult(info);
-    }
-
-    // Check on startup.
-    void checkForUpdate();
-
-    // Re-check whenever the window becomes visible (app focus, un-hide, etc.).
-    // Throttled: at most once per hour so we don't hammer the GitHub API.
-    const FOCUS_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-    let lastFocusCheck = Date.now();
-
-    function onVisibilityChange() {
-      if (document.visibilityState !== "visible") return;
-      const now = Date.now();
-      if (now - lastFocusCheck < FOCUS_CHECK_INTERVAL_MS) return;
-      lastFocusCheck = now;
-      void checkForUpdate();
-    }
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    return () => {
-      ignore = true;
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, []);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -4230,22 +4185,6 @@ export default function App() {
           permissionStatus={permissionStatus}
           summary={permissionSummary}
         />
-        {autoUpdateResult && (
-          <UpdateAvailableDialog
-            result={autoUpdateResult}
-            onClose={() => {
-              dismissAutoUpdate(autoUpdateResult);
-              setAutoUpdateResult(null);
-            }}
-            onDownload={() => {
-              void invokeTauri("plugin:opener|open_url", {
-                url: updateDownloadUrl(autoUpdateResult),
-              });
-              dismissAutoUpdate(autoUpdateResult);
-              setAutoUpdateResult(null);
-            }}
-          />
-        )}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );
@@ -4588,23 +4527,6 @@ export default function App() {
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      {autoUpdateResult && (
-        <UpdateAvailableDialog
-          result={autoUpdateResult}
-          onClose={() => {
-            dismissAutoUpdate(autoUpdateResult);
-            setAutoUpdateResult(null);
-          }}
-          onDownload={() => {
-            void invokeTauri("plugin:opener|open_url", {
-              url: updateDownloadUrl(autoUpdateResult),
-            });
-            dismissAutoUpdate(autoUpdateResult);
-            setAutoUpdateResult(null);
-          }}
-        />
-      )}
-
       {logOfflineOpen && (
         <div className="offline-modal-backdrop" onClick={() => setLogOfflineOpen(false)}>
           <form
@@ -10706,265 +10628,212 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-type UpdateCheckResult = {
-  currentVersion: string;
-  currentBuildUnix?: number | null;
-  latestVersion?: string | null;
-  latestBuildAt?: string | null;
-  updateAvailable: boolean;
-  releaseUrl: string;
-  downloadUrl?: string | null;
-  releaseNotes?: string | null;
-  error?: string | null;
-  homebrewManaged?: boolean;
-};
+type UpdateState =
+  | { phase: "idle" }
+  | { phase: "checking" }
+  | { phase: "available"; update: Update }
+  | { phase: "downloading"; downloaded: number; total: number | null }
+  | { phase: "ready" }
+  | { phase: "error"; message: string }
+  | { phase: "up_to_date" };
 
-const UPDATE_DISMISSED_KEY_PREFIX = "daytrail:autoUpdate:dismissed:";
-const UPDATE_REMIND_LATER_MS = 8 * 60 * 60 * 1000;
+const UPDATE_SNOOZE_KEY = "daytrail:update:snoozedUntil:";
+const UPDATE_SNOOZE_MS = 8 * 60 * 60 * 1000;
 
-function updateDownloadUrl(result: UpdateCheckResult) {
-  return result.downloadUrl || result.releaseUrl;
+function updateSnoozeKey(version: string) {
+  return `${UPDATE_SNOOZE_KEY}${version}`;
 }
-
-function updateDismissKey(result: UpdateCheckResult) {
-  return `${UPDATE_DISMISSED_KEY_PREFIX}${result.latestVersion ?? "unknown"}:${result.latestBuildAt ?? "release"}`;
-}
-
-function localStorageGetItem(key: string) {
+function isSnoozed(version: string) {
   try {
-    if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") {
-      return null;
-    }
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+    const raw = localStorage.getItem(updateSnoozeKey(version));
+    return raw ? Number(raw) > Date.now() : false;
+  } catch { return false; }
 }
-
-function localStorageSetItem(key: string, value: string) {
-  try {
-    if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") {
-      return;
-    }
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Storage can be unavailable in private sessions or restricted test shells.
-  }
-}
-
-function isAutoUpdateDismissed(result: UpdateCheckResult) {
-  const raw = localStorageGetItem(updateDismissKey(result));
-  const snoozedUntil = raw ? Number(raw) : 0;
-  return Number.isFinite(snoozedUntil) && snoozedUntil > Date.now();
-}
-
-function dismissAutoUpdate(result: UpdateCheckResult) {
-  localStorageSetItem(updateDismissKey(result), String(Date.now() + UPDATE_REMIND_LATER_MS));
+function snooze(version: string) {
+  try { localStorage.setItem(updateSnoozeKey(version), String(Date.now() + UPDATE_SNOOZE_MS)); } catch { /* */ }
 }
 
 function UpdateChecker() {
   const [version, setVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "checking" | "result">("idle");
-  const [result, setResult] = useState<UpdateCheckResult | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [state, setState] = useState<UpdateState>({ phase: "idle" });
+  const updateRef = useRef<Update | null>(null);
 
   useEffect(() => {
-    void invokeTauri<string>("app_version")
-      .then((v) => setVersion(v))
-      .catch(() => setVersion(null));
+    void invokeTauri<string>("app_version").then(setVersion).catch(() => null);
   }, []);
 
-  const checkNow = async () => {
-    setStatus("checking");
+  const runCheck = useCallback(async (silent = false) => {
+    if (!hasTauriRuntime()) return;
+    setState({ phase: "checking" });
     try {
-      const info = await invokeTauri<UpdateCheckResult>("check_for_updates");
-      setResult(info);
-      if (info?.updateAvailable) {
-        setDialogOpen(true);
+      const update = await checkUpdate();
+      if (!update?.available) {
+        setState({ phase: "up_to_date" });
+        if (silent) setTimeout(() => setState({ phase: "idle" }), 3000);
+        return;
       }
-    } catch {
-      setResult(null);
+      if (isSnoozed(update.version ?? "")) {
+        setState({ phase: "idle" });
+        return;
+      }
+      updateRef.current = update;
+      setState({ phase: "available", update });
+    } catch (err) {
+      setState({ phase: "error", message: errorMessage(err) });
+      if (silent) setTimeout(() => setState({ phase: "idle" }), 4000);
     }
-    setStatus("result");
-  };
+  }, []);
 
-  const openReleases = (url: string) => {
-    void invokeTauri("plugin:opener|open_url", { url });
-  };
+  // Check on startup.
+  useEffect(() => { void runCheck(true); }, [runCheck]);
 
-  // Brief inline status: only used when there is no update or check failed.
-  // When an update is available, the modal carries the message instead.
-  const inlineMessage = (() => {
-    if (status !== "result" || !result || dialogOpen) return null;
-    if (result.error) return "Couldn't check right now.";
-    if (!result.updateAvailable) return "Up to date.";
-    return null;
-  })();
+  // Re-check on window focus (throttled to once per hour).
+  useEffect(() => {
+    const INTERVAL = 60 * 60 * 1000;
+    let last = Date.now();
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - last < INTERVAL) return;
+      last = now;
+      void runCheck(true);
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [runCheck]);
+
+  async function handleInstall() {
+    const update = updateRef.current;
+    if (!update) return;
+    let contentLength: number | null = null;
+    setState({ phase: "downloading", downloaded: 0, total: null });
+    try {
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          contentLength = event.data.contentLength ?? null;
+          setState({ phase: "downloading", downloaded: 0, total: contentLength });
+        } else if (event.event === "Progress") {
+          setState((prev) =>
+            prev.phase === "downloading"
+              ? { phase: "downloading", downloaded: prev.downloaded + event.data.chunkLength, total: contentLength }
+              : prev
+          );
+        } else if (event.event === "Finished") {
+          setState({ phase: "ready" });
+        }
+      });
+    } catch (err) {
+      setState({ phase: "error", message: errorMessage(err) });
+    }
+  }
+
+  function handleSnooze() {
+    if (updateRef.current) snooze(updateRef.current.version ?? "");
+    setState({ phase: "idle" });
+  }
+
+  async function handleRestart() {
+    await relaunch();
+  }
+
+  // Settings card (always visible in Settings → About).
+  const card = (
+    <div className="settings-about-card">
+      <div className="settings-about-head">
+        <span className="settings-about-version">DayTrail{version ? ` v${version}` : ""}</span>
+        <button
+          className="button compact ghost"
+          type="button"
+          onClick={() => runCheck(false)}
+          disabled={state.phase === "checking" || state.phase === "downloading"}
+        >
+          {state.phase === "checking" ? "Checking…" : "Check now"}
+        </button>
+      </div>
+      <span className="settings-about-copy">
+        {state.phase === "up_to_date" ? "Up to date." :
+         state.phase === "error" ? "Couldn't check right now." :
+         "Checks on startup and when you return to the app. Snooze for 8h."}
+      </span>
+    </div>
+  );
+
+  if (state.phase !== "available" && state.phase !== "downloading" && state.phase !== "ready") {
+    return card;
+  }
+
+  const update = updateRef.current;
+  const headline = update?.version ? `DayTrail ${update.version} is available` : "A new DayTrail build is available";
+  const notes = update?.body?.trim() ?? "";
+  const pct = state.phase === "downloading" && state.total
+    ? Math.round((state.downloaded / state.total) * 100)
+    : null;
 
   return (
     <>
-      <div className="settings-about-card">
-        <div className="settings-about-head">
-          <span className="settings-about-version">
-            DayTrail{version ? ` v${version}` : ""}
-          </span>
-          <button
-            className="button compact ghost"
-            type="button"
-            onClick={checkNow}
-            disabled={status === "checking"}
-          >
-            {status === "checking" ? "Checking..." : "Check now"}
-          </button>
-        </div>
-        <span className="settings-about-copy">Checks on startup and when you return to the app. Snooze for 8h.</span>
-        {inlineMessage && (
-          <div className="settings-about-result">
-            <span>{inlineMessage}</span>
-          </div>
-        )}
-      </div>
-      {dialogOpen && result && result.updateAvailable && (
-        <UpdateAvailableDialog
-          result={result}
-          onClose={() => setDialogOpen(false)}
-          onDownload={() => {
-            openReleases(updateDownloadUrl(result));
-            setDialogOpen(false);
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-function UpdateAvailableDialog({
-  result,
-  onClose,
-  onDownload,
-}: {
-  result: UpdateCheckResult;
-  onClose: () => void;
-  onDownload: () => void;
-}) {
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const notes = result.releaseNotes?.trim() ?? "";
-  const headline = result.latestVersion
-    ? `DayTrail ${result.latestVersion} is available`
-    : "A new DayTrail build is available";
-  const isHomebrew = result.homebrewManaged === true;
-
-  type BrewState = "idle" | "upgrading" | "done" | "error";
-  const [brewState, setBrewState] = useState<BrewState>("idle");
-  const [brewError, setBrewError] = useState<string | null>(null);
-
-  async function handleUpdate() {
-    if (isHomebrew) {
-      setBrewState("upgrading");
-      setBrewError(null);
-      try {
-        await invokeTauriStrict("brew_upgrade_daytrail");
-        setBrewState("done");
-      } catch (err) {
-        setBrewState("error");
-        setBrewError(errorMessage(err));
-      }
-    } else {
-      onDownload();
-    }
-  }
-
-  function handleRestart() {
-    void invokeTauri("restart_app");
-  }
-
-  const dialogCopy = isHomebrew
-    ? brewState === "done"
-      ? "Update installed. Restart to run the new version."
-      : brewState === "upgrading"
-        ? "Installing update…"
-        : "DayTrail will install the update for you."
-    : "A newer build is ready. Download it from GitHub Releases and install it over your current copy.";
-
-  return (
-    <div
-      aria-labelledby="update-dialog-title"
-      aria-modal="true"
-      className="offline-modal-backdrop"
-      onClick={brewState === "upgrading" ? undefined : onClose}
-      role="dialog"
-    >
+      {card}
       <div
-        className="offline-modal update-dialog"
-        onClick={(event) => event.stopPropagation()}
+        aria-labelledby="update-dialog-title"
+        aria-modal="true"
+        className="offline-modal-backdrop"
+        onClick={state.phase === "downloading" ? undefined : handleSnooze}
+        role="dialog"
       >
-        <div className="update-dialog-header">
-          <img alt="" className="update-dialog-icon" src="/daytrail-icon.png" />
-          <div className="update-dialog-heading">
-            <h3 id="update-dialog-title">{headline}</h3>
-            <p className="update-dialog-copy">{dialogCopy}</p>
+        <div className="offline-modal update-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="update-dialog-header">
+            <img alt="" className="update-dialog-icon" src="/daytrail-icon.png" />
+            <div className="update-dialog-heading">
+              <h3 id="update-dialog-title">{headline}</h3>
+              <p className="update-dialog-copy">
+                {state.phase === "ready"
+                  ? "Update installed. Restart to run the new version."
+                  : state.phase === "downloading"
+                    ? pct !== null ? `Downloading… ${pct}%` : "Downloading…"
+                    : "DayTrail will download and install the update for you."}
+              </p>
+            </div>
           </div>
-        </div>
-        {brewState === "error" && brewError && (
-          <p className="update-dialog-error">{brewError}</p>
-        )}
-        <dl className="update-dialog-versions">
-          <div>
-            <dt>Current</dt>
-            <dd>v{result.currentVersion}</dd>
-          </div>
-          {result.latestVersion && (
-            <div>
-              <dt>Available</dt>
-              <dd>v{result.latestVersion}</dd>
+
+          {state.phase === "downloading" && (
+            <div className="update-dialog-progress">
+              <div
+                className="update-dialog-progress-bar"
+                style={{ width: pct !== null ? `${pct}%` : "100%", opacity: pct === null ? 0.4 : 1 }}
+              />
             </div>
           )}
-        </dl>
-        {notes && brewState === "idle" && (
-          <div className="update-dialog-notes" aria-label="Release notes">
-            <span className="update-dialog-notes-label">What's new</span>
-            <pre className="update-dialog-notes-body">{notes}</pre>
+
+          <dl className="update-dialog-versions">
+            {version && <div><dt>Current</dt><dd>v{version}</dd></div>}
+            {update?.version && <div><dt>Available</dt><dd>v{update.version}</dd></div>}
+          </dl>
+
+          {notes && state.phase === "available" && (
+            <div className="update-dialog-notes" aria-label="Release notes">
+              <span className="update-dialog-notes-label">What's new</span>
+              <pre className="update-dialog-notes-body">{notes}</pre>
+            </div>
+          )}
+
+          <div className="update-dialog-actions">
+            {state.phase !== "ready" && (
+              <button className="button compact ghost" onClick={handleSnooze} disabled={state.phase === "downloading"} type="button">
+                Later
+              </button>
+            )}
+            {state.phase === "ready" ? (
+              <button className="button compact primary" onClick={handleRestart} type="button">
+                Restart now
+              </button>
+            ) : (
+              <button className="button compact primary" onClick={handleInstall} disabled={state.phase === "downloading"} type="button">
+                {state.phase === "downloading" ? "Installing…" : "Update now"}
+              </button>
+            )}
           </div>
-        )}
-        <div className="update-dialog-actions">
-          {brewState !== "done" && (
-            <button
-              className="button compact ghost"
-              onClick={onClose}
-              disabled={brewState === "upgrading"}
-              type="button"
-            >
-              Later
-            </button>
-          )}
-          {brewState === "done" ? (
-            <button
-              className="button compact primary"
-              onClick={handleRestart}
-              type="button"
-            >
-              Restart now
-            </button>
-          ) : (
-            <button
-              className="button compact primary"
-              onClick={handleUpdate}
-              disabled={brewState === "upgrading"}
-              type="button"
-            >
-              {brewState === "upgrading" ? "Installing…" : "Update now"}
-            </button>
-          )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

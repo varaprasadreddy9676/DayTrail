@@ -7249,14 +7249,18 @@ textarea {
   line-height: 1.2;
 }
 
-.update-dialog-error {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(220, 53, 69, 0.08);
-  border: 1px solid rgba(220, 53, 69, 0.3);
-  font-size: 12.5px;
-  color: var(--color-error, #e05a5a);
+.update-dialog-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.update-dialog-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent, #3b82f6);
+  transition: width 0.2s ease;
 }
 
 .update-dialog-notes {

@@ -141,10 +141,14 @@ jobs:
       - name: Build desktop frontend
         run: npm --prefix apps/desktop run build
 
-      # Unsigned ad-hoc bundle. Notarization requires a paid Apple Developer ID;
-      # this produces a runnable .app/.dmg for local-first / open-source use.
-      - name: Build app and dmg
-        run: npm --prefix apps/desktop run tauri -- build --bundles app,dmg
+      # Unsigned ad-hoc bundle. Signs the updater package with the project's own
+      # RSA key so the in-app updater can verify downloads without needing a
+      # paid Apple Developer ID.
+      - name: Build app, dmg and updater bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npm --prefix apps/desktop run tauri -- build --bundles app,dmg,updater
 
       - name: Upload macOS bundle
         uses: actions/upload-artifact@v4
@@ -181,14 +185,46 @@ jobs:
           echo "Release upload target: $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Attach macOS DMG to GitHub Release
+      - name: Attach macOS DMG and updater bundle to GitHub Release
         if: steps.release_target.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
           overwrite_files: true
           tag_name: ${{ steps.release_target.outputs.tag }}
-          files: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          files: |
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+
+      - name: Generate and upload latest.json
+        if: steps.release_target.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sig_file=$(ls apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig)
+          signature=$(cat "$sig_file")
+          pub_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          base_url="https://github.com/varaprasadreddy9676/DayTrail/releases/download/${TAG}"
+
+          cat > /tmp/latest.json <<EOF
+          {
+            "version": "${version}",
+            "pub_date": "${pub_date}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${signature}",
+                "url": "${base_url}/DayTrail_${version}_aarch64.app.tar.gz"
+              }
+            }
+          }
+          EOF
+
+          gh release upload "${TAG}" /tmp/latest.json --clobber
 
       - name: Update Homebrew cask
         if: steps.release_target.outputs.tag != ''

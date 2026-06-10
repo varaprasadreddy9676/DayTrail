@@ -24,6 +24,15 @@
       "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2ODg1MEUzMjUyOTgxMTkKUldRWmdTa2w0MUNJVnF1ZStoM2VJaHI4UXJqR2dPeUNUeTk5Q2JrUVFZS3JRVlZ2WVVWTzB0RUMK",
+      "endpoints": [
+        "https://github.com/varaprasadreddy9676/DayTrail/releases/latest/download/latest.json"
+      ],
+      "dialog": false
+    }
+  },
   "bundle": {
     "active": true,
     "icon": [
