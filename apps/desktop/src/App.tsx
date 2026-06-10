@@ -4899,6 +4899,7 @@ export default function App() {
           onSave={saveWorkContext}
         />
       )}
+      <UpdateChecker dialogOnly />
     </div>
   );
 }
@@ -11149,7 +11150,7 @@ function snooze(version: string) {
   try { localStorage.setItem(updateSnoozeKey(version), String(Date.now() + UPDATE_SNOOZE_MS)); } catch { /* */ }
 }
 
-function UpdateChecker() {
+function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
   const [version, setVersion] = useState<string | null>(null);
   const [state, setState] = useState<UpdateState>({ phase: "idle" });
   const updateRef = useRef<Update | null>(null);
@@ -11180,11 +11181,16 @@ function UpdateChecker() {
     }
   }, []);
 
-  // Check on startup.
-  useEffect(() => { void runCheck(true); }, [runCheck]);
-
-  // Re-check on window focus (throttled to once per hour).
+  // Root-level instance handles startup check and focus re-check.
+  // Settings card instance skips these to avoid duplicate checks.
   useEffect(() => {
+    if (!dialogOnly) return;
+    void runCheck(true);
+  }, [dialogOnly, runCheck]);
+
+  // Re-check on window focus (throttled to once per hour) — root instance only.
+  useEffect(() => {
+    if (!dialogOnly) return;
     const INTERVAL = 60 * 60 * 1000;
     let last = Date.now();
     function onVisible() {
@@ -11196,7 +11202,7 @@ function UpdateChecker() {
     }
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [runCheck]);
+  }, [dialogOnly, runCheck]);
 
   async function handleInstall() {
     const update = updateRef.current;
@@ -11255,7 +11261,7 @@ function UpdateChecker() {
   );
 
   if (state.phase !== "available" && state.phase !== "downloading" && state.phase !== "ready") {
-    return card;
+    return dialogOnly ? null : card;
   }
 
   const update = updateRef.current;
@@ -11267,7 +11273,7 @@ function UpdateChecker() {
 
   return (
     <>
-      {card}
+      {!dialogOnly && card}
       <div
         aria-labelledby="update-dialog-title"
         aria-modal="true"

@@ -1,8 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 
 import App from "../src/App";
+
+// Mock the Tauri updater plugin so UpdateChecker doesn't make real network calls
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 
 afterEach(() => {
   cleanup();
@@ -232,66 +237,17 @@ describe("DayTrail command center", () => {
   it("prompts for available updates from the automatic startup check", async () => {
     const user = userEvent.setup();
     installLocalStorageMock();
-    const invoke = vi.fn(async (command: string) => {
-      if (command === "today") {
-        return {
-          localDate: "2026-06-02",
-          tasks: [],
-          quickNotes: [],
-          commitments: [],
-          pendingReplies: [],
-          aiOutputs: [],
-          calendarEvents: [],
-          calendarReconciliation: {
-            plannedEvents: 0,
-            matchedEvents: 0,
-            unmatchedEvents: 0,
-            plannedDurationMs: 0,
-            actualOverlapMs: 0,
-            items: [],
-          },
-          focusSessions: [],
-          recoverySummary: null,
-          meetings: [],
-          fieldVisits: [],
-          idleBlocks: [],
-          sourceEvents: [],
-          workSessions: [],
-          parallelStreams: [],
-          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
-          appUsageSummary: { totalDurationMs: 0, apps: [] },
-          automationCandidates: [],
-          unclosedLoopInbox: [],
-          aiOutputLedger: [],
-          loopRisks: [],
-          nextBestAction: null,
-          pauseState: { paused: false },
-          settings: { browserBridgeEnabled: true, excludedDomains: [] },
-          projectContext: null,
-          activeWorkContext: null,
-        };
-      }
-      if (command === "check_for_updates") {
-        return {
-          currentVersion: "0.1.2",
-          latestVersion: "0.1.3",
-          latestBuildAt: "2026-06-02T12:00:00Z",
-          updateAvailable: true,
-          releaseUrl: "https://github.com/example/releases/latest",
-          downloadUrl: "https://github.com/example/releases/download/v0.1.3/DayTrail.dmg",
-          error: null,
-        };
-      }
-      return null;
-    });
+
+    const mockDownloadAndInstall = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(checkUpdate).mockResolvedValueOnce({
+      available: true,
+      version: "0.1.3",
+      body: null,
+      downloadAndInstall: mockDownloadAndInstall,
+    } as never);
 
     window.__TAURI__ = {
-      core: {
-        invoke: invoke as unknown as <T>(
-          command: string,
-          args?: Record<string, unknown>,
-        ) => Promise<T>,
-      },
+      core: { invoke: vi.fn().mockResolvedValue(null) as never },
     };
 
     render(<App />);
@@ -299,89 +255,25 @@ describe("DayTrail command center", () => {
     expect(
       await screen.findByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText("v0.1.2")).toBeInTheDocument();
     expect(screen.getByText("v0.1.3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /later/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /download update/i }));
+    await user.click(screen.getByRole("button", { name: /update now/i }));
 
-    expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
-      url: "https://github.com/example/releases/download/v0.1.3/DayTrail.dmg",
-    });
-    expect(
-      screen.queryByRole("dialog", { name: /daytrail 0.1.3 is available/i }),
-    ).not.toBeInTheDocument();
+    expect(mockDownloadAndInstall).toHaveBeenCalled();
   });
 
   it("checks for updates on startup even if a previous check happened recently", async () => {
-    installLocalStorageMock();
-    window.localStorage.setItem("daytrail:autoUpdate:lastCheckedAt", String(Date.now()));
-    const invoke = vi.fn(async (command: string) => {
-      if (command === "today") {
-        return {
-          localDate: "2026-06-02",
-          tasks: [],
-          quickNotes: [],
-          commitments: [],
-          pendingReplies: [],
-          aiOutputs: [],
-          calendarEvents: [],
-          calendarReconciliation: {
-            plannedEvents: 0,
-            matchedEvents: 0,
-            unmatchedEvents: 0,
-            plannedDurationMs: 0,
-            actualOverlapMs: 0,
-            items: [],
-          },
-          focusSessions: [],
-          recoverySummary: null,
-          meetings: [],
-          fieldVisits: [],
-          idleBlocks: [],
-          sourceEvents: [],
-          workSessions: [],
-          parallelStreams: [],
-          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
-          appUsageSummary: { totalDurationMs: 0, apps: [] },
-          automationCandidates: [],
-          unclosedLoopInbox: [],
-          aiOutputLedger: [],
-          loopRisks: [],
-          nextBestAction: null,
-          pauseState: { paused: false },
-          settings: { browserBridgeEnabled: true, excludedDomains: [] },
-          projectContext: null,
-          activeWorkContext: null,
-        };
-      }
-      if (command === "check_for_updates") {
-        return {
-          currentVersion: "0.1.2",
-          latestVersion: "0.1.2",
-          latestBuildAt: null,
-          updateAvailable: false,
-          releaseUrl: "https://github.com/example/releases/latest",
-          downloadUrl: null,
-          error: null,
-        };
-      }
-      return null;
-    });
+    vi.mocked(checkUpdate).mockResolvedValueOnce({ available: false } as never);
 
     window.__TAURI__ = {
-      core: {
-        invoke: invoke as unknown as <T>(
-          command: string,
-          args?: Record<string, unknown>,
-        ) => Promise<T>,
-      },
+      core: { invoke: vi.fn().mockResolvedValue(null) as never },
     };
 
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /^today$/i })).toBeInTheDocument();
-    expect(invoke).toHaveBeenCalledWith("check_for_updates", undefined);
+    expect(checkUpdate).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -389,66 +281,16 @@ describe("DayTrail command center", () => {
     const user = userEvent.setup();
     installLocalStorageMock();
     const now = Date.now();
-    const invoke = vi.fn(async (command: string) => {
-      if (command === "today") {
-        return {
-          localDate: "2026-06-02",
-          tasks: [],
-          quickNotes: [],
-          commitments: [],
-          pendingReplies: [],
-          aiOutputs: [],
-          calendarEvents: [],
-          calendarReconciliation: {
-            plannedEvents: 0,
-            matchedEvents: 0,
-            unmatchedEvents: 0,
-            plannedDurationMs: 0,
-            actualOverlapMs: 0,
-            items: [],
-          },
-          focusSessions: [],
-          recoverySummary: null,
-          meetings: [],
-          fieldVisits: [],
-          idleBlocks: [],
-          sourceEvents: [],
-          workSessions: [],
-          parallelStreams: [],
-          aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
-          appUsageSummary: { totalDurationMs: 0, apps: [] },
-          automationCandidates: [],
-          unclosedLoopInbox: [],
-          aiOutputLedger: [],
-          loopRisks: [],
-          nextBestAction: null,
-          pauseState: { paused: false },
-          settings: { browserBridgeEnabled: true, excludedDomains: [] },
-          projectContext: null,
-          activeWorkContext: null,
-        };
-      }
-      if (command === "check_for_updates") {
-        return {
-          currentVersion: "0.1.2",
-          latestVersion: "0.1.3",
-          latestBuildAt: "2026-06-02T12:00:00Z",
-          updateAvailable: true,
-          releaseUrl: "https://github.com/example/releases/latest",
-          downloadUrl: null,
-          error: null,
-        };
-      }
-      return null;
-    });
+
+    vi.mocked(checkUpdate).mockResolvedValueOnce({
+      available: true,
+      version: "0.1.3",
+      body: null,
+      downloadAndInstall: vi.fn().mockResolvedValue(undefined),
+    } as never);
 
     window.__TAURI__ = {
-      core: {
-        invoke: invoke as unknown as <T>(
-          command: string,
-          args?: Record<string, unknown>,
-        ) => Promise<T>,
-      },
+      core: { invoke: vi.fn().mockResolvedValue(null) as never },
     };
 
     render(<App />);
@@ -459,7 +301,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getByRole("button", { name: /later/i }));
 
     const snoozedUntil = Number(
-      window.localStorage.getItem("daytrail:autoUpdate:dismissed:0.1.3:2026-06-02T12:00:00Z"),
+      window.localStorage.getItem("daytrail:update:snoozedUntil:0.1.3"),
     );
     expect(snoozedUntil).toBeGreaterThanOrEqual(now + 8 * 60 * 60 * 1000 - 5_000);
     expect(
