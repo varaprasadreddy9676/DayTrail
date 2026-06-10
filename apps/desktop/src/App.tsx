@@ -440,6 +440,43 @@ type BackendSourceEvent = {
   createdAt: number;
 };
 
+type TaskMatchField = "title" | "url" | "app" | "source" | "any";
+type TaskMatcherType = "contains" | "wildcard" | "regex";
+type LinkOrigin = "manual" | "rule";
+
+type BackendLinkedActivity = BackendSourceEvent & {
+  linkId: number;
+  origin: LinkOrigin;
+  ruleId?: number | null;
+  linkedAt: number;
+};
+
+type BackendTaskMatchRule = {
+  id: number;
+  taskId: number;
+  field: TaskMatchField;
+  matcher: TaskMatcherType;
+  pattern: string;
+  caseSensitive: boolean;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type TaskMatchRuleInput = {
+  field: TaskMatchField;
+  matcher: TaskMatcherType;
+  pattern: string;
+  caseSensitive: boolean;
+  enabled: boolean;
+};
+
+type BackendApplyRulesSummary = {
+  linked: number;
+  scanned: number;
+  rules: number;
+};
+
 type BackendAiToolUsage = {
   tool: string;
   durationMs: number;
@@ -1034,6 +1071,22 @@ async function invokeTauri<T>(
     console.warn(`Tauri command failed: ${command}`, error);
     return null;
   }
+}
+
+/**
+ * Like {@link invokeTauri} but surfaces backend errors to the caller instead of
+ * swallowing them. Used for mutations (e.g. saving a rule) where the user needs
+ * to see validation failures such as an invalid regular expression.
+ */
+async function invokeTauriStrict<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error("DayTrail backend is not available.");
+  }
+  return invoke<T>(command, args);
 }
 
 async function writeClipboardText(value: string) {
@@ -6058,6 +6111,7 @@ function TaskListSection({
   tasks: BackendTask[];
   title: string;
 }) {
+  const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
   return (
     <section className="tasks-section panel-block" aria-label={title}>
       <header className="tasks-section-head">
@@ -6090,6 +6144,16 @@ function TaskListSection({
                 <em>{taskDueLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
               </div>
               <div className="task-actions">
+                <button
+                  aria-expanded={expandedTaskId === task.id}
+                  className="button compact"
+                  onClick={() =>
+                    setExpandedTaskId((current) => (current === task.id ? null : task.id))
+                  }
+                  type="button"
+                >
+                  {expandedTaskId === task.id ? "Hide links" : "Links & rules"}
+                </button>
                 <button className="button compact" onClick={() => onEditTask(task)} type="button">
                   Edit
                 </button>
@@ -6122,11 +6186,391 @@ function TaskListSection({
                   Delete
                 </button>
               </div>
+              {expandedTaskId === task.id && <TaskLinksPanel task={task} />}
             </article>
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+const MATCH_FIELD_OPTIONS: Array<{ value: TaskMatchField; label: string }> = [
+  { value: "any", label: "Title, URL or app" },
+  { value: "title", label: "Title" },
+  { value: "url", label: "URL" },
+  { value: "app", label: "App" },
+  { value: "source", label: "Source" },
+];
+
+const MATCHER_OPTIONS: Array<{ value: TaskMatcherType; label: string }> = [
+  { value: "contains", label: "Contains" },
+  { value: "wildcard", label: "Wildcard (* ?)" },
+  { value: "regex", label: "Regex" },
+];
+
+const EMPTY_RULE_DRAFT: TaskMatchRuleInput = {
+  field: "any",
+  matcher: "contains",
+  pattern: "",
+  caseSensitive: false,
+  enabled: true,
+};
+
+function linkedActivityLabel(activity: BackendLinkedActivity): string {
+  return (
+    compactDisplayLabel(activity.title) ||
+    compactDisplayLabel(activity.workspaceKey) ||
+    compactDisplayLabel(activity.domain) ||
+    compactDisplayLabel(activity.app) ||
+    activity.source
+  );
+}
+
+/**
+ * Per-task panel for linking recorded activities and managing auto-match rules.
+ * Loads its data lazily the first time it is expanded.
+ */
+function TaskLinksPanel({ task }: { task: BackendTask }) {
+  const [activities, setActivities] = useState<BackendLinkedActivity[]>([]);
+  const [rules, setRules] = useState<BackendTaskMatchRule[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<TaskMatchRuleInput>(EMPTY_RULE_DRAFT);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerResults, setPickerResults] = useState<BackendSourceEvent[]>([]);
+  const [pickerSearched, setPickerSearched] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [nextActivities, nextRules] = await Promise.all([
+      invokeTauri<BackendLinkedActivity[]>("list_task_activities", { taskId: task.id }),
+      invokeTauri<BackendTaskMatchRule[]>("list_task_rules", { taskId: task.id }),
+    ]);
+    setActivities(nextActivities ?? []);
+    setRules(nextRules ?? []);
+    setLoaded(true);
+  }, [task.id]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const runMutation = async (action: () => Promise<void>, successMessage?: string) => {
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await action();
+      await refresh();
+      if (successMessage) setStatus(successMessage);
+    } catch (mutationError) {
+      setError(errorMessage(mutationError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addRule = () =>
+    runMutation(async () => {
+      if (draft.pattern.trim().length === 0) {
+        throw new Error("Enter a pattern to match.");
+      }
+      await invokeTauriStrict<BackendTaskMatchRule>("create_task_rule", {
+        taskId: task.id,
+        input: { ...draft, pattern: draft.pattern.trim() },
+      });
+      setDraft(EMPTY_RULE_DRAFT);
+    }, "Rule added.");
+
+  const toggleRule = (rule: BackendTaskMatchRule) =>
+    runMutation(async () => {
+      await invokeTauriStrict<BackendTaskMatchRule>("update_task_rule", {
+        ruleId: rule.id,
+        input: {
+          field: rule.field,
+          matcher: rule.matcher,
+          pattern: rule.pattern,
+          caseSensitive: rule.caseSensitive,
+          enabled: !rule.enabled,
+        } satisfies TaskMatchRuleInput,
+      });
+    });
+
+  const deleteRule = (rule: BackendTaskMatchRule) =>
+    runMutation(async () => {
+      await invokeTauriStrict("delete_task_rule", { ruleId: rule.id });
+    }, "Rule removed.");
+
+  const applyRules = () =>
+    runMutation(async () => {
+      const summary = await invokeTauriStrict<BackendApplyRulesSummary>("apply_task_rules", {
+        taskId: task.id,
+      });
+      setStatus(
+        `Scanned ${summary.scanned} activit${summary.scanned === 1 ? "y" : "ies"} · linked ${summary.linked} new.`,
+      );
+    });
+
+  const unlink = (activity: BackendLinkedActivity) =>
+    runMutation(async () => {
+      await invokeTauriStrict("unlink_activity_from_task", {
+        sourceEventId: activity.id,
+        taskId: task.id,
+      });
+    }, "Activity unlinked.");
+
+  const searchActivities = async () => {
+    const results = await invokeTauri<BackendSourceEvent[]>("search_recent_activities", {
+      query: pickerQuery.trim() || null,
+      limit: 25,
+    });
+    setPickerResults(results ?? []);
+    setPickerSearched(true);
+  };
+
+  const linkActivity = (activity: BackendSourceEvent) =>
+    runMutation(async () => {
+      await invokeTauriStrict<unknown>("link_activity_to_task", {
+        sourceEventId: activity.id,
+        taskId: task.id,
+      });
+    }, "Activity linked.");
+
+  const linkedIds = new Set(activities.map((activity) => activity.id));
+
+  return (
+    <div className="task-links-panel" aria-label={`Links and rules for ${task.title}`}>
+      <section className="task-links-section">
+        <header>
+          <h4>Linked activities</h4>
+          <button
+            aria-expanded={pickerOpen}
+            className="button compact"
+            disabled={busy}
+            onClick={() => setPickerOpen((open) => !open)}
+            type="button"
+          >
+            {pickerOpen ? "Close" : "Link an activity"}
+          </button>
+        </header>
+
+        {pickerOpen && (
+          <div className="task-link-picker">
+            <div className="task-link-picker-search">
+              <input
+                aria-label="Search activities"
+                disabled={busy}
+                onChange={(event) => setPickerQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void searchActivities();
+                  }
+                }}
+                placeholder="Search recorded activities…"
+                type="text"
+                value={pickerQuery}
+              />
+              <button
+                className="button compact"
+                disabled={busy}
+                onClick={() => void searchActivities()}
+                type="button"
+              >
+                Search
+              </button>
+            </div>
+            {pickerSearched && pickerResults.length === 0 ? (
+              <p className="task-links-empty">No matching activities.</p>
+            ) : (
+              <ul className="task-links-list">
+                {pickerResults.map((activity) => {
+                  const alreadyLinked = linkedIds.has(activity.id);
+                  return (
+                    <li key={activity.id}>
+                      <div className="task-link-activity">
+                        <strong>
+                          {compactDisplayLabel(activity.title) ||
+                            compactDisplayLabel(activity.domain) ||
+                            compactDisplayLabel(activity.app) ||
+                            activity.source}
+                        </strong>
+                        <span>
+                          {new Date(activity.startedAt).toLocaleString()} ·{" "}
+                          {formatDuration(activity.durationMs)}
+                        </span>
+                      </div>
+                      <button
+                        className="button compact primary"
+                        disabled={busy || alreadyLinked}
+                        onClick={() => void linkActivity(activity)}
+                        type="button"
+                      >
+                        {alreadyLinked ? "Linked" : "Link"}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {loaded && activities.length === 0 ? (
+          <p className="task-links-empty">
+            No activities linked yet. Add a rule below, or use “Apply rules to history” to scan past
+            activity.
+          </p>
+        ) : (
+          <ul className="task-links-list">
+            {activities.map((activity) => (
+              <li key={activity.linkId}>
+                <div className="task-link-activity">
+                  <strong>{linkedActivityLabel(activity)}</strong>
+                  <span>
+                    {activity.origin === "rule" ? "Auto" : "Manual"} ·{" "}
+                    {new Date(activity.startedAt).toLocaleString()} ·{" "}
+                    {formatDuration(activity.durationMs)}
+                  </span>
+                </div>
+                <button
+                  className="button compact"
+                  disabled={busy}
+                  onClick={() => void unlink(activity)}
+                  type="button"
+                >
+                  Unlink
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="task-links-section">
+        <header>
+          <h4>Auto-match rules</h4>
+          <button
+            className="button compact"
+            disabled={busy || rules.length === 0}
+            onClick={() => void applyRules()}
+            type="button"
+          >
+            Apply rules to history
+          </button>
+        </header>
+
+        {rules.length > 0 && (
+          <ul className="task-rules-list">
+            {rules.map((rule) => (
+              <li data-enabled={rule.enabled} key={rule.id}>
+                <div className="task-rule-summary">
+                  <code>{rule.pattern}</code>
+                  <span>
+                    {MATCH_FIELD_OPTIONS.find((option) => option.value === rule.field)?.label} ·{" "}
+                    {MATCHER_OPTIONS.find((option) => option.value === rule.matcher)?.label}
+                    {rule.caseSensitive ? " · case-sensitive" : ""}
+                  </span>
+                </div>
+                <div className="task-rule-actions">
+                  <button
+                    className="button compact"
+                    disabled={busy}
+                    onClick={() => void toggleRule(rule)}
+                    type="button"
+                  >
+                    {rule.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    className="button compact danger"
+                    disabled={busy}
+                    onClick={() => void deleteRule(rule)}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="task-rule-form">
+          <select
+            aria-label="Rule field"
+            disabled={busy}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, field: event.target.value as TaskMatchField }))
+            }
+            value={draft.field}
+          >
+            {MATCH_FIELD_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Rule matcher"
+            disabled={busy}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                matcher: event.target.value as TaskMatcherType,
+              }))
+            }
+            value={draft.matcher}
+          >
+            {MATCHER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <input
+            aria-label="Rule pattern"
+            disabled={busy}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, pattern: event.target.value }))
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void addRule();
+              }
+            }}
+            placeholder="e.g. [PROJECT-A] or JIRA-\d+"
+            type="text"
+            value={draft.pattern}
+          />
+          <label className="task-rule-case">
+            <input
+              checked={draft.caseSensitive}
+              disabled={busy}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, caseSensitive: event.target.checked }))
+              }
+              type="checkbox"
+            />
+            Aa
+          </label>
+          <button
+            className="button compact primary"
+            disabled={busy || draft.pattern.trim().length === 0}
+            onClick={() => void addRule()}
+            type="button"
+          >
+            Add rule
+          </button>
+        </div>
+      </section>
+
+      {status && <p className="task-links-status">{status}</p>}
+      {error && <p className="task-links-error">{error}</p>}
+    </div>
   );
 }
 

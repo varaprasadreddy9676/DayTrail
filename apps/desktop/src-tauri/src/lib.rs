@@ -4,6 +4,7 @@ pub mod commands;
 pub mod error;
 pub mod focus;
 pub mod llm;
+pub mod matching;
 pub mod models;
 pub mod native_messaging;
 pub mod permissions;
