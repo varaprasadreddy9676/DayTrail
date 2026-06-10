@@ -237,12 +237,12 @@ fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
 #[tauri::command]
 pub fn brew_upgrade_daytrail() -> Result<String, CommandError> {
     let brew = find_brew_binary()
-        .ok_or_else(|| CommandError::from("brew binary not found"))?;
+        .ok_or_else(|| CommandError::from(anyhow::anyhow!("brew binary not found")))?;
 
     let output = std::process::Command::new(&brew)
         .args(["upgrade", "--cask", "daytrail"])
         .output()
-        .map_err(|e| CommandError::from(format!("failed to launch brew: {e}")))?;
+        .map_err(|e| CommandError::from(anyhow::anyhow!("failed to launch brew: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -251,11 +251,12 @@ pub fn brew_upgrade_daytrail() -> Result<String, CommandError> {
     if output.status.success() {
         Ok(combined)
     } else {
-        Err(CommandError::from(if combined.is_empty() {
+        let msg = if combined.is_empty() {
             "brew upgrade failed".to_string()
         } else {
             combined
-        }))
+        };
+        Err(CommandError::from(anyhow::anyhow!("{msg}")))
     }
 }
 

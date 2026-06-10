@@ -1,5 +1,34 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProactiveInsight {
+    pub id: i64,
+    pub insight_type: String,
+    pub title: String,
+    pub body: String,
+    pub priority: String,
+    pub action_hint: Option<String>,
+    pub generated_at: i64,
+    pub seen_at: Option<i64>,
+    pub dismissed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatResponse {
+    pub message: String,
+    pub data_sources: Vec<String>,
+    pub used_ai: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -117,6 +146,14 @@ pub struct Settings {
     pub recovery_enabled: bool,
     #[serde(default = "default_recovery_threshold_minutes")]
     pub recovery_threshold_minutes: i64,
+    #[serde(default = "default_work_hours_enabled")]
+    pub work_hours_enabled: bool,
+    #[serde(default = "default_work_start_hour")]
+    pub work_start_hour: i64,
+    #[serde(default = "default_work_end_hour")]
+    pub work_end_hour: i64,
+    #[serde(default = "default_min_gap_minutes")]
+    pub min_gap_minutes: i64,
 }
 
 fn default_experience_mode() -> String {
@@ -129,6 +166,22 @@ fn default_show_ai_details() -> String {
 
 fn default_recovery_threshold_minutes() -> i64 {
     30
+}
+
+fn default_work_hours_enabled() -> bool {
+    true
+}
+
+fn default_work_start_hour() -> i64 {
+    9
+}
+
+fn default_work_end_hour() -> i64 {
+    18
+}
+
+fn default_min_gap_minutes() -> i64 {
+    10
 }
 
 impl Default for Settings {
@@ -156,6 +209,10 @@ impl Default for Settings {
             data_retention_days: 0,
             recovery_enabled: false,
             recovery_threshold_minutes: default_recovery_threshold_minutes(),
+            work_hours_enabled: default_work_hours_enabled(),
+            work_start_hour: default_work_start_hour(),
+            work_end_hour: default_work_end_hour(),
+            min_gap_minutes: default_min_gap_minutes(),
         }
     }
 }
@@ -184,6 +241,10 @@ pub struct SettingsPatch {
     pub data_retention_days: Option<i64>,
     pub recovery_enabled: Option<bool>,
     pub recovery_threshold_minutes: Option<i64>,
+    pub work_hours_enabled: Option<bool>,
+    pub work_start_hour: Option<i64>,
+    pub work_end_hour: Option<i64>,
+    pub min_gap_minutes: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

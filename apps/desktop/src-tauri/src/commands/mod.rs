@@ -1,5 +1,7 @@
 pub mod agents;
 pub mod bridge;
+pub mod insights;
+pub mod chat;
 pub mod calendar;
 pub mod commitments;
 pub mod context;
@@ -126,6 +128,11 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         recovery::list_recovery_events,
         recovery::snooze_recovery,
         recovery::skip_recovery,
-        recovery::take_recovery_break
+        recovery::take_recovery_break,
+        chat::chat_query,
+        insights::list_proactive_insights,
+        insights::dismiss_insight,
+        insights::mark_insights_seen,
+        insights::count_unseen_insights
     ]
 }

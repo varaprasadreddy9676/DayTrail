@@ -65,7 +65,8 @@ pub fn run() {
             // it would only run at startup — and DayTrail is built to never quit,
             // so on an always-on machine the DB would grow unbounded. This is a
             // no-op while retention is disabled (data_retention_days <= 0).
-            spawn_retention_scheduler(store, Duration::from_secs(24 * 60 * 60));
+            spawn_retention_scheduler(store.clone(), Duration::from_secs(24 * 60 * 60));
+            spawn_insight_scheduler(store, app.handle().clone(), Duration::from_secs(3 * 60 * 60));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -217,6 +218,45 @@ fn spawn_retention_scheduler(store: WorktraceStore, interval: Duration) {
             Err(_) => eprintln!("retention sweep panicked — recovered, continuing"),
         }
     });
+}
+
+fn spawn_insight_scheduler(store: WorktraceStore, app: tauri::AppHandle, interval: Duration) {
+    use chrono::Timelike;
+    std::thread::spawn(move || {
+        // Wait 90s after launch so the app has time to settle before the first LLM call.
+        std::thread::sleep(Duration::from_secs(90));
+        loop {
+            let hour = chrono::Local::now().hour();
+            if hour >= 7 && hour < 22 {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    store.generate_and_store_insights()
+                }));
+                match outcome {
+                    Ok(Ok(insights)) => {
+                        for insight in &insights {
+                            if insight.priority == "high" {
+                                post_proactive_insight(&app, insight);
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => eprintln!("insight generation failed: {e:#}"),
+                    Err(_) => eprintln!("insight scheduler panicked — recovered"),
+                }
+            }
+            std::thread::sleep(interval);
+        }
+    });
+}
+
+fn post_proactive_insight(app: &tauri::AppHandle, insight: &crate::models::ProactiveInsight) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title(&insight.title)
+        .body(&insight.body)
+        .sound(crate::platform::notification_sound())
+        .show();
 }
 
 /// Strip the macOS quarantine xattr from the running app bundle. This removes

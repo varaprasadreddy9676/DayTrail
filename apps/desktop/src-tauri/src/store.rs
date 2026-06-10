@@ -562,6 +562,18 @@ impl WorktraceStore {
                 billable INTEGER NOT NULL DEFAULT 1,
                 updated_at INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS proactive_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                insight_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                priority TEXT NOT NULL DEFAULT 'medium',
+                action_hint TEXT,
+                generated_at INTEGER NOT NULL,
+                seen_at INTEGER,
+                dismissed_at INTEGER
+            );
             "#,
         )?;
 
@@ -2049,6 +2061,21 @@ impl WorktraceStore {
                     settings.recovery_threshold_minutes =
                         value.parse().unwrap_or(settings.recovery_threshold_minutes);
                 }
+                "work_hours_enabled" => {
+                    settings.work_hours_enabled = matches!(value.as_str(), "1" | "true");
+                }
+                "work_start_hour" => {
+                    settings.work_start_hour =
+                        value.parse().unwrap_or(settings.work_start_hour);
+                }
+                "work_end_hour" => {
+                    settings.work_end_hour =
+                        value.parse().unwrap_or(settings.work_end_hour);
+                }
+                "min_gap_minutes" => {
+                    settings.min_gap_minutes =
+                        value.parse().unwrap_or(settings.min_gap_minutes);
+                }
                 _ => {}
             }
         }
@@ -2247,6 +2274,29 @@ impl WorktraceStore {
                 &now,
             )?;
         }
+        if let Some(value) = patch.work_hours_enabled {
+            Self::upsert_setting_locked(
+                &conn,
+                "work_hours_enabled",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.work_start_hour {
+            anyhow::ensure!((0..=23).contains(&value), "work start hour must be 0–23");
+            Self::upsert_setting_locked(&conn, "work_start_hour", &value.to_string(), &now)?;
+        }
+        if let Some(value) = patch.work_end_hour {
+            anyhow::ensure!((1..=24).contains(&value), "work end hour must be 1–24");
+            Self::upsert_setting_locked(&conn, "work_end_hour", &value.to_string(), &now)?;
+        }
+        if let Some(value) = patch.min_gap_minutes {
+            anyhow::ensure!(
+                (5..=120).contains(&value),
+                "minimum gap must be between 5 and 120 minutes"
+            );
+            Self::upsert_setting_locked(&conn, "min_gap_minutes", &value.to_string(), &now)?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -2348,6 +2398,10 @@ impl WorktraceStore {
             data_retention_days: Some(settings.data_retention_days),
             recovery_enabled: Some(settings.recovery_enabled),
             recovery_threshold_minutes: Some(settings.recovery_threshold_minutes),
+            work_hours_enabled: Some(settings.work_hours_enabled),
+            work_start_hour: Some(settings.work_start_hour),
+            work_end_hour: Some(settings.work_end_hour),
+            min_gap_minutes: Some(settings.min_gap_minutes),
         })?;
 
         {
@@ -3682,6 +3736,385 @@ impl WorktraceStore {
         Ok(output)
     }
 
+    // ── Proactive insights ─────────────────────────────────────────────────
+
+    pub fn generate_and_store_insights(&self) -> Result<Vec<crate::models::ProactiveInsight>> {
+        let three_hours_ago = now_ms() - 3 * 60 * 60 * 1_000_i64;
+        {
+            let conn = self.lock()?;
+            let recent: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proactive_insights WHERE generated_at > ?1",
+                params![three_hours_ago],
+                |r| r.get(0),
+            )?;
+            if recent > 0 {
+                return Ok(vec![]);
+            }
+        }
+
+        let settings = self.get_settings()?;
+        let endpoint = settings.ai_endpoint.trim().to_string();
+        let model = settings.ai_model.trim().to_string();
+        if endpoint.is_empty() || model.is_empty() {
+            return Ok(vec![]);
+        }
+        let api_key = settings
+            .ai_api_key_ref
+            .as_deref()
+            .and_then(keychain_key_from_ref)
+            .and_then(|k| SystemKeychain.keychain_get(k).ok().flatten());
+
+        let snapshot = self.today_snapshot()?;
+        let today = Local::now().date_naive();
+        let from_date = (today - ChronoDuration::days(6)).format("%Y-%m-%d").to_string();
+        let to_date = today.format("%Y-%m-%d").to_string();
+        let week_context = self
+            .export_data_range(ExportRangeInput { from_date: Some(from_date), to_date: Some(to_date) })
+            .map(|e| build_compact_weekly_context(&e))
+            .unwrap_or_default();
+
+        let tasks = self.list_tasks(None).unwrap_or_default();
+        let open_tasks: Vec<_> = tasks.iter().filter(|t| t.status == crate::models::TaskStatus::Open).collect();
+        let overdue_count = {
+            let now = now_ms();
+            let today_str = Local::now().format("%Y-%m-%d").to_string();
+            open_tasks.iter().filter(|t| {
+                t.due_at.is_some_and(|d| d < now)
+                    || t.due_date.as_deref().is_some_and(|d| d < today_str.as_str())
+            }).count()
+        };
+
+        let commitments = self.list_open_commitments(50).unwrap_or_default();
+        let commitment_summary = if commitments.is_empty() {
+            String::new()
+        } else {
+            format!("Open commitments: {}", commitments.len())
+        };
+
+        let now_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
+        let context = format!(
+            "Today: {now_str}\n\n{today_snapshot}\n\n{week_context}\n\nOpen tasks: {open}, Overdue: {overdue}\n{commitments}",
+            today_snapshot = build_compact_chat_snapshot(&snapshot),
+            open = open_tasks.len(),
+            overdue = overdue_count,
+            commitments = commitment_summary,
+        );
+
+        let instruction = "You are DayTrail, an AI work-memory assistant. Analyze the following work data \
+and return 1-3 proactive insights that are genuinely interesting and specific to this person's actual data.\n\n\
+RULES:\n\
+- Every insight MUST cite specific numbers, durations, or names from the data\n\
+- Only flag things that are truly notable — skip generic productivity advice\n\
+- Priority \"high\" = needs attention now, \"medium\" = interesting pattern, \"low\" = FYI\n\
+- insight_type: one of: focus, loop, rhythm, commitment, ai_usage, productivity\n\
+- action_hint: 1 short sentence suggesting what to do, or null\n\n\
+Return ONLY a valid JSON array — no markdown fences, no other text:\n\
+[{\"type\":\"...\",\"title\":\"...\",\"body\":\"...\",\"priority\":\"high|medium|low\",\"action_hint\":\"...or null\"}]";
+
+        let raw = crate::llm::generate_text(
+            &settings.ai_provider,
+            &endpoint,
+            &model,
+            api_key.as_deref(),
+            instruction,
+            &context,
+        )?;
+
+        let json_str = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(json_str)
+            .unwrap_or_default();
+
+        let now = now_ms();
+        let mut stored = Vec::new();
+        let conn = self.lock()?;
+        for item in &parsed {
+            let insight_type = item["type"].as_str().unwrap_or("productivity").to_string();
+            let title = item["title"].as_str().unwrap_or("").to_string();
+            let body = item["body"].as_str().unwrap_or("").to_string();
+            let priority = item["priority"].as_str().unwrap_or("medium").to_string();
+            let action_hint: Option<String> = item["action_hint"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "null")
+                .map(str::to_string);
+
+            if title.is_empty() || body.is_empty() {
+                continue;
+            }
+
+            let id = conn.query_row(
+                "INSERT INTO proactive_insights (insight_type, title, body, priority, action_hint, generated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id",
+                params![insight_type, title, body, priority, action_hint, now],
+                |r| r.get::<_, i64>(0),
+            )?;
+
+            stored.push(crate::models::ProactiveInsight {
+                id,
+                insight_type,
+                title,
+                body,
+                priority,
+                action_hint,
+                generated_at: now,
+                seen_at: None,
+                dismissed_at: None,
+            });
+        }
+
+        Ok(stored)
+    }
+
+    pub fn list_proactive_insights(&self) -> Result<Vec<crate::models::ProactiveInsight>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, insight_type, title, body, priority, action_hint, generated_at, seen_at, dismissed_at
+             FROM proactive_insights
+             WHERE dismissed_at IS NULL
+             ORDER BY generated_at DESC
+             LIMIT 30",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::models::ProactiveInsight {
+                id: r.get(0)?,
+                insight_type: r.get(1)?,
+                title: r.get(2)?,
+                body: r.get(3)?,
+                priority: r.get(4)?,
+                action_hint: r.get(5)?,
+                generated_at: r.get(6)?,
+                seen_at: r.get(7)?,
+                dismissed_at: r.get(8)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+    }
+
+    pub fn dismiss_insight(&self, id: i64) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE proactive_insights SET dismissed_at = ?1 WHERE id = ?2",
+            params![now_ms(), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_insights_seen(&self) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE proactive_insights SET seen_at = ?1 WHERE seen_at IS NULL AND dismissed_at IS NULL",
+            params![now_ms()],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_unseen_insights(&self) -> Result<i64> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM proactive_insights WHERE seen_at IS NULL AND dismissed_at IS NULL",
+            [],
+            |r| r.get(0),
+        ).map_err(Into::into)
+    }
+
+    // ── Chat ───────────────────────────────────────────────────────────────
+
+    pub fn handle_chat_query(
+        &self,
+        message: &str,
+        history: &[crate::models::ChatMessage],
+    ) -> Result<crate::models::ChatResponse> {
+        let (context, sources) = self.build_chat_context(message)?;
+
+        let now_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
+        let instruction = format!(
+            "You are DayTrail's personal work assistant. DayTrail automatically tracks everything \
+the user does on their computer — apps used, time spent, tasks, commitments, meetings, \
+and AI tool usage.\n\n\
+Answer using ONLY the data provided below. Rules:\n\
+- Cite exact numbers, durations, app names, and task titles from the data\n\
+- Compute totals and percentages when it helps answer the question\n\
+- If the data isn't enough to answer, say what's missing and suggest a better question\n\
+- Be concise: 2-5 sentences or a short markdown list\n\
+- Never give generic productivity advice — everything must reference the actual data\n\n\
+Today is {now_str}."
+        );
+
+        let mut full_context = String::new();
+
+        if !history.is_empty() {
+            full_context.push_str("## Previous messages in this conversation\n");
+            for msg in history.iter().rev().take(8).rev() {
+                let role = if msg.role == "user" { "You" } else { "DayTrail" };
+                full_context.push_str(&format!("**{}:** {}\n\n", role, msg.content));
+            }
+            full_context.push_str("---\n\n");
+        }
+
+        full_context.push_str(&context);
+        full_context.push_str(&format!("\n\n## Current question\n{message}"));
+
+        let ai_answer = self.try_generate_ai_markdown(
+            "chat",
+            &instruction,
+            &full_context,
+            &SystemKeychain,
+        );
+
+        let used_ai = ai_answer.is_some();
+        let message_out = ai_answer.unwrap_or_else(|| {
+            "AI is not configured yet. Go to **Settings → AI Provider** to connect a model (Claude, GPT-4, Gemini, or a local Ollama model), and I'll be able to answer questions about your work data.".to_string()
+        });
+
+        Ok(crate::models::ChatResponse {
+            message: message_out,
+            data_sources: sources,
+            used_ai,
+        })
+    }
+
+    fn build_chat_context(&self, message: &str) -> Result<(String, Vec<String>)> {
+        let msg = message.to_lowercase();
+        let mut sections: Vec<String> = Vec::new();
+        let mut sources: Vec<String> = Vec::new();
+
+        let wants_week = msg.contains("week") || msg.contains("7 day") || msg.contains("pattern")
+            || msg.contains("trend") || msg.contains("average")
+            || ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                .iter()
+                .any(|d| msg.contains(d));
+
+        let wants_tasks = msg.contains("task") || msg.contains("todo") || msg.contains(" due")
+            || msg.contains("overdue") || msg.contains("priority") || msg.contains("backlog")
+            || msg.contains("what should i") || msg.contains("next step")
+            || msg.contains("focus on");
+
+        let wants_loops = msg.contains("open loop") || msg.contains("outstanding")
+            || msg.contains("pending") || msg.contains("commitment")
+            || msg.contains("reply debt") || msg.contains("unfinished")
+            || msg.contains("promised");
+
+        let wants_billing = msg.contains("bill") || msg.contains("invoice")
+            || msg.contains("charge") || msg.contains("client");
+
+        // Always include today — it's compact and answers most questions
+        let snapshot = self.today_snapshot()?;
+        sections.push(build_compact_chat_snapshot(&snapshot));
+        sources.push("today's activity".to_string());
+
+        if wants_week {
+            let today = Local::now().date_naive();
+            let from_date = (today - ChronoDuration::days(6))
+                .format("%Y-%m-%d")
+                .to_string();
+            let to_date = today.format("%Y-%m-%d").to_string();
+            if let Ok(export) = self.export_data_range(ExportRangeInput {
+                from_date: Some(from_date),
+                to_date: Some(to_date),
+            }) {
+                sections.push(build_compact_weekly_context(&export));
+                sources.push("this week's activity".to_string());
+            }
+        }
+
+        if wants_tasks {
+            let tasks = self.list_tasks(None)?;
+            let open: Vec<_> = tasks
+                .iter()
+                .filter(|t| t.status == crate::models::TaskStatus::Open)
+                .collect();
+            if !open.is_empty() {
+                let now = now_ms();
+                let mut task_lines = vec!["## All Open Tasks".to_string()];
+                for t in &open {
+                    let today_str = Local::now().format("%Y-%m-%d").to_string();
+                    let overdue = t.due_at.is_some_and(|d| d < now)
+                        || t.due_date.as_deref().is_some_and(|d| d < today_str.as_str());
+                    let project = t
+                        .project_label
+                        .as_deref()
+                        .or(t.client_label.as_deref())
+                        .map(|p| format!(" [{}]", p))
+                        .unwrap_or_default();
+                    let due = t
+                        .due_date
+                        .as_deref()
+                        .map(|d| format!(" due:{}", d))
+                        .unwrap_or_default();
+                    task_lines.push(format!(
+                        "- {}{}{}{}\n",
+                        t.title,
+                        project,
+                        due,
+                        if overdue { " **OVERDUE**" } else { "" }
+                    ));
+                }
+                sections.push(task_lines.join("\n"));
+                sources.push("tasks".to_string());
+            }
+        }
+
+        if wants_loops {
+            let commitments = self.list_open_commitments(20)?;
+            if !commitments.is_empty() {
+                let now = now_ms();
+                let mut lines = vec!["## Open Commitments".to_string()];
+                for c in &commitments {
+                    let overdue = c.due_at.is_some_and(|d| d < now);
+                    lines.push(format!(
+                        "- {}{}\n",
+                        c.title,
+                        if overdue { " **OVERDUE**" } else { "" }
+                    ));
+                }
+                sections.push(lines.join("\n"));
+                sources.push("commitments".to_string());
+            }
+
+            if !snapshot.loop_risks.is_empty() {
+                let mut lines = vec!["## Open Loop Risks".to_string()];
+                for r in snapshot.loop_risks.iter().take(10) {
+                    lines.push(format!("- {} [{}]: {}\n", r.title, r.risk_type, r.reason));
+                }
+                sections.push(lines.join("\n"));
+                if !sources.contains(&"loop risks".to_string()) {
+                    sources.push("loop risks".to_string());
+                }
+            }
+        }
+
+        if wants_billing {
+            let billable: Vec<_> = snapshot
+                .work_sessions
+                .iter()
+                .filter(|s| s.billable)
+                .collect();
+            if !billable.is_empty() {
+                let mut lines = vec!["## Billable Sessions (Today)".to_string()];
+                let total_ms: i64 = billable.iter().map(|s| s.duration_ms.max(0)).sum();
+                for s in &billable {
+                    let client = s
+                        .client_label
+                        .as_deref()
+                        .unwrap_or("no client");
+                    lines.push(format!(
+                        "- {} | {} | {} | {}\n",
+                        s.title,
+                        client,
+                        format_duration_words(s.duration_ms),
+                        s.billing_status
+                    ));
+                }
+                lines.push(format!("\nTotal billable today: {}", format_duration_words(total_ms)));
+                sections.push(lines.join("\n"));
+                if !sources.contains(&"billing data".to_string()) {
+                    sources.push("billing data".to_string());
+                }
+            }
+        }
+
+        Ok((sections.join("\n\n"), sources))
+    }
+
     pub fn search_work_memory(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let Some(fts_query) = build_fts_query(query) else {
             return Ok(Vec::new());
@@ -4818,12 +5251,19 @@ impl WorktraceStore {
             "idle gap ended_at must be after started_at"
         );
         let duration_ms = ended_at.saturating_sub(started_at);
-        if duration_ms < 10 * 60_000 {
+        let settings = self.get_settings()?;
+        let min_gap_ms = settings.min_gap_minutes.max(1) * 60_000;
+        if duration_ms < min_gap_ms {
             return Ok(None);
         }
         if self.pause_state()?.paused {
             return Ok(None);
         }
+
+        // Auto-classify gaps that start entirely outside work hours so users
+        // are never asked about activity at 1 am, 2 am, etc.
+        let off_hours = settings.work_hours_enabled
+            && is_outside_work_hours(started_at, settings.work_start_hour, settings.work_end_hour);
 
         let conn = self.lock()?;
         let covered_count: i64 = conn.query_row(
@@ -4866,13 +5306,14 @@ impl WorktraceStore {
             id: Some(id),
             started_at,
             ended_at,
-            category: None,
-            classified: Some(false),
+            category: if off_hours { Some("off_hours".to_string()) } else { None },
+            classified: Some(off_hours),
             evidence_json: Some(
                 serde_json::json!({
                     "source": "auto_idle_gap",
                     "kind": kind,
                     "durationMs": duration_ms,
+                    "offHours": off_hours,
                 })
                 .to_string(),
             ),
@@ -9842,11 +10283,241 @@ fn push_unclosed_loop(
     }
 }
 
+/// Compact snapshot of today's activity for passing as chat context to the LLM.
+/// Intentionally terse — keeps tokens low while giving the LLM all key facts.
+fn build_compact_chat_snapshot(snapshot: &TodaySnapshot) -> String {
+    let total_session_ms: i64 = snapshot
+        .work_sessions
+        .iter()
+        .map(|s| s.duration_ms.max(0))
+        .sum();
+    let total_ms = if total_session_ms > 0 {
+        total_session_ms
+    } else {
+        snapshot.app_usage_summary.total_duration_ms.max(0)
+    };
+
+    let mut out = format!("## Today — {}\n\n", snapshot.local_date);
+    out.push_str(&format!(
+        "**Time tracked:** {}  |  **Sessions:** {}\n",
+        format_duration_words(total_ms),
+        snapshot.work_sessions.len()
+    ));
+
+    if !snapshot.work_sessions.is_empty() {
+        out.push_str("\n**Work sessions:**\n");
+        for s in snapshot.work_sessions.iter().take(8) {
+            let label = s
+                .project_label
+                .as_deref()
+                .or(s.client_label.as_deref())
+                .map(|p| format!(" [{}]", p))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- {}{} — {}{}",
+                s.title,
+                label,
+                format_duration_words(s.duration_ms),
+                if s.billable { " (billable)" } else { "" }
+            ));
+            out.push('\n');
+        }
+    }
+
+    if !snapshot.app_usage_summary.apps.is_empty() {
+        out.push_str("\n**App usage:**\n");
+        for app in snapshot.app_usage_summary.apps.iter().take(8) {
+            let pct = if total_ms > 0 {
+                app.duration_ms * 100 / total_ms
+            } else {
+                0
+            };
+            out.push_str(&format!(
+                "- {} [{}]: {} ({}%)\n",
+                app.app,
+                app.category,
+                format_duration_words(app.duration_ms),
+                pct
+            ));
+        }
+    }
+
+    let open_tasks: Vec<_> = snapshot
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::models::TaskStatus::Open)
+        .collect();
+    let now = now_ms();
+    let overdue_count = open_tasks
+        .iter()
+        .filter(|t| t.due_at.is_some_and(|d| d < now))
+        .count();
+    out.push_str(&format!(
+        "\n**Tasks:** {} open",
+        open_tasks.len()
+    ));
+    if overdue_count > 0 {
+        out.push_str(&format!(", {} overdue", overdue_count));
+    }
+    out.push('\n');
+
+    if !open_tasks.is_empty() {
+        for t in open_tasks.iter().take(5) {
+            let overdue = t.due_at.is_some_and(|d| d < now);
+            out.push_str(&format!(
+                "  - {}{}\n",
+                t.title,
+                if overdue { " (OVERDUE)" } else { "" }
+            ));
+        }
+        if open_tasks.len() > 5 {
+            out.push_str(&format!("  - … and {} more\n", open_tasks.len() - 5));
+        }
+    }
+
+    if !snapshot.loop_risks.is_empty() {
+        out.push_str(&format!(
+            "\n**Open loops:** {} items need attention\n",
+            snapshot.loop_risks.len()
+        ));
+    }
+
+    if !snapshot.commitments.is_empty() {
+        let overdue_c = snapshot
+            .commitments
+            .iter()
+            .filter(|c| c.due_at.is_some_and(|d| d < now))
+            .count();
+        out.push_str(&format!(
+            "\n**Commitments:** {} open{}",
+            snapshot.commitments.len(),
+            if overdue_c > 0 {
+                format!(", {} overdue", overdue_c)
+            } else {
+                String::new()
+            }
+        ));
+        out.push('\n');
+    }
+
+    if !snapshot.ai_usage_summary.tools.is_empty() {
+        let tools: Vec<String> = snapshot
+            .ai_usage_summary
+            .tools
+            .iter()
+            .take(5)
+            .map(|t| format!("{} ({})", t.tool, format_duration_words(t.duration_ms)))
+            .collect();
+        out.push_str(&format!("\n**AI tools used today:** {}\n", tools.join(", ")));
+    }
+
+    if !snapshot.meetings.is_empty() {
+        out.push_str(&format!(
+            "\n**Meetings today:** {}\n",
+            snapshot.meetings.len()
+        ));
+        for m in snapshot.meetings.iter().take(3) {
+            out.push_str(&format!("  - {}\n", m.title));
+        }
+    }
+
+    out
+}
+
+/// Compact weekly summary for chat context. Much shorter than the full weekly markdown.
+fn build_compact_weekly_context(export: &ExportPayload) -> String {
+    let from = export.from_date.as_deref().unwrap_or("?");
+    let to = export.to_date.as_deref().unwrap_or("?");
+    let mut out = format!("## Week ({} to {})\n\n", from, to);
+
+    let total_ms: i64 = export
+        .work_sessions
+        .iter()
+        .map(|s| s.duration_ms.max(0))
+        .sum();
+    out.push_str(&format!(
+        "**Total time:** {}  |  **Sessions:** {}\n",
+        format_duration_words(total_ms),
+        export.work_sessions.len()
+    ));
+
+    if !export.app_usage_summary.apps.is_empty() {
+        out.push_str("\n**Top apps this week:**\n");
+        for app in export.app_usage_summary.apps.iter().take(6) {
+            let pct = if total_ms > 0 {
+                app.duration_ms * 100 / total_ms
+            } else {
+                0
+            };
+            out.push_str(&format!(
+                "- {} [{}]: {} ({}%)\n",
+                app.app,
+                app.category,
+                format_duration_words(app.duration_ms),
+                pct
+            ));
+        }
+    }
+
+    let completed: Vec<_> = export
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::models::TaskStatus::Done)
+        .collect();
+    let open: Vec<_> = export
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::models::TaskStatus::Open)
+        .collect();
+    out.push_str(&format!(
+        "\n**Tasks:** {} completed, {} open\n",
+        completed.len(),
+        open.len()
+    ));
+
+    if !export.commitments.is_empty() {
+        out.push_str(&format!(
+            "\n**Commitments tracked this week:** {}\n",
+            export.commitments.len()
+        ));
+    }
+
+    if !export.ai_usage_summary.tools.is_empty() {
+        let tools: Vec<String> = export
+            .ai_usage_summary
+            .tools
+            .iter()
+            .take(4)
+            .map(|t| format!("{} ({})", t.tool, format_duration_words(t.duration_ms)))
+            .collect();
+        out.push_str(&format!("\n**AI tools used this week:** {}\n", tools.join(", ")));
+    }
+
+    out
+}
+
 fn is_actionable_idle_block(block: &IdleBlock) -> bool {
     !block
         .evidence_json
         .as_deref()
         .is_some_and(|value| value.contains("source_event_gap"))
+}
+
+/// Returns true when a UTC timestamp (ms) falls outside [start_hour, end_hour)
+/// in local wall-clock time. Both hours are 0–23 inclusive; end_hour=18 means
+/// the window closes at 18:00 (6 pm).
+fn is_outside_work_hours(timestamp_ms: i64, start_hour: i64, end_hour: i64) -> bool {
+    use chrono::Timelike;
+    // Guard against misconfigured range — treat as "always inside work hours".
+    if end_hour <= start_hour {
+        return false;
+    }
+    let local = Local
+        .timestamp_millis_opt(timestamp_ms)
+        .single()
+        .unwrap_or_else(|| Local.timestamp_millis_opt(0).single().unwrap());
+    let hour = local.hour() as i64;
+    hour < start_hour || hour >= end_hour
 }
 
 fn loop_risk_category(risk_type: &str) -> &'static str {

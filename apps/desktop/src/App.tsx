@@ -33,6 +33,8 @@ type ViewKey =
   | "rituals"
   | "review"
   | "memory"
+  | "chat"
+  | "insights"
   | "settings";
 type RitualKey = "daily" | "weekly";
 
@@ -132,6 +134,10 @@ type BackendSettings = {
   dataRetentionDays?: number;
   recoveryEnabled?: boolean;
   recoveryThresholdMinutes?: number;
+  workHoursEnabled?: boolean;
+  workStartHour?: number;
+  workEndHour?: number;
+  minGapMinutes?: number;
 };
 
 type BackendStorageLocationInfo = {
@@ -712,6 +718,29 @@ type BackendReport = {
   fallbackReason?: string | null;
 };
 
+type ProactiveInsight = {
+  id: number;
+  insightType: string;
+  title: string;
+  body: string;
+  priority: "high" | "medium" | "low";
+  actionHint: string | null;
+  generatedAt: number;
+  seenAt: number | null;
+  dismissedAt: number | null;
+};
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+type ChatResponse = {
+  message: string;
+  dataSources: string[];
+  usedAi: boolean;
+};
+
 type BackendSearchResult = {
   entityType: string;
   entityId: string;
@@ -812,6 +841,8 @@ type WorkspaceFolder = {
 const navigation: Array<{ id: ViewKey; label: string; icon: IconName }> = [
   { id: "today", label: "Today", icon: "layout" },
   { id: "tasks", label: "My Tasks", icon: "check" },
+  { id: "insights", label: "Insights", icon: "bell" },
+  { id: "chat", label: "Ask AI", icon: "chat" },
   { id: "apps", label: "Activity", icon: "apps" },
   { id: "ai", label: "AI Impact", icon: "ritual" },
   { id: "restore", label: "Replay", icon: "search" },
@@ -2712,6 +2743,11 @@ export default function App() {
 
   const [activeView, setActiveView] = useState<ViewKey>("today");
   const [activeStream, setActiveStream] = useState("backend");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [insights, setInsights] = useState<ProactiveInsight[]>([]);
+  const [unseenInsightCount, setUnseenInsightCount] = useState(0);
   const [activeAppName, setActiveAppName] = useState<string | null>(null);
   const [activeHourDetail, setActiveHourDetail] = useState<number | null>(null);
   const [activeRitual, setActiveRitual] = useState<RitualKey>("daily");
@@ -2764,6 +2800,8 @@ export default function App() {
   const [reviewSessions, setReviewSessions] = useState<BackendWorkSessionSummary[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [exportingTimesheet, setExportingTimesheet] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   const [timelineRangePreset, setTimelineRangePreset] = useState<RangePreset>("today");
   const [timelineFromDate, setTimelineFromDate] = useState(() => formatLocalDateInput(new Date()));
   const [timelineToDate, setTimelineToDate] = useState(() => formatLocalDateInput(new Date()));
@@ -3057,6 +3095,14 @@ export default function App() {
       ignore = true;
       window.clearInterval(refreshId);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    void loadInsights();
+    const id = window.setInterval(() => void loadInsights(), 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -4117,27 +4163,81 @@ export default function App() {
   async function generateRitual(ritual: RitualKey = activeRitual) {
     setActiveView("rituals");
     setActiveRitual(ritual);
+    setIsGeneratingReport(true);
+    try {
+      const report =
+        ritual === "weekly"
+          ? await invokeTauri<BackendReport>("generate_weekly_review")
+          : timelineRangePreset === "today"
+          ? await invokeTauri<BackendReport>("generate_daily_report")
+          : await invokeTauri<BackendReport>("analyze_export_range", {
+              range: {
+                fromDate: timelineFromDate,
+                toDate: timelineToDate,
+              },
+            });
+      setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, effectiveSnapshot, experienceSettings));
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
 
-    const report =
-      ritual === "weekly"
-        ? await invokeTauri<BackendReport>("generate_weekly_review")
-        : timelineRangePreset === "today"
-        ? await invokeTauri<BackendReport>("generate_daily_report")
-        : await invokeTauri<BackendReport>("analyze_export_range", {
-            range: {
-              fromDate: timelineFromDate,
-              toDate: timelineToDate,
-            },
-          });
+  async function loadInsights() {
+    const data = await invokeTauri<ProactiveInsight[]>("list_proactive_insights");
+    if (data) {
+      setInsights(data);
+      const unseen = data.filter((i) => !i.seenAt).length;
+      setUnseenInsightCount(unseen);
+    }
+  }
 
-    setReportMarkdown(report?.bodyMarkdown || buildLocalReportMarkdown(ritual, effectiveSnapshot, experienceSettings));
+  async function dismissInsight(id: number) {
+    await invokeTauri("dismiss_insight", { id });
+    setInsights((prev) => prev.filter((i) => i.id !== id));
+    setUnseenInsightCount((prev) => Math.max(0, prev - 1));
+  }
+
+  async function openInsightsView() {
+    setActiveView("insights");
+    await invokeTauri("mark_insights_seen");
+    setUnseenInsightCount(0);
+  }
+
+  async function sendChatMessage(message: string) {
+    if (!message.trim() || chatLoading) return;
+    const userMsg: ChatMessage = { role: "user", content: message.trim() };
+    const next = [...chatMessages, userMsg];
+    setChatMessages(next);
+    setChatDraft("");
+    setChatLoading(true);
+    try {
+      const response = await invokeTauri<ChatResponse>("chat_query", {
+        message: userMsg.content,
+        history: chatMessages,
+      });
+      if (response) {
+        setChatMessages([...next, { role: "assistant", content: response.message }]);
+      }
+    } catch {
+      setChatMessages([
+        ...next,
+        { role: "assistant", content: "Something went wrong. Please try again." },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
   }
 
   async function regenerateContextData() {
+    setIsRefreshingContext(true);
     setSaveState("Refreshing work memory...");
-    const refreshed = await invokeTauri("materialize_work_memory");
-    const snapshot = await refreshTodaySnapshot();
-    setSaveState(refreshed || snapshot ? "Context data refreshed" : "Context refresh unavailable");
+    try {
+      const refreshed = await invokeTauri("materialize_work_memory");
+      const snapshot = await refreshTodaySnapshot();
+      setSaveState(refreshed || snapshot ? "Context data refreshed" : "Context refresh unavailable");
+    } finally {
+      setIsRefreshingContext(false);
+    }
   }
 
   function resumeCurrentContext() {
@@ -4208,11 +4308,24 @@ export default function App() {
               aria-current={activeView === item.id ? "page" : undefined}
               className="nav-item"
               key={item.id}
-              onClick={() => setActiveView(item.id)}
+              onClick={() => {
+                if (item.id === "insights") {
+                  void openInsightsView();
+                } else {
+                  setActiveView(item.id);
+                }
+              }}
               title={item.label}
               type="button"
             >
-              <Icon name={item.icon} />
+              <span className="nav-icon-wrap">
+                <Icon name={item.icon} />
+                {item.id === "insights" && unseenInsightCount > 0 && (
+                  <span className="nav-badge" aria-label={`${unseenInsightCount} new insights`}>
+                    {unseenInsightCount > 9 ? "9+" : unseenInsightCount}
+                  </span>
+                )}
+              </span>
               <span>{item.label}</span>
             </button>
           ))}
@@ -4452,6 +4565,8 @@ export default function App() {
           {activeView === "rituals" && (
             <RitualsView
               activeRitual={activeRitual}
+              isGenerating={isGeneratingReport}
+              isRefreshingContext={isRefreshingContext}
               onOpenExports={() => setActiveView("automation")}
               onGenerateReport={() => generateRitual(activeRitual)}
               onGenerateDaily={() => generateRitual("daily")}
@@ -4461,6 +4576,26 @@ export default function App() {
               settings={effectiveSnapshot?.settings}
               sourceFeed={displaySourceFeed}
               snapshot={effectiveSnapshot}
+            />
+          )}
+          {activeView === "insights" && (
+            <InsightsView
+              insights={insights}
+              onDismiss={dismissInsight}
+              onAskAI={(insight) => {
+                setChatDraft(`Tell me more about: ${insight.title}`);
+                setActiveView("chat");
+              }}
+            />
+          )}
+          {activeView === "chat" && (
+            <ChatView
+              loading={chatLoading}
+              messages={chatMessages}
+              draft={chatDraft}
+              onDraftChange={setChatDraft}
+              onSend={sendChatMessage}
+              onClear={() => setChatMessages([])}
             />
           )}
           {activeView === "memory" && (
@@ -7944,6 +8079,239 @@ function SimpleActivityView({
   );
 }
 
+const CHAT_SUGGESTIONS = [
+  "What did I work on today?",
+  "How much time did I spend on each app today?",
+  "What tasks are overdue or due soon?",
+  "What are my open loops and commitments?",
+  "How was my focus this week compared to last week?",
+  "What should I prioritize tomorrow?",
+  "How much billable time have I logged today?",
+  "Which AI tools did I use and for how long?",
+];
+
+const PRIORITY_LABELS: Record<string, string> = {
+  high: "Needs attention",
+  medium: "Pattern detected",
+  low: "FYI",
+};
+
+function InsightsView({
+  insights,
+  onDismiss,
+  onAskAI,
+}: {
+  insights: ProactiveInsight[];
+  onDismiss: (id: number) => void;
+  onAskAI: (insight: ProactiveInsight) => void;
+}) {
+  const unseen = insights.filter((i) => !i.seenAt);
+  const seen = insights.filter((i) => i.seenAt);
+
+  return (
+    <div className="view-frame insights-view">
+      <div className="screen-titlebar">
+        <div>
+          <h2>AI Insights</h2>
+          <p>DayTrail analyzes your work patterns every few hours and surfaces things worth knowing.</p>
+        </div>
+      </div>
+
+      {insights.length === 0 && (
+        <div className="insights-empty">
+          <div className="insights-empty-icon">
+            <Icon name="bell" />
+          </div>
+          <strong>No insights yet</strong>
+          <span>
+            DayTrail will analyze your work data and surface patterns, risks, and opportunities here.
+            {" "}Check back after a few work sessions — or make sure an AI model is configured in Settings.
+          </span>
+        </div>
+      )}
+
+      {unseen.length > 0 && (
+        <section className="insights-section">
+          <h3 className="insights-section-label">New</h3>
+          <div className="insights-list">
+            {unseen.map((insight) => (
+              <InsightCard key={insight.id} insight={insight} onDismiss={onDismiss} onAskAI={onAskAI} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {seen.length > 0 && (
+        <section className="insights-section">
+          <h3 className="insights-section-label">Earlier</h3>
+          <div className="insights-list">
+            {seen.map((insight) => (
+              <InsightCard key={insight.id} insight={insight} onDismiss={onDismiss} onAskAI={onAskAI} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function InsightCard({
+  insight,
+  onDismiss,
+  onAskAI,
+}: {
+  insight: ProactiveInsight;
+  onDismiss: (id: number) => void;
+  onAskAI: (insight: ProactiveInsight) => void;
+}) {
+  return (
+    <article className={`insight-card insight-priority-${insight.priority}`} data-seen={!!insight.seenAt}>
+      <div className="insight-card-header">
+        <span className={`insight-priority-badge priority-${insight.priority}`}>
+          {PRIORITY_LABELS[insight.priority] ?? insight.priority}
+        </span>
+        <button
+          aria-label="Dismiss insight"
+          className="insight-dismiss"
+          onClick={() => onDismiss(insight.id)}
+          type="button"
+        >
+          <Icon name="x" />
+        </button>
+      </div>
+      <h4 className="insight-title">{insight.title}</h4>
+      <p className="insight-body">{insight.body}</p>
+      {insight.actionHint && (
+        <p className="insight-action-hint">
+          <Icon name="arrow" />
+          {insight.actionHint}
+        </p>
+      )}
+      <div className="insight-card-actions">
+        <button
+          className="button compact"
+          onClick={() => onAskAI(insight)}
+          type="button"
+        >
+          <Icon name="chat" />
+          Explore in chat
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function ChatView({
+  messages,
+  loading,
+  draft,
+  onDraftChange,
+  onSend,
+  onClear,
+}: {
+  messages: ChatMessage[];
+  loading: boolean;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onSend: (msg: string) => void;
+  onClear: () => void;
+}) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  return (
+    <div className="view-frame chat-view">
+      <div className="screen-titlebar">
+        <div>
+          <h2>Ask AI</h2>
+          <p>Ask anything about your work data — time spent, tasks, patterns, commitments, and more.</p>
+        </div>
+        {messages.length > 0 && (
+          <div className="screen-actions">
+            <button className="button compact" onClick={onClear} type="button">
+              <Icon name="x" />
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="chat-messages">
+        {messages.length === 0 && !loading ? (
+          <div className="chat-empty">
+            <div className="chat-empty-icon">
+              <Icon name="chat" />
+            </div>
+            <strong>Ask about your work</strong>
+            <p>DayTrail has detailed records of your apps, time, tasks, and commitments. Try one of these:</p>
+            <div className="chat-suggestions">
+              {CHAT_SUGGESTIONS.map((q) => (
+                <button
+                  className="chat-suggestion"
+                  key={q}
+                  onClick={() => onSend(q)}
+                  type="button"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            {messages.map((msg, i) => (
+              <div className={`chat-bubble chat-bubble-${msg.role}`} key={i}>
+                {msg.role === "user" ? (
+                  <span>{msg.content}</span>
+                ) : (
+                  <pre className="chat-response">{msg.content}</pre>
+                )}
+              </div>
+            ))}
+            {loading && (
+              <div className="chat-bubble chat-bubble-assistant chat-bubble-loading">
+                <span className="chat-typing">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </>
+        )}
+      </div>
+
+      <div className="chat-input-bar">
+        <textarea
+          className="chat-input"
+          disabled={loading}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend(draft);
+            }
+          }}
+          placeholder="Ask about your work… (Enter to send, Shift+Enter for newline)"
+          rows={2}
+          value={draft}
+        />
+        <button
+          className="button primary chat-send"
+          disabled={loading || !draft.trim()}
+          onClick={() => onSend(draft)}
+          type="button"
+        >
+          <Icon name="arrow" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoopsView({
   items,
   onLoopAction,
@@ -9168,6 +9536,8 @@ function RestoreView({
 
 function RitualsView({
   activeRitual,
+  isGenerating,
+  isRefreshingContext,
   onGenerateDaily,
   onGenerateReport,
   onGenerateWeekly,
@@ -9179,6 +9549,8 @@ function RitualsView({
   snapshot,
 }: {
   activeRitual: RitualKey;
+  isGenerating: boolean;
+  isRefreshingContext: boolean;
   onGenerateDaily: () => void;
   onGenerateReport: () => void;
   onGenerateWeekly: () => void;
@@ -9209,6 +9581,7 @@ function RitualsView({
           <div className="screen-actions">
             <button
               className={activeRitual === "daily" ? "button compact primary" : "button compact"}
+              disabled={isGenerating}
               onClick={onGenerateDaily}
               type="button"
             >
@@ -9217,6 +9590,7 @@ function RitualsView({
             </button>
             <button
               className={activeRitual === "weekly" ? "button compact primary" : "button compact"}
+              disabled={isGenerating}
               onClick={onGenerateWeekly}
               type="button"
             >
@@ -9243,24 +9617,40 @@ function RitualsView({
               <div><span>To review</span><strong>{(snapshot?.unclosedLoopInbox?.length ?? 0) + (snapshot?.inferredWorkBlocks?.length ?? 0) + (snapshot?.idleBlocks?.filter((block) => !block.classified).length ?? 0)}</strong></div>
             </div>
             <div className="report-input-actions">
-              <button className="button compact" onClick={onRegenerateContext} type="button">
+              <button className="button compact" disabled={isRefreshingContext} onClick={onRegenerateContext} type="button">
                 <Icon name="sync" />
-                Refresh included work
+                {isRefreshingContext ? "Refreshing…" : "Refresh included work"}
               </button>
             </div>
           </section>
 
           <section className="panel-block report-output-panel">
             <PanelHeader eyebrow={activeRitual === "weekly" ? "2. Weekly digest" : "2. Daily report"} title={activeRitual === "weekly" ? "Weekly Work Review" : "Daily Work Report"} value="Markdown" />
-            <pre className={simpleReportMarkdown ? "report-preview" : "report-preview empty-report-preview"} aria-label="Generated report markdown">
-              {simpleReportMarkdown || (activeRitual === "weekly"
-                ? "Generate a weekly digest after DayTrail captures work across the last seven local days."
-                : "Generate today’s report after DayTrail captures a work session.")}
+            <pre
+              aria-label="Generated report markdown"
+              aria-busy={isGenerating}
+              className={[
+                "report-preview",
+                !simpleReportMarkdown && !isGenerating ? "empty-report-preview" : "",
+                isGenerating ? "report-preview-generating" : "",
+              ].join(" ").trim()}
+            >
+              {isGenerating
+                ? `Generating ${activeRitual === "weekly" ? "weekly digest" : "daily report"}…\n\nReading your work sessions, app usage, tasks, and commitments.\nThis can take up to 30 seconds with an AI model.`
+                : simpleReportMarkdown || (activeRitual === "weekly"
+                  ? "Generate a weekly digest after DayTrail captures work across the last seven local days."
+                  : "Generate today’s report after DayTrail captures a work session.")}
             </pre>
             <div className="output-actions">
-              <button aria-label="Generate" className="button compact primary" onClick={onGenerateReport} type="button">
-                <Icon name="ritual" />
-                Generate {activeRitual === "weekly" ? "weekly" : "daily"}
+              <button
+                aria-label="Generate"
+                className="button compact primary"
+                disabled={isGenerating}
+                onClick={onGenerateReport}
+                type="button"
+              >
+                <Icon name={isGenerating ? "sync" : "ritual"} />
+                {isGenerating ? "Generating…" : `Generate ${activeRitual === "weekly" ? "weekly" : "daily"}`}
               </button>
               <button
                 className="button compact"
@@ -9316,11 +9706,11 @@ function RitualsView({
             <Icon name="archive" />
             Raw export
           </button>
-          <button className="button compact" onClick={onGenerateDaily} type="button">
+          <button className="button compact" disabled={isGenerating} onClick={onGenerateDaily} type="button">
             <Icon name="plus" />
             Daily
           </button>
-          <button className="button compact primary" onClick={onGenerateWeekly} type="button">
+          <button className="button compact primary" disabled={isGenerating} onClick={onGenerateWeekly} type="button">
             <Icon name="archive" />
             Weekly
           </button>
@@ -9367,20 +9757,28 @@ function RitualsView({
             ))}
           </div>
           <div className="report-input-actions">
-            <button className="button compact" onClick={onRegenerateContext} type="button">
+            <button className="button compact" disabled={isRefreshingContext} onClick={onRegenerateContext} type="button">
               <Icon name="sync" />
-              Refresh inputs
+              {isRefreshingContext ? "Refreshing…" : "Refresh inputs"}
             </button>
           </div>
         </section>
 
         <section className="panel-block report-output-panel">
           <PanelHeader eyebrow="2. Generated report" title={markdownTitle} value="Markdown" />
-          <pre className="report-preview" aria-label="Generated report markdown">{reportContent}</pre>
+          <pre
+            aria-busy={isGenerating}
+            aria-label="Generated report markdown"
+            className={["report-preview", isGenerating ? "report-preview-generating" : ""].join(" ").trim()}
+          >
+            {isGenerating
+              ? `Generating ${activeRitual === "weekly" ? "weekly digest" : "daily report"}…\n\nThis can take up to 30 seconds with an AI model.`
+              : reportContent}
+          </pre>
           <div className="output-actions">
-            <button className="button compact primary" onClick={onGenerateReport} type="button">
-              <Icon name="ritual" />
-              Regenerate
+            <button className="button compact primary" disabled={isGenerating} onClick={onGenerateReport} type="button">
+              <Icon name={isGenerating ? "sync" : "ritual"} />
+              {isGenerating ? "Generating…" : "Regenerate"}
             </button>
             <button
               className="button compact"
@@ -9702,6 +10100,10 @@ function SettingsView({
   const retentionDays = storageInfo?.retentionDays ?? optimisticSettings.dataRetentionDays ?? 0;
   const recoveryEnabled = Boolean(optimisticSettings.recoveryEnabled);
   const recoveryThresholdMinutes = optimisticSettings.recoveryThresholdMinutes ?? 30;
+  const workHoursEnabled = optimisticSettings.workHoursEnabled ?? true;
+  const workStartHour = optimisticSettings.workStartHour ?? 9;
+  const workEndHour = optimisticSettings.workEndHour ?? 18;
+  const minGapMinutes = optimisticSettings.minGapMinutes ?? 10;
 
   return (
     <div className="view-frame settings-view">
@@ -9927,6 +10329,100 @@ function SettingsView({
                   <div className="status-row" data-state={recoveryEnabled ? "ok" : "muted"}>
                     <span>Context awareness</span>
                     <strong>Quiet during calls</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <span>Away prompts</span>
+                    <h2>Working hours</h2>
+                  </div>
+                  <strong>
+                    {workHoursEnabled ? `${workStartHour}:00 – ${workEndHour}:00` : "Always on"}
+                  </strong>
+                </div>
+                <div className="status-matrix">
+                  <label className="settings-toggle-row">
+                    <span>
+                      <strong>Respect working hours</strong>
+                      <em>
+                        Skip "Were you away?" prompts outside your work window.
+                        Gaps at 1 am or during weekends are silently recorded — never asked about.
+                      </em>
+                    </span>
+                    <input
+                      checked={workHoursEnabled}
+                      onChange={(event) =>
+                        saveSettingsPatch({ workHoursEnabled: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                  </label>
+                  <div className="settings-preset-row">
+                    <span>Work starts at</span>
+                    <div className="settings-preset-buttons" role="group" aria-label="Work start hour">
+                      {[6, 7, 8, 9, 10].map((h) => (
+                        <button
+                          aria-pressed={workStartHour === h}
+                          className="settings-preset-button"
+                          disabled={!workHoursEnabled}
+                          key={h}
+                          onClick={() => saveSettingsPatch({ workStartHour: h })}
+                          type="button"
+                        >
+                          {h}:00
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-preset-row">
+                    <span>Work ends at</span>
+                    <div className="settings-preset-buttons" role="group" aria-label="Work end hour">
+                      {[17, 18, 19, 20, 21].map((h) => (
+                        <button
+                          aria-pressed={workEndHour === h}
+                          className="settings-preset-button"
+                          disabled={!workHoursEnabled}
+                          key={h}
+                          onClick={() => saveSettingsPatch({ workEndHour: h })}
+                          type="button"
+                        >
+                          {h}:00
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-preset-row">
+                    <span>Minimum gap to prompt</span>
+                    <div
+                      className="settings-preset-buttons"
+                      role="group"
+                      aria-label="Minimum gap minutes"
+                    >
+                      {[5, 10, 15, 20, 30].map((m) => (
+                        <button
+                          aria-pressed={minGapMinutes === m}
+                          className="settings-preset-button"
+                          key={m}
+                          onClick={() => saveSettingsPatch({ minGapMinutes: m })}
+                          type="button"
+                        >
+                          {m}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div
+                    className="status-row"
+                    data-state={workHoursEnabled ? "ok" : "muted"}
+                  >
+                    <span>Outside window</span>
+                    <strong>Gaps auto-classified, no prompt</strong>
+                  </div>
+                  <div className="status-row" data-state="ok">
+                    <span>Gaps shorter than {minGapMinutes}m</span>
+                    <strong>Always skipped</strong>
                   </div>
                 </div>
               </section>
