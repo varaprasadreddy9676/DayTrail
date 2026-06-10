@@ -1209,6 +1209,110 @@ pub struct SourceEvent {
     pub created_at: i64,
 }
 
+// ── Activity ↔ task links ──────────────────────────────────────────────────────
+
+use crate::matching::{MatchField, MatcherType};
+
+/// How an activity↔task link came to exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkOrigin {
+    /// The user linked the activity by hand.
+    Manual,
+    /// A task match rule auto-linked the activity.
+    Rule,
+}
+
+impl LinkOrigin {
+    pub fn as_db_value(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Rule => "rule",
+        }
+    }
+}
+
+impl TryFrom<&str> for LinkOrigin {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "manual" => Ok(Self::Manual),
+            "rule" => Ok(Self::Rule),
+            other => anyhow::bail!("unknown link origin: {other}"),
+        }
+    }
+}
+
+/// A durable association between a recorded activity and a task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityTaskLink {
+    pub id: i64,
+    pub source_event_id: String,
+    pub task_id: i64,
+    pub origin: LinkOrigin,
+    pub rule_id: Option<i64>,
+    pub created_at: i64,
+}
+
+/// An activity joined with the link metadata, used when listing a task's
+/// linked activities.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedActivity {
+    #[serde(flatten)]
+    pub event: SourceEvent,
+    pub link_id: i64,
+    pub origin: LinkOrigin,
+    pub rule_id: Option<i64>,
+    pub linked_at: i64,
+}
+
+/// A rule that auto-links matching activities to a task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMatchRule {
+    pub id: i64,
+    pub task_id: i64,
+    pub field: MatchField,
+    pub matcher: MatcherType,
+    pub pattern: String,
+    pub case_sensitive: bool,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Input payload for creating or updating a task match rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMatchRuleInput {
+    pub field: MatchField,
+    pub matcher: MatcherType,
+    pub pattern: String,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Outcome of applying rules to already-recorded activities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyRulesSummary {
+    /// Number of new links created (existing links are not double-counted).
+    pub linked: usize,
+    /// Number of activities scanned.
+    pub scanned: usize,
+    /// Number of rules evaluated.
+    pub rules: usize,
+}
+
 // ── Git context ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

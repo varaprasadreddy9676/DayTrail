@@ -29,21 +29,23 @@ const DATA_DIR_NAME: &str = "ai.daytrail.desktop";
 const DB_FILE_NAME: &str = "daytrail.sqlite3";
 
 use crate::{
+    matching::CompiledRule,
     models::{
-        ActiveWorkContext, ActiveWorkContextInput, AgentRun, AgentRunInput, AiContextUsage,
-        AiContributionRow, AiOutputLedgerItem, AiToolUsage, AiUsage, AiUsageInput, AiUsageSummary,
-        AppProjectUsage, AppUsage, AppUsageSummary, AutomationCandidate, BrowserBridgeEvent,
-        CalendarEvent, CalendarEventInput, CalendarReconciliation, CalendarReconciliationItem,
-        CaptureHealthCheck, CaptureHealthSummary, Commitment, CommitmentInput,
-        DatabaseTransferResult, EmailThread, EmailThreadInput, ExportPayload, ExportRangeInput,
-        FieldVisit, FieldVisitInput, FileUsage, FocusSessionInput, FocusSessionSummary, IdleBlock,
-        IdleBlockInput, InferredWorkBlock, LoopAction, LoopActionInput, LoopRisk, Meeting,
-        MeetingInput, MenuBarSummary, NextBestAction, ParallelStreamSummary, PauseState,
-        PlanningItem, PlanningOutput, PrivacyDeleteSummary, ProjectContext, QuickNote,
-        RecoveryEvent, RecoveryEventInput, RecoveryPrompt, RecoverySummary, ReportOutput,
-        ReturnMarker, ReviewSessionInput, ScratchpadNote, ScratchpadNoteInput, SearchResult,
-        Settings, SettingsConfigPayload, SettingsPatch, SourceEvent, SourceEventInput,
-        StateSnapshot, StateSnapshotInput, StorageLocationInfo, Task, TaskDraft, TaskInput,
+        ActiveWorkContext, ActiveWorkContextInput, ActivityTaskLink, AgentRun, AgentRunInput,
+        AiContextUsage, AiContributionRow, AiOutputLedgerItem, AiToolUsage, AiUsage, AiUsageInput,
+        AiUsageSummary, AppProjectUsage, AppUsage, AppUsageSummary, ApplyRulesSummary,
+        AutomationCandidate, BrowserBridgeEvent, CalendarEvent, CalendarEventInput,
+        CalendarReconciliation, CalendarReconciliationItem, CaptureHealthCheck, CaptureHealthSummary,
+        Commitment, CommitmentInput, DatabaseTransferResult, EmailThread, EmailThreadInput,
+        ExportPayload, ExportRangeInput, FieldVisit, FieldVisitInput, FileUsage, FocusSessionInput,
+        FocusSessionSummary, IdleBlock, IdleBlockInput, InferredWorkBlock, LinkOrigin,
+        LinkedActivity, LoopAction, LoopActionInput, LoopRisk, Meeting, MeetingInput, MenuBarSummary,
+        NextBestAction, ParallelStreamSummary, PauseState, PlanningItem, PlanningOutput,
+        PrivacyDeleteSummary, ProjectContext, QuickNote, RecoveryEvent, RecoveryEventInput,
+        RecoveryPrompt, RecoverySummary, ReportOutput, ReturnMarker, ReviewSessionInput,
+        ScratchpadNote, ScratchpadNoteInput, SearchResult, Settings, SettingsConfigPayload,
+        SettingsPatch, SourceEvent, SourceEventInput, StateSnapshot, StateSnapshotInput,
+        StorageLocationInfo, Task, TaskDraft, TaskInput, TaskMatchRule, TaskMatchRuleInput,
         TaskStatus, TerminalBridgeMetadata, TimesheetRow, TodaySnapshot, UnclosedLoopItem,
         WorkMemorySummary, WorkOutput, WorkOutputInput, WorkSessionSummary, WorkspaceContext,
     },
@@ -521,6 +523,34 @@ impl WorktraceStore {
                 created_at INTEGER NOT NULL
             );
 
+            -- Durable, user-intent links between recorded activities and tasks.
+            -- Kept separate from the inferred work_graph_edges so manual and
+            -- rule-based links survive re-materialization of the work graph.
+            CREATE TABLE IF NOT EXISTS activity_task_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_event_id TEXT NOT NULL,
+                task_id INTEGER NOT NULL,
+                origin TEXT NOT NULL DEFAULT 'manual',
+                rule_id INTEGER,
+                created_at INTEGER NOT NULL,
+                UNIQUE (source_event_id, task_id),
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+
+            -- Per-task rules that auto-link matching activities.
+            CREATE TABLE IF NOT EXISTS task_match_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                field TEXT NOT NULL DEFAULT 'any',
+                matcher TEXT NOT NULL DEFAULT 'contains',
+                pattern TEXT NOT NULL,
+                case_sensitive INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+
             -- Singleton row: the user's currently declared work context
             CREATE TABLE IF NOT EXISTS active_work_context (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -587,6 +617,12 @@ impl WorktraceStore {
                 ON work_graph_edges(from_type, from_id);
             CREATE INDEX IF NOT EXISTS idx_work_graph_to
                 ON work_graph_edges(to_type, to_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_task_links_task
+                ON activity_task_links(task_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_task_links_event
+                ON activity_task_links(source_event_id);
+            CREATE INDEX IF NOT EXISTS idx_task_match_rules_task
+                ON task_match_rules(task_id, enabled);
             "#,
         )?;
 
@@ -1316,6 +1352,421 @@ impl WorktraceStore {
             params![sent_at, now, id],
         )?;
         Self::get_task_locked(&conn, id)
+    }
+
+    // ── Activity ↔ task links ──────────────────────────────────────────────
+
+    /// Link a recorded activity to a task by hand. Idempotent: re-linking the
+    /// same pair returns the existing link.
+    pub fn link_activity_to_task(
+        &self,
+        source_event_id: &str,
+        task_id: i64,
+    ) -> Result<ActivityTaskLink> {
+        let source_event_id = source_event_id.trim();
+        anyhow::ensure!(!source_event_id.is_empty(), "activity id is required");
+        let conn = self.lock()?;
+        let event_exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM source_events WHERE id = ?1",
+                params![source_event_id],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        anyhow::ensure!(event_exists, "activity not found: {source_event_id}");
+        let task_exists: bool = conn
+            .query_row("SELECT 1 FROM tasks WHERE id = ?1", params![task_id], |_| {
+                Ok(true)
+            })
+            .optional()?
+            .unwrap_or(false);
+        anyhow::ensure!(task_exists, "task not found: {task_id}");
+        Self::insert_link_locked(&conn, source_event_id, task_id, LinkOrigin::Manual, None)?;
+        Self::link_by_pair_locked(&conn, source_event_id, task_id)
+    }
+
+    /// Remove a manual or rule link between an activity and a task.
+    pub fn unlink_activity_from_task(
+        &self,
+        source_event_id: &str,
+        task_id: i64,
+    ) -> Result<PrivacyDeleteSummary> {
+        let conn = self.lock()?;
+        let deleted_rows = conn.execute(
+            "DELETE FROM activity_task_links WHERE source_event_id = ?1 AND task_id = ?2",
+            params![source_event_id.trim(), task_id],
+        )?;
+        Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
+    /// All activities linked to a task, newest activity first.
+    pub fn list_task_activities(&self, task_id: i64) -> Result<Vec<LinkedActivity>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT e.id, e.source, e.event_type, e.app, e.title, e.domain, e.url_redacted,
+                   e.workspace_key, e.started_at, e.ended_at, e.duration_ms, e.sensitivity,
+                   e.metadata_json, e.created_at,
+                   l.id, l.origin, l.rule_id, l.created_at
+            FROM activity_task_links l
+            JOIN source_events e ON e.id = l.source_event_id
+            WHERE l.task_id = ?1
+            ORDER BY e.started_at DESC, e.id DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![task_id], Self::linked_activity_from_row)?;
+        let mut activities = Vec::new();
+        for activity in rows {
+            activities.push(activity?);
+        }
+        Ok(activities)
+    }
+
+    /// All tasks linked to a given activity.
+    pub fn list_activity_tasks(&self, source_event_id: &str) -> Result<Vec<Task>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT t.id, t.title, t.status, t.due_date, t.due_at, t.notes, t.priority, t.source,
+                   t.project_path, t.client_label, t.project_label, t.reminder_sent_at,
+                   t.created_at, t.updated_at
+            FROM activity_task_links l
+            JOIN tasks t ON t.id = l.task_id
+            WHERE l.source_event_id = ?1
+            ORDER BY t.created_at DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![source_event_id.trim()], Self::task_from_row)?;
+        let mut tasks = Vec::new();
+        for task in rows {
+            tasks.push(task?);
+        }
+        Ok(tasks)
+    }
+
+    /// Rules attached to a task, newest first.
+    pub fn list_task_rules(&self, task_id: i64) -> Result<Vec<TaskMatchRule>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, task_id, field, matcher, pattern, case_sensitive, enabled,
+                   created_at, updated_at
+            FROM task_match_rules
+            WHERE task_id = ?1
+            ORDER BY created_at DESC, id DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![task_id], Self::task_rule_from_row)?;
+        let mut rules = Vec::new();
+        for rule in rows {
+            rules.push(rule?);
+        }
+        Ok(rules)
+    }
+
+    /// Create a rule for a task. The pattern is compiled up front so an invalid
+    /// regex/wildcard is rejected before it is stored.
+    pub fn create_task_rule(
+        &self,
+        task_id: i64,
+        input: TaskMatchRuleInput,
+    ) -> Result<TaskMatchRule> {
+        let pattern = input.pattern.trim();
+        CompiledRule::compile(input.field, input.matcher, pattern, input.case_sensitive)?;
+        let now = now_ms();
+        let conn = self.lock()?;
+        let task_exists: bool = conn
+            .query_row("SELECT 1 FROM tasks WHERE id = ?1", params![task_id], |_| {
+                Ok(true)
+            })
+            .optional()?
+            .unwrap_or(false);
+        anyhow::ensure!(task_exists, "task not found: {task_id}");
+        conn.execute(
+            r#"
+            INSERT INTO task_match_rules
+                (task_id, field, matcher, pattern, case_sensitive, enabled, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+            "#,
+            params![
+                task_id,
+                input.field.as_db_value(),
+                input.matcher.as_db_value(),
+                pattern,
+                input.case_sensitive as i64,
+                input.enabled as i64,
+                now
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Self::task_rule_by_id_locked(&conn, id)
+    }
+
+    /// Update an existing rule. Re-validates the pattern.
+    pub fn update_task_rule(
+        &self,
+        rule_id: i64,
+        input: TaskMatchRuleInput,
+    ) -> Result<TaskMatchRule> {
+        let pattern = input.pattern.trim();
+        CompiledRule::compile(input.field, input.matcher, pattern, input.case_sensitive)?;
+        let now = now_ms();
+        let conn = self.lock()?;
+        let changed = conn.execute(
+            r#"
+            UPDATE task_match_rules
+            SET field = ?1, matcher = ?2, pattern = ?3, case_sensitive = ?4,
+                enabled = ?5, updated_at = ?6
+            WHERE id = ?7
+            "#,
+            params![
+                input.field.as_db_value(),
+                input.matcher.as_db_value(),
+                pattern,
+                input.case_sensitive as i64,
+                input.enabled as i64,
+                now,
+                rule_id
+            ],
+        )?;
+        anyhow::ensure!(changed == 1, "rule not found: {rule_id}");
+        Self::task_rule_by_id_locked(&conn, rule_id)
+    }
+
+    /// Delete a rule. Links it previously created are kept (they become plain
+    /// historical links); deleting the link is a separate action.
+    pub fn delete_task_rule(&self, rule_id: i64) -> Result<PrivacyDeleteSummary> {
+        let conn = self.lock()?;
+        let deleted_rows =
+            conn.execute("DELETE FROM task_match_rules WHERE id = ?1", params![rule_id])?;
+        Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
+    /// Apply rules to already-recorded activities. When `task_id` is `Some`,
+    /// only that task's rules run; otherwise every enabled rule runs. New links
+    /// are created with `INSERT OR IGNORE`, so re-running is safe and idempotent.
+    pub fn apply_task_rules(&self, task_id: Option<i64>) -> Result<ApplyRulesSummary> {
+        let conn = self.lock()?;
+        let rules = Self::compiled_enabled_rules_locked(&conn, task_id)?;
+        if rules.is_empty() {
+            return Ok(ApplyRulesSummary {
+                linked: 0,
+                scanned: 0,
+                rules: 0,
+            });
+        }
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, source, event_type, app, title, domain, url_redacted, workspace_key,
+                   started_at, ended_at, duration_ms, sensitivity, metadata_json, created_at
+            FROM source_events
+            "#,
+        )?;
+        let events: Vec<SourceEvent> = stmt
+            .query_map([], Self::source_event_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+
+        let mut linked = 0usize;
+        for event in &events {
+            for (rule_task_id, rule_id, compiled) in &rules {
+                if compiled.matches(event) {
+                    let inserted = Self::insert_link_locked(
+                        &conn,
+                        &event.id,
+                        *rule_task_id,
+                        LinkOrigin::Rule,
+                        Some(*rule_id),
+                    )?;
+                    if inserted {
+                        linked += 1;
+                    }
+                }
+            }
+        }
+        Ok(ApplyRulesSummary {
+            linked,
+            scanned: events.len(),
+            rules: rules.len(),
+        })
+    }
+
+    /// Auto-link a freshly recorded activity against every enabled rule.
+    /// Best-effort: an individual broken rule is skipped, never fatal to ingest.
+    fn auto_link_event_locked(conn: &Connection, event: &SourceEvent) -> Result<()> {
+        let rules = Self::compiled_enabled_rules_locked(conn, None)?;
+        for (task_id, rule_id, compiled) in &rules {
+            if compiled.matches(event) {
+                Self::insert_link_locked(conn, &event.id, *task_id, LinkOrigin::Rule, Some(*rule_id))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn compiled_enabled_rules_locked(
+        conn: &Connection,
+        task_id: Option<i64>,
+    ) -> Result<Vec<(i64, i64, CompiledRule)>> {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, task_id, field, matcher, pattern, case_sensitive, enabled,
+                   created_at, updated_at
+            FROM task_match_rules
+            WHERE enabled = 1 AND (?1 IS NULL OR task_id = ?1)
+            "#,
+        )?;
+        let rules: Vec<TaskMatchRule> = stmt
+            .query_map(params![task_id], Self::task_rule_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut compiled = Vec::with_capacity(rules.len());
+        for rule in rules {
+            // A stored rule should already be valid; skip defensively if not.
+            if let Ok(c) = CompiledRule::compile(
+                rule.field,
+                rule.matcher,
+                &rule.pattern,
+                rule.case_sensitive,
+            ) {
+                compiled.push((rule.task_id, rule.id, c));
+            }
+        }
+        Ok(compiled)
+    }
+
+    fn insert_link_locked(
+        conn: &Connection,
+        source_event_id: &str,
+        task_id: i64,
+        origin: LinkOrigin,
+        rule_id: Option<i64>,
+    ) -> Result<bool> {
+        let changed = conn.execute(
+            r#"
+            INSERT OR IGNORE INTO activity_task_links
+                (source_event_id, task_id, origin, rule_id, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                source_event_id,
+                task_id,
+                origin.as_db_value(),
+                rule_id,
+                now_ms()
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
+    fn link_by_pair_locked(
+        conn: &Connection,
+        source_event_id: &str,
+        task_id: i64,
+    ) -> Result<ActivityTaskLink> {
+        conn.query_row(
+            r#"
+            SELECT id, source_event_id, task_id, origin, rule_id, created_at
+            FROM activity_task_links
+            WHERE source_event_id = ?1 AND task_id = ?2
+            "#,
+            params![source_event_id, task_id],
+            Self::activity_task_link_from_row,
+        )
+        .map_err(Into::into)
+    }
+
+    fn task_rule_by_id_locked(conn: &Connection, id: i64) -> Result<TaskMatchRule> {
+        conn.query_row(
+            r#"
+            SELECT id, task_id, field, matcher, pattern, case_sensitive, enabled,
+                   created_at, updated_at
+            FROM task_match_rules
+            WHERE id = ?1
+            "#,
+            params![id],
+            Self::task_rule_from_row,
+        )
+        .map_err(Into::into)
+    }
+
+    fn activity_task_link_from_row(row: &Row<'_>) -> rusqlite::Result<ActivityTaskLink> {
+        let origin: String = row.get(3)?;
+        let origin = LinkOrigin::try_from(origin.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    err.to_string(),
+                )),
+            )
+        })?;
+        Ok(ActivityTaskLink {
+            id: row.get(0)?,
+            source_event_id: row.get(1)?,
+            task_id: row.get(2)?,
+            origin,
+            rule_id: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    }
+
+    fn task_rule_from_row(row: &Row<'_>) -> rusqlite::Result<TaskMatchRule> {
+        let field: String = row.get(2)?;
+        let field = crate::matching::MatchField::try_from(field.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                2,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    err.to_string(),
+                )),
+            )
+        })?;
+        let matcher: String = row.get(3)?;
+        let matcher = crate::matching::MatcherType::try_from(matcher.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    err.to_string(),
+                )),
+            )
+        })?;
+        Ok(TaskMatchRule {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            field,
+            matcher,
+            pattern: row.get(4)?,
+            case_sensitive: row.get::<_, i64>(5)? == 1,
+            enabled: row.get::<_, i64>(6)? == 1,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    }
+
+    fn linked_activity_from_row(row: &Row<'_>) -> rusqlite::Result<LinkedActivity> {
+        let event = Self::source_event_from_row(row)?;
+        let origin: String = row.get(15)?;
+        let origin = LinkOrigin::try_from(origin.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                15,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    err.to_string(),
+                )),
+            )
+        })?;
+        Ok(LinkedActivity {
+            event,
+            link_id: row.get(14)?,
+            origin,
+            rule_id: row.get(16)?,
+            linked_at: row.get(17)?,
+        })
     }
 
     pub fn create_commitment(&self, input: CommitmentInput) -> Result<Commitment> {
@@ -5679,6 +6130,7 @@ impl WorktraceStore {
                         None,
                     )?;
                 }
+                Self::auto_link_event_locked(&conn, &coalesced)?;
                 return Ok(coalesced);
             }
         }
@@ -5717,6 +6169,7 @@ impl WorktraceStore {
                 None,
             )?;
         }
+        Self::auto_link_event_locked(&conn, &event)?;
         Ok(event)
     }
 
@@ -12115,5 +12568,268 @@ mod tests {
         for app in ["VS Code", "Google Chrome", "Slack"] {
             assert!(!is_idle_system_app(app));
         }
+    }
+
+    // ── Activity ↔ task links ──────────────────────────────────────────────
+
+    fn temp_store() -> (tempfile::TempDir, WorktraceStore) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = WorktraceStore::open(dir.path().join("test.sqlite3")).expect("open store");
+        (dir, store)
+    }
+
+    fn seed_event(store: &WorktraceStore, id: &str, title: &str) -> SourceEvent {
+        store
+            .record_source_event(SourceEventInput {
+                id: Some(id.to_string()),
+                source: "window".into(),
+                event_type: "window".into(),
+                app: Some("Editor".into()),
+                title: Some(title.into()),
+                url: None,
+                workspace_key: None,
+                started_at: Some(1_000),
+                ended_at: Some(2_000),
+                sensitivity: None,
+                metadata_json: None,
+            })
+            .expect("record event")
+    }
+
+    fn seed_task(store: &WorktraceStore, title: &str) -> Task {
+        store
+            .create_task(TaskInput {
+                title: title.into(),
+                due_date: None,
+                due_at: None,
+                notes: None,
+                priority: None,
+                source: None,
+                project_path: None,
+                client_label: None,
+                project_label: None,
+            })
+            .expect("create task")
+    }
+
+    fn rule_input(pattern: &str, matcher: crate::matching::MatcherType) -> TaskMatchRuleInput {
+        TaskMatchRuleInput {
+            field: crate::matching::MatchField::Title,
+            matcher,
+            pattern: pattern.into(),
+            case_sensitive: false,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn manual_link_is_idempotent_and_listable() {
+        let (_dir, store) = temp_store();
+        let event = seed_event(&store, "e1", "fix [PROJECT-A] crash");
+        let task = seed_task(&store, "Project A work");
+
+        let link = store.link_activity_to_task(&event.id, task.id).unwrap();
+        assert_eq!(link.origin, LinkOrigin::Manual);
+        // Re-linking the same pair must not create a duplicate.
+        store.link_activity_to_task(&event.id, task.id).unwrap();
+
+        let activities = store.list_task_activities(task.id).unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0].event.id, "e1");
+
+        let tasks = store.list_activity_tasks(&event.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, task.id);
+    }
+
+    #[test]
+    fn manual_link_rejects_unknown_event_or_task() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        assert!(store.link_activity_to_task("missing", task.id).is_err());
+
+        let event = seed_event(&store, "e1", "x");
+        assert!(store.link_activity_to_task(&event.id, 9999).is_err());
+    }
+
+    #[test]
+    fn unlink_removes_the_link() {
+        let (_dir, store) = temp_store();
+        let event = seed_event(&store, "e1", "x");
+        let task = seed_task(&store, "t");
+        store.link_activity_to_task(&event.id, task.id).unwrap();
+
+        let summary = store.unlink_activity_from_task(&event.id, task.id).unwrap();
+        assert_eq!(summary.deleted_rows, 1);
+        assert!(store.list_task_activities(task.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rules_auto_link_new_activities_on_ingest() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "Project A");
+        store
+            .create_task_rule(task.id, rule_input("[PROJECT-A]", crate::matching::MatcherType::Contains))
+            .unwrap();
+
+        // Recorded AFTER the rule exists → auto-linked.
+        let event = seed_event(&store, "e1", "fix [project-a] bug");
+        seed_event(&store, "e2", "unrelated note");
+
+        let activities = store.list_task_activities(task.id).unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0].event.id, event.id);
+        assert_eq!(activities[0].origin, LinkOrigin::Rule);
+    }
+
+    #[test]
+    fn apply_rules_backfills_existing_activities() {
+        let (_dir, store) = temp_store();
+        // Activities recorded BEFORE any rule exists.
+        seed_event(&store, "e1", "JIRA-100 deploy");
+        seed_event(&store, "e2", "JIRA-200 review");
+        seed_event(&store, "e3", "lunch");
+        let task = seed_task(&store, "Tickets");
+        store
+            .create_task_rule(task.id, rule_input(r"JIRA-\d+", crate::matching::MatcherType::Regex))
+            .unwrap();
+
+        let summary = store.apply_task_rules(Some(task.id)).unwrap();
+        assert_eq!(summary.linked, 2);
+        assert_eq!(summary.scanned, 3);
+        assert_eq!(summary.rules, 1);
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 2);
+
+        // Idempotent: a second run links nothing new.
+        let again = store.apply_task_rules(Some(task.id)).unwrap();
+        assert_eq!(again.linked, 0);
+    }
+
+    #[test]
+    fn invalid_regex_rule_is_rejected() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        assert!(store
+            .create_task_rule(task.id, rule_input("(unclosed", crate::matching::MatcherType::Regex))
+            .is_err());
+    }
+
+    #[test]
+    fn disabled_rule_does_not_auto_link() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        let mut input = rule_input("match", crate::matching::MatcherType::Contains);
+        input.enabled = false;
+        store.create_task_rule(task.id, input).unwrap();
+        seed_event(&store, "e1", "match this");
+        assert!(store.list_task_activities(task.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_rules_without_a_task_id_runs_every_rule() {
+        let (_dir, store) = temp_store();
+        let alpha = seed_task(&store, "Alpha");
+        let beta = seed_task(&store, "Beta");
+        store
+            .create_task_rule(alpha.id, rule_input("alpha", crate::matching::MatcherType::Contains))
+            .unwrap();
+        store
+            .create_task_rule(beta.id, rule_input("beta", crate::matching::MatcherType::Contains))
+            .unwrap();
+        seed_event(&store, "e1", "alpha review");
+        seed_event(&store, "e2", "beta deploy");
+        seed_event(&store, "e3", "noise");
+
+        // Auto-link already fired on ingest; a global apply must be idempotent.
+        let summary = store.apply_task_rules(None).unwrap();
+        assert_eq!(summary.linked, 0);
+        assert_eq!(summary.rules, 2);
+        assert_eq!(store.list_task_activities(alpha.id).unwrap().len(), 1);
+        assert_eq!(store.list_task_activities(beta.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn case_sensitive_rule_distinguishes_case() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        let mut input = rule_input("PROD", crate::matching::MatcherType::Contains);
+        input.case_sensitive = true;
+        store.create_task_rule(task.id, input).unwrap();
+        seed_event(&store, "e1", "deploy to PROD");
+        seed_event(&store, "e2", "prod is lowercase");
+        let activities = store.list_task_activities(task.id).unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0].event.id, "e1");
+    }
+
+    #[test]
+    fn wildcard_rule_links_via_store() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        store
+            .create_task_rule(
+                task.id,
+                TaskMatchRuleInput {
+                    field: crate::matching::MatchField::Url,
+                    matcher: crate::matching::MatcherType::Wildcard,
+                    pattern: "*github.com*".into(),
+                    case_sensitive: false,
+                    enabled: true,
+                },
+            )
+            .unwrap();
+        store
+            .record_source_event(SourceEventInput {
+                id: Some("e1".into()),
+                source: "browser".into(),
+                event_type: "browser".into(),
+                app: Some("Chrome".into()),
+                title: Some("PR".into()),
+                url: Some("https://github.com/acme/repo".into()),
+                workspace_key: None,
+                started_at: Some(1),
+                ended_at: Some(2),
+                sensitivity: None,
+                metadata_json: None,
+            })
+            .unwrap();
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn updating_a_rule_changes_which_activities_match() {
+        let (_dir, store) = temp_store();
+        seed_event(&store, "e1", "alpha task");
+        seed_event(&store, "e2", "beta task");
+        let task = seed_task(&store, "t");
+        let rule = store
+            .create_task_rule(task.id, rule_input("alpha", crate::matching::MatcherType::Contains))
+            .unwrap();
+        store.apply_task_rules(Some(task.id)).unwrap();
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 1);
+
+        // Re-point the rule at the other activity; applying picks it up too.
+        store
+            .update_task_rule(rule.id, rule_input("beta", crate::matching::MatcherType::Contains))
+            .unwrap();
+        let summary = store.apply_task_rules(Some(task.id)).unwrap();
+        assert_eq!(summary.linked, 1);
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deleting_a_task_cascades_its_links_and_rules() {
+        let (_dir, store) = temp_store();
+        let task = seed_task(&store, "t");
+        store
+            .create_task_rule(task.id, rule_input("x", crate::matching::MatcherType::Contains))
+            .unwrap();
+        let event = seed_event(&store, "e1", "x marks");
+        // Auto-linked via the rule.
+        assert_eq!(store.list_task_activities(task.id).unwrap().len(), 1);
+
+        store.delete_task(task.id).unwrap();
+        assert!(store.list_task_rules(task.id).unwrap().is_empty());
+        assert!(store.list_activity_tasks(&event.id).unwrap().is_empty());
     }
 }

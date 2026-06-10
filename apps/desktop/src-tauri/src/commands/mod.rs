@@ -6,6 +6,7 @@ pub mod context;
 pub mod export;
 pub mod focus;
 pub mod inbox;
+pub mod links;
 pub mod offline;
 pub mod outputs;
 pub mod permissions;
@@ -39,6 +40,15 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         tasks::complete_task,
         tasks::snooze_task,
         tasks::delete_task,
+        links::link_activity_to_task,
+        links::unlink_activity_from_task,
+        links::list_task_activities,
+        links::list_activity_tasks,
+        links::list_task_rules,
+        links::create_task_rule,
+        links::update_task_rule,
+        links::delete_task_rule,
+        links::apply_task_rules,
         commitments::create_commitment,
         commitments::list_open_commitments,
         inbox::upsert_email_thread,

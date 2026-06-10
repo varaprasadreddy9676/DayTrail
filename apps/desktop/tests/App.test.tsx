@@ -1983,3 +1983,218 @@ describe("DayTrail command center", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_capture_permissions", undefined));
   });
 });
+
+type TestTask = {
+  id: number;
+  title: string;
+  status: "open" | "done";
+  priority?: string;
+};
+
+function snapshotWithTasks(tasks: TestTask[]) {
+  return {
+    localDate: "2026-06-02",
+    tasks,
+    quickNotes: [],
+    commitments: [],
+    pendingReplies: [],
+    aiOutputs: [],
+    calendarEvents: [],
+    calendarReconciliation: {
+      plannedEvents: 0,
+      matchedEvents: 0,
+      unmatchedEvents: 0,
+      plannedDurationMs: 0,
+      actualOverlapMs: 0,
+      items: [],
+    },
+    focusSessions: [],
+    recoverySummary: null,
+    meetings: [],
+    fieldVisits: [],
+    idleBlocks: [],
+    sourceEvents: [],
+    workSessions: [],
+    parallelStreams: [],
+    aiUsageSummary: { totalDurationMs: 0, tools: [], contexts: [], outputCount: 0 },
+    appUsageSummary: { totalDurationMs: 0, apps: [] },
+    automationCandidates: [],
+    unclosedLoopInbox: [],
+    aiOutputLedger: [],
+    loopRisks: [],
+    nextBestAction: null,
+    pauseState: { paused: false },
+    settings: { browserBridgeEnabled: true, excludedDomains: [] },
+    projectContext: null,
+    activeWorkContext: null,
+  };
+}
+
+function installInvoke(invoke: ReturnType<typeof vi.fn>) {
+  window.__TAURI__ = {
+    core: {
+      invoke: invoke as unknown as <T>(
+        command: string,
+        args?: Record<string, unknown>,
+      ) => Promise<T>,
+    },
+  };
+}
+
+describe("activity ↔ task linking", () => {
+  it("manages rules and links for a task from the My Tasks panel", async () => {
+    const user = userEvent.setup();
+
+    // Stateful backend mock so the panel's refresh-after-mutation reflects the
+    // same lifecycle the real store enforces (create rule → apply → link).
+    const rules: Array<Record<string, unknown>> = [];
+    let linkedActivities: Array<Record<string, unknown>> = [];
+
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      switch (command) {
+        case "today":
+          return snapshotWithTasks([
+            { id: 1, title: "Project A work", status: "open", priority: "high" },
+          ]);
+        case "list_task_rules":
+          return rules;
+        case "list_task_activities":
+          return linkedActivities;
+        case "create_task_rule": {
+          const input = args?.input as Record<string, unknown>;
+          const rule = {
+            id: 10,
+            taskId: args?.taskId,
+            ...input,
+            createdAt: 1,
+            updatedAt: 1,
+          };
+          rules.push(rule);
+          return rule;
+        }
+        case "apply_task_rules": {
+          // Simulate a single past activity now matching the new rule.
+          linkedActivities = [
+            {
+              id: "evt-1",
+              source: "window",
+              eventType: "window",
+              app: "Editor",
+              title: "fix [PROJECT-A] crash",
+              domain: null,
+              urlRedacted: null,
+              workspaceKey: null,
+              startedAt: Date.parse("2026-06-02T10:00:00Z"),
+              endedAt: Date.parse("2026-06-02T10:05:00Z"),
+              durationMs: 300_000,
+              sensitivity: "normal",
+              metadataJson: null,
+              createdAt: 1,
+              linkId: 100,
+              origin: "rule",
+              ruleId: 10,
+              linkedAt: 1,
+            },
+          ];
+          return { linked: 1, scanned: 3, rules: 1 };
+        }
+        case "unlink_activity_from_task":
+          linkedActivities = [];
+          return { deletedRows: 1 };
+        default:
+          return null;
+      }
+    });
+
+    installInvoke(invoke);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /^my tasks$/i }),
+    ).toBeInTheDocument();
+
+    // Expand the per-task links & rules panel.
+    await user.click(screen.getByRole("button", { name: /links & rules/i }));
+    expect(await screen.findByText(/linked activities/i)).toBeInTheDocument();
+    expect(screen.getByText(/no activities linked yet/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_task_rules", { taskId: 1 }),
+    );
+    expect(invoke).toHaveBeenCalledWith("list_task_activities", { taskId: 1 });
+
+    // Add a rule. (fireEvent.change avoids userEvent treating "[" as a key tag.)
+    fireEvent.change(screen.getByLabelText(/rule pattern/i), {
+      target: { value: "[PROJECT-A]" },
+    });
+    await user.click(screen.getByRole("button", { name: /^add rule$/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("create_task_rule", {
+        taskId: 1,
+        input: {
+          field: "any",
+          matcher: "contains",
+          pattern: "[PROJECT-A]",
+          caseSensitive: false,
+          enabled: true,
+        },
+      }),
+    );
+    expect(await screen.findByText(/rule added\./i)).toBeInTheDocument();
+    expect(screen.getByText("[PROJECT-A]")).toBeInTheDocument();
+
+    // Apply rules to history → one activity gets linked.
+    await user.click(screen.getByRole("button", { name: /apply rules to history/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("apply_task_rules", { taskId: 1 }),
+    );
+    expect(await screen.findByText(/scanned 3 activities · linked 1 new\./i)).toBeInTheDocument();
+    expect(await screen.findByText(/fix \[PROJECT-A\] crash/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Auto ·/)).toBeInTheDocument();
+
+    // Unlink it again.
+    await user.click(screen.getByRole("button", { name: /^unlink$/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("unlink_activity_from_task", {
+        sourceEventId: "evt-1",
+        taskId: 1,
+      }),
+    );
+    expect(await screen.findByText(/activity unlinked\./i)).toBeInTheDocument();
+    expect(screen.getByText(/no activities linked yet/i)).toBeInTheDocument();
+  });
+
+  it("surfaces backend validation errors when a rule pattern is invalid", async () => {
+    const user = userEvent.setup();
+
+    const invoke = vi.fn(async (command: string) => {
+      switch (command) {
+        case "today":
+          return snapshotWithTasks([{ id: 1, title: "Tickets", status: "open" }]);
+        case "list_task_rules":
+        case "list_task_activities":
+          return [];
+        case "create_task_rule":
+          throw new Error("invalid regular expression: unclosed group");
+        default:
+          return null;
+      }
+    });
+
+    installInvoke(invoke);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+    await user.click(await screen.findByRole("button", { name: /links & rules/i }));
+
+    await user.selectOptions(screen.getByLabelText(/rule matcher/i), "regex");
+    fireEvent.change(screen.getByLabelText(/rule pattern/i), {
+      target: { value: "(unclosed" },
+    });
+    await user.click(screen.getByRole("button", { name: /^add rule$/i }));
+
+    expect(
+      await screen.findByText(/invalid regular expression/i),
+    ).toBeInTheDocument();
+  });
+});
