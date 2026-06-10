@@ -25,6 +25,9 @@ pub struct UpdateInfo {
     /// Set when the check could not complete (e.g. offline). UI shows this
     /// instead of a misleading "up to date".
     pub error: Option<String>,
+    /// True when the app was installed via the Homebrew cask. The UI uses this
+    /// to show `brew upgrade --cask daytrail` instead of a DMG download link.
+    pub homebrew_managed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,6 +71,7 @@ pub fn check_for_updates() -> Result<UpdateInfo, CommandError> {
         download_url: None,
         release_notes: None,
         error: None,
+        homebrew_managed: is_homebrew_managed(),
     };
 
     match fetch_latest_release() {
@@ -225,6 +229,22 @@ fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
         .parse()
         .unwrap_or(0);
     Some((major, minor, patch))
+}
+
+/// True when a Homebrew Caskroom receipt exists for daytrail, meaning the app
+/// was installed (and should be updated) via `brew upgrade --cask daytrail`.
+fn is_homebrew_managed() -> bool {
+    // Homebrew creates a versioned receipt directory under Caskroom when a
+    // cask is installed. Check both Apple Silicon and Intel prefixes.
+    #[cfg(target_os = "macos")]
+    {
+        let prefixes = ["/opt/homebrew/Caskroom/daytrail", "/usr/local/Caskroom/daytrail"];
+        prefixes.iter().any(|p| std::path::Path::new(p).exists())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -10716,6 +10716,7 @@ type UpdateCheckResult = {
   downloadUrl?: string | null;
   releaseNotes?: string | null;
   error?: string | null;
+  homebrewManaged?: boolean;
 };
 
 const UPDATE_DISMISSED_KEY_PREFIX = "daytrail:autoUpdate:dismissed:";
@@ -10858,7 +10859,25 @@ function UpdateAvailableDialog({
   const headline = result.latestVersion
     ? `DayTrail ${result.latestVersion} is available`
     : "A new DayTrail build is available";
-  const downloadLabel = "Download update";
+  const isHomebrew = result.homebrewManaged === true;
+  const downloadLabel = isHomebrew ? "Copy brew command" : "Download update";
+  const dialogCopy = isHomebrew
+    ? "Run this command in Terminal to update:"
+    : "A newer build is ready. Download it from GitHub Releases and install it over your current copy.";
+  const brewCommand = "brew upgrade --cask daytrail";
+
+  const [copied, setCopied] = useState(false);
+
+  function handleAction() {
+    if (isHomebrew) {
+      void navigator.clipboard.writeText(brewCommand).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    } else {
+      onDownload();
+    }
+  }
 
   return (
     <div
@@ -10876,9 +10895,12 @@ function UpdateAvailableDialog({
           <img alt="" className="update-dialog-icon" src="/daytrail-icon.png" />
           <div className="update-dialog-heading">
             <h3 id="update-dialog-title">{headline}</h3>
-            <p className="update-dialog-copy">A newer build is ready. Download it from GitHub Releases and install it over your current copy.</p>
+            <p className="update-dialog-copy">{dialogCopy}</p>
           </div>
         </div>
+        {isHomebrew && (
+          <pre className="update-dialog-brew-cmd">{brewCommand}</pre>
+        )}
         <dl className="update-dialog-versions">
           <div>
             <dt>Current</dt>
@@ -10907,10 +10929,10 @@ function UpdateAvailableDialog({
           </button>
           <button
             className="button compact primary"
-            onClick={onDownload}
+            onClick={handleAction}
             type="button"
           >
-            {downloadLabel}
+            {copied ? "Copied!" : downloadLabel}
           </button>
         </div>
       </div>

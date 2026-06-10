@@ -7249,6 +7249,18 @@ textarea {
   line-height: 1.2;
 }
 
+.update-dialog-brew-cmd {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg-surface, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text-main);
+  user-select: all;
+}
+
 .update-dialog-notes {
   display: flex;
   flex-direction: column;
