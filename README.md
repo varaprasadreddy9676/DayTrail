@@ -162,11 +162,13 @@ brew tap varaprasadreddy9676/tap
 brew install --cask daytrail
 ```
 
-Homebrew handles quarantine and future updates automatically:
+To update to the latest version:
 
 ```sh
-brew upgrade --cask daytrail
+brew update && brew upgrade --cask daytrail
 ```
+
+> **`brew update` first is required.** `brew upgrade` alone uses your local tap cache — without `brew update`, Homebrew won't know a new version exists and will say "already installed". Always run both commands together.
 
 **macOS — direct DMG:** grab the latest `.dmg` from the [**Releases page**](https://github.com/varaprasadreddy9676/DayTrail/releases/latest).
 
@@ -200,6 +202,25 @@ Drag the app to **Applications** first if you haven't. Using Homebrew avoids thi
 <summary><b>Windows: "Windows protected your PC" (SmartScreen)</b></summary>
 
 The installer isn't code-signed yet, so SmartScreen warns on first run. Click **More info → Run anyway**.
+</details>
+
+<details>
+<summary><b>Homebrew: "already installed" or installs an old version</b></summary>
+
+Homebrew caches tap metadata locally. If `brew upgrade --cask daytrail` says the latest is already installed but you know a newer version exists, your local cache is stale.
+
+Fix:
+
+```sh
+brew update && brew upgrade --cask daytrail
+```
+
+If it still shows the wrong version, force a clean reinstall:
+
+```sh
+brew uninstall --cask daytrail && brew install --cask daytrail
+```
+
 </details>
 
 <details>
