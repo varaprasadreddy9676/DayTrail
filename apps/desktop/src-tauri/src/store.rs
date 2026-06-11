@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use chrono::{Duration as ChronoDuration, Local, NaiveDate, SecondsFormat, TimeZone, Utc};
+use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, SecondsFormat, TimeZone, Utc};
 use rusqlite::{
     params, params_from_iter, types::Value as SqlValue, Connection, DatabaseName,
     OptionalExtension, Row,
@@ -3987,11 +3987,28 @@ Today is {now_str}."
         let mut sections: Vec<String> = Vec::new();
         let mut sources: Vec<String> = Vec::new();
 
-        let wants_week = msg.contains("week") || msg.contains("7 day") || msg.contains("pattern")
-            || msg.contains("trend") || msg.contains("average")
-            || ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-                .iter()
-                .any(|d| msg.contains(d));
+        // Determine the historical look-back range from message intent.
+        // Priority: quarter > month > last-week > this-week > none (today only).
+        let wants_quarter = msg.contains("quarter") || msg.contains("90 day")
+            || msg.contains("3 month") || msg.contains("all time")
+            || msg.contains("all data") || msg.contains("history")
+            || msg.contains("since i started") || msg.contains("ever ");
+
+        let wants_month = !wants_quarter
+            && (msg.contains("month") || msg.contains("30 day") || msg.contains("4 week")
+                || msg.contains("this month") || msg.contains("last month"));
+
+        // "last week" = Mon–Sun of the calendar week before this one.
+        let wants_last_week = !wants_month && !wants_quarter
+            && (msg.contains("last week") || msg.contains("previous week")
+                || msg.contains("prior week"));
+
+        let wants_week = !wants_month && !wants_quarter && !wants_last_week
+            && (msg.contains("week") || msg.contains("7 day") || msg.contains("pattern")
+                || msg.contains("trend") || msg.contains("average")
+                || ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                    .iter()
+                    .any(|d| msg.contains(d)));
 
         let wants_tasks = msg.contains("task") || msg.contains("todo") || msg.contains(" due")
             || msg.contains("overdue") || msg.contains("priority") || msg.contains("backlog")
@@ -4011,18 +4028,52 @@ Today is {now_str}."
         sections.push(build_compact_chat_snapshot(&snapshot));
         sources.push("today's activity".to_string());
 
-        if wants_week {
-            let today = Local::now().date_naive();
-            let from_date = (today - ChronoDuration::days(6))
-                .format("%Y-%m-%d")
-                .to_string();
+        let today = Local::now().date_naive();
+
+        if wants_quarter {
+            let from_date = (today - ChronoDuration::days(89)).format("%Y-%m-%d").to_string();
             let to_date = today.format("%Y-%m-%d").to_string();
             if let Ok(export) = self.export_data_range(ExportRangeInput {
-                from_date: Some(from_date),
-                to_date: Some(to_date),
+                from_date: Some(from_date.clone()),
+                to_date: Some(to_date.clone()),
             }) {
                 sections.push(build_compact_weekly_context(&export));
-                sources.push("this week's activity".to_string());
+                sources.push(format!("last 90 days ({from_date} → {to_date})"));
+            }
+        } else if wants_month {
+            let from_date = (today - ChronoDuration::days(29)).format("%Y-%m-%d").to_string();
+            let to_date = today.format("%Y-%m-%d").to_string();
+            if let Ok(export) = self.export_data_range(ExportRangeInput {
+                from_date: Some(from_date.clone()),
+                to_date: Some(to_date.clone()),
+            }) {
+                sections.push(build_compact_weekly_context(&export));
+                sources.push(format!("last 30 days ({from_date} → {to_date})"));
+            }
+        } else if wants_last_week {
+            // Calendar week Mon–Sun that ended before this week.
+            let days_since_monday = today.weekday().num_days_from_monday() as i64;
+            let this_monday = today - ChronoDuration::days(days_since_monday);
+            let last_monday = this_monday - ChronoDuration::days(7);
+            let last_sunday = this_monday - ChronoDuration::days(1);
+            let from_date = last_monday.format("%Y-%m-%d").to_string();
+            let to_date = last_sunday.format("%Y-%m-%d").to_string();
+            if let Ok(export) = self.export_data_range(ExportRangeInput {
+                from_date: Some(from_date.clone()),
+                to_date: Some(to_date.clone()),
+            }) {
+                sections.push(build_compact_weekly_context(&export));
+                sources.push(format!("last week ({from_date} → {to_date})"));
+            }
+        } else if wants_week {
+            let from_date = (today - ChronoDuration::days(6)).format("%Y-%m-%d").to_string();
+            let to_date = today.format("%Y-%m-%d").to_string();
+            if let Ok(export) = self.export_data_range(ExportRangeInput {
+                from_date: Some(from_date.clone()),
+                to_date: Some(to_date.clone()),
+            }) {
+                sections.push(build_compact_weekly_context(&export));
+                sources.push(format!("last 7 days ({from_date} → {to_date})"));
             }
         }
 
