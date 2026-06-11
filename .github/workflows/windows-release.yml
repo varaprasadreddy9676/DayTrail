@@ -147,7 +147,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: npm --prefix apps/desktop run tauri -- build --bundles nsis,msi,updater
+        run: npm --prefix apps/desktop run tauri -- build --bundles nsis,msi
 
       - name: Upload Windows installers and updater bundle
         uses: actions/upload-artifact@v4

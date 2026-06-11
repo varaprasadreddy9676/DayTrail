@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DayTrail",
-  "version": "0.1.23",
+
+  "version": "0.1.24",
   "identifier": "ai.daytrail.desktop",
   "build": {
     "beforeDevCommand": "",
