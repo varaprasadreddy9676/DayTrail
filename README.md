@@ -159,8 +159,11 @@ Built with Tauri + Rust — no bundled Chromium runtime. The macOS Apple Silicon
 
 ```sh
 brew tap varaprasadreddy9676/tap
+brew trust varaprasadreddy9676/tap
 brew install --cask daytrail
 ```
+
+> **`brew trust` is required once.** Recent versions of Homebrew require you to explicitly trust third-party taps before installing casks from them. You only need to run this once per machine.
 
 To update to the latest version:
 
@@ -199,7 +202,9 @@ It is **not** damaged. Because the app isn't notarized (no paid Apple Developer 
 
 **Option 1 — use Homebrew** (handles it automatically):
 ```sh
-brew tap varaprasadreddy9676/tap && brew install --cask daytrail
+brew tap varaprasadreddy9676/tap
+brew trust varaprasadreddy9676/tap
+brew install --cask daytrail
 ```
 
 **Option 2 — use the one-line installer** (handles it automatically):
@@ -221,6 +226,18 @@ The installer isn't code-signed yet, so SmartScreen warns on first run. Click **
 </details>
 
 <details>
+<summary><b>Homebrew: "Refusing to load cask from untrusted tap"</b></summary>
+
+Recent versions of Homebrew require you to trust third-party taps before installing casks. Run once:
+
+```sh
+brew trust varaprasadreddy9676/tap
+brew install --cask daytrail
+```
+
+</details>
+
+<details>
 <summary><b>Homebrew: "already installed" or installs an old version</b></summary>
 
 Homebrew caches tap metadata locally. If `brew upgrade --cask daytrail` says the latest is already installed but you know a newer version exists, your local cache is stale.
@@ -234,7 +251,9 @@ brew update && brew upgrade --cask daytrail
 If it still shows the wrong version, force a clean reinstall:
 
 ```sh
-brew uninstall --cask daytrail && brew install --cask daytrail
+brew uninstall --cask daytrail
+brew update
+brew install --cask daytrail
 ```
 
 </details>
