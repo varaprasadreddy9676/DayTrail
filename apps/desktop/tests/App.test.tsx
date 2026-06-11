@@ -1432,10 +1432,9 @@ describe("DayTrail command center", () => {
     );
     expect(await screen.findByText(/openai compatible saved/i)).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /^reports$/i }));
     await user.click(screen.getByRole("button", { name: /daily report/i }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("generate_daily_report", undefined));
-
-    await user.click(screen.getByRole("button", { name: /^reports$/i }));
 
     expect(screen.getByLabelText(/generated report markdown/i).textContent).toMatch(
       /daily work execution report/i,
