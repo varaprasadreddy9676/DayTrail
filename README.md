@@ -170,13 +170,19 @@ brew update && brew upgrade --cask daytrail
 
 > **`brew update` first is required.** `brew upgrade` alone uses your local tap cache — without `brew update`, Homebrew won't know a new version exists and will say "already installed". Always run both commands together.
 
-**macOS — direct DMG:** grab the latest `.dmg` from the [**Releases page**](https://github.com/varaprasadreddy9676/DayTrail/releases/latest).
+**macOS — one-line installer (no Homebrew needed):**
 
-> ⚠️ The build is **not notarized** yet (no paid Apple Developer ID), so macOS may show **"DayTrail.app is damaged and can't be opened."** It isn't damaged — that's Gatekeeper. DayTrail clears the quarantine flag automatically on first launch, but if the app won't open at all, run this once in Terminal:
->
-> ```bash
-> xattr -dr com.apple.quarantine /Applications/DayTrail.app
-> ```
+Paste this in Terminal — it downloads the latest release, installs to `/Applications`, and clears the Gatekeeper flag automatically:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/varaprasadreddy9676/DayTrail/main/scripts/install-macos.sh | bash
+```
+
+**macOS — manual DMG:** grab the latest `.dmg` from the [**Releases page**](https://github.com/varaprasadreddy9676/DayTrail/releases/latest), drag to Applications, then run this once to clear the Gatekeeper flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/DayTrail.app
+```
 
 **Windows:** download the `.msi` or `.exe` installer from the same Releases page.
 
@@ -189,13 +195,23 @@ brew update && brew upgrade --cask daytrail
 <details open>
 <summary><b>macOS: "DayTrail.app is damaged and can't be opened."</b></summary>
 
-It is **not** damaged. Because the app isn't notarized (no paid Apple Developer ID), macOS quarantines the download. DayTrail removes the quarantine flag automatically on first launch. If the app won't open at all, run this once in Terminal, then open DayTrail normally:
+It is **not** damaged. Because the app isn't notarized (no paid Apple Developer ID), macOS blocks the first launch. There are three ways to fix this — pick the easiest:
 
+**Option 1 — use Homebrew** (handles it automatically):
+```sh
+brew tap varaprasadreddy9676/tap && brew install --cask daytrail
+```
+
+**Option 2 — use the one-line installer** (handles it automatically):
+```sh
+curl -fsSL https://raw.githubusercontent.com/varaprasadreddy9676/DayTrail/main/scripts/install-macos.sh | bash
+```
+
+**Option 3 — manual fix after DMG install** (one command, one time per version):
 ```bash
 xattr -dr com.apple.quarantine /Applications/DayTrail.app
 ```
-
-Drag the app to **Applications** first if you haven't. Using Homebrew avoids this entirely.
+Drag the app to **Applications** first, then run the command above, then open normally.
 </details>
 
 <details>
