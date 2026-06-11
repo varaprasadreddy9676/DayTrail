@@ -1,6 +1,6 @@
 [package]
 name = "daytrail-desktop"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2021"
 description = "Local-first DayTrail desktop work memory with optional Smart Break nudges"
 license = "MIT OR Apache-2.0"
