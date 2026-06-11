@@ -4596,6 +4596,8 @@ export default function App() {
               onDraftChange={setChatDraft}
               onSend={sendChatMessage}
               onClear={() => setChatMessages([])}
+              aiConfig={aiConfig}
+              onOpenSettings={() => setActiveView("settings")}
             />
           )}
           {activeView === "memory" && (
@@ -8209,6 +8211,8 @@ function ChatView({
   onDraftChange,
   onSend,
   onClear,
+  aiConfig,
+  onOpenSettings,
 }: {
   messages: ChatMessage[];
   loading: boolean;
@@ -8216,11 +8220,19 @@ function ChatView({
   onDraftChange: (v: string) => void;
   onSend: (msg: string) => void;
   onClear: () => void;
+  aiConfig: AiConfig;
+  onOpenSettings: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  const isLocal = aiConfig.provider === "Ollama Local" || aiConfig.provider === "LM Studio";
+  const isConfigured = isLocal || aiConfig.apiKey.trim().length > 0;
+  const providerLabel = aiConfig.model.trim()
+    ? `${aiConfig.provider} · ${aiConfig.model}`
+    : aiConfig.provider;
 
   return (
     <div className="view-frame chat-view">
@@ -8229,14 +8241,30 @@ function ChatView({
           <h2>Ask AI</h2>
           <p>Ask anything about your work data — time spent, tasks, patterns, commitments, and more.</p>
         </div>
-        {messages.length > 0 && (
-          <div className="screen-actions">
+        <div className="screen-actions">
+          {isConfigured ? (
+            <span className="chat-provider-pill chat-provider-pill--ok" title="AI provider configured">
+              <span className="chat-provider-dot" />
+              {providerLabel}
+            </span>
+          ) : (
+            <button
+              className="chat-provider-pill chat-provider-pill--warn"
+              onClick={onOpenSettings}
+              title="No AI key configured — click to open Settings"
+              type="button"
+            >
+              <span className="chat-provider-dot" />
+              No AI configured
+            </button>
+          )}
+          {messages.length > 0 && (
             <button className="button compact" onClick={onClear} type="button">
               <Icon name="x" />
               Clear
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="chat-messages">
