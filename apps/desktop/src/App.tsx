@@ -4430,7 +4430,7 @@ export default function App() {
         </header>
 
         <section className="content-pane" aria-live="polite">
-          {activeView !== "settings" && activeView !== "tasks" && activeView !== "chat" && (
+          {activeView === "today" && (
             <GlobalRangeControls
               fromDate={timelineFromDate}
               onLoadRange={loadTimelineRange}
