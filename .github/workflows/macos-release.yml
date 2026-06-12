@@ -208,6 +208,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           sig_file=$(ls apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig)
+          archive_name="$(basename "${sig_file%.sig}")"
           signature=$(cat "$sig_file")
           pub_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           base_url="https://github.com/varaprasadreddy9676/DayTrail/releases/download/${TAG}"
@@ -219,7 +220,7 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": "${signature}",
-                "url": "${base_url}/DayTrail_${version}_aarch64.app.tar.gz"
+                "url": "${base_url}/${archive_name}"
               }
             }
           }
