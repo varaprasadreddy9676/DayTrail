@@ -25,6 +25,26 @@ At the end of the day, you'll know exactly where the hours went. And slowly, tha
 
 ---
 
+## Quick Start
+
+**macOS Apple Silicon — Homebrew recommended:**
+
+```sh
+brew tap varaprasadreddy9676/tap && brew trust varaprasadreddy9676/tap && brew install --cask daytrail
+```
+
+**macOS — one-line installer, no Homebrew needed:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/varaprasadreddy9676/DayTrail/main/scripts/install-macos.sh | bash
+```
+
+**Windows:** download the latest `.msi` or `.exe` from the [Releases page](https://github.com/varaprasadreddy9676/DayTrail/releases/latest).
+
+If macOS or Windows warns because the app is not code-signed yet, see [Troubleshooting](#troubleshooting). DayTrail is open source, local-first, and built from this repository.
+
+---
+
 ## The moment that made this app necessary
 
 It's 6pm. You're tired. You're pretty sure you worked hard — you had your coffee, opened your laptop, kept things moving. But you can't really account for the day. There was a PR review, some Slack, a bug you got pulled into, a YouTube video you "just needed a minute" for. Your standup tomorrow is going to be vague. Your timesheet is going to be a reconstruction. You'll say you spent time on the project when really you spent time *near* it.
@@ -32,6 +52,20 @@ It's 6pm. You're tired. You're pretty sure you worked hard — you had your coff
 This isn't a discipline problem. **Human memory is simply not built for tracking time.** We remember events, not durations. We remember the last thing, not the whole arc. We remember effort as output — and when the output was invisible (reading, researching, getting unstuck), we forget it happened at all.
 
 DayTrail closes that gap. Not by watching you, but by remembering what your computer already knows.
+
+---
+
+## Why DayTrail feels different
+
+| What matters | DayTrail | Traditional time trackers | Cloud AI trackers |
+| --- | --- | --- | --- |
+| Privacy | Local-first, no account, no backend | Often local, but manual | Usually cloud-based |
+| Effort | No timers, no manual notes | Start/stop timers and edits | Passive, but opaque |
+| Footprint | Small Tauri + Rust desktop app | Often heavier desktop stacks | Higher CPU/RAM from rich capture |
+| AI | Optional, BYO key or local Ollama | Usually none | Built in, usually subscription-based |
+| Developer context | Apps, tabs, projects, files, terminals, AI tools | Mostly app names and categories | General activity, often screenshot-heavy |
+
+DayTrail is not trying to be surveillance software. It is trying to be a private work memory: enough context to reconstruct your day, without sending your life to someone else's server.
 
 ---
 
@@ -68,6 +102,10 @@ Source-backed. Specific. No reconstructing from memory the night before.
 
 ## Features that quietly change your relationship with your own work
 
+### Light as a feather, tight as a drum
+
+Built with Tauri + Rust — no bundled Chromium runtime. DayTrail runs quietly in the background, keeps installer sizes small, and stays out of your way while it captures the context you would otherwise forget.
+
 ### Focus Mode — catch the drift before it becomes an hour
 
 ![Focus Mode sidebar controls with focus label and duration choices](docs/screenshots/07-focus-mode.png)
@@ -76,9 +114,22 @@ Start a focus block — 25, 50, or 90 minutes — and DayTrail sends a gentle na
 
 The difference between a nudge at minute three and discovering the drift at hour two is enormous.
 
-### Proactive AI Insights — the analysis that happens even when you don't ask
+### AI-native capabilities — optional, private, and actually useful
 
-With an AI provider configured, DayTrail runs a quiet background analysis every few hours during your work day. Not surveillance — pattern recognition. It surfaces observations you wouldn't have thought to look for:
+![Ask AI chat showing a real question about app usage and a detailed AI response with actual data](docs/screenshots/04-ask-ai.png)
+
+DayTrail does not just log data. With Claude, GPT-4, Gemini, DeepSeek, or a local Ollama model configured, it helps you reason about what happened:
+
+- **Ask AI:** ask plain-English questions like "Which projects did I ignore this week?" or "What did I spend the most time on today?"
+- **Proactive insights:** background analysis surfaces patterns you would not have thought to search for.
+- **AI impact tracking:** ChatGPT, Claude, Codex, Copilot, Cursor, and similar tools become first-class work sessions instead of disappearing into "browser time."
+- **Daily and weekly reports:** turn captured work into a standup, timesheet, client update, or weekly retro draft.
+
+Because the provider is optional and configured locally, you choose whether DayTrail stays fully offline or uses your own AI key.
+
+![AI Insights showing proactive pattern cards: AI dominance, fragmented sessions, open loops](docs/screenshots/05-insights.png)
+
+Examples of insights DayTrail can surface:
 
 - You've had three days without a real deep work block
 - Your context-switching spiked 60% this week compared to last
@@ -89,6 +140,10 @@ High-priority insights fire an OS notification. All of them live in the Insights
 
 This is what makes DayTrail feel like an AI-native app rather than a tracker with a dashboard.
 
+![AI Impact view showing per-tool usage: ChatGPT, Claude, and Claude Code with durations](docs/screenshots/02-ai-impact.png)
+
+DayTrail also tracks which AI tools you actually rely on, for how long, and on which projects — because AI work is real work, not random browser time.
+
 ### Smart Breaks — sustainable work without another dashboard
 
 Enabled optionally in Settings. When turned on, DayTrail watches the same foreground-window signals it already uses and notices when you've been at it for a while. It sends blink reminders, posture resets, and short break prompts — at the interval you choose. It stays quiet during calls, presentation-like contexts, or when you step away. No extra card on your Today screen. No medical claims. Just the kind of nudge a good colleague might give you.
@@ -96,32 +151,6 @@ Enabled optionally in Settings. When turned on, DayTrail watches the same foregr
 ### Replay / restore — pick up exactly where you were
 
 After an interruption — a meeting, a lunch, an unexpected call — DayTrail shows you what you were in before you left. The app, the project, the file, the context. You don't have to rebuild the mental model from scratch. The trail is there.
-
-### Ask AI — just ask, in plain language
-
-![Ask AI chat showing a real question about app usage and a detailed AI response with actual data](docs/screenshots/04-ask-ai.png)
-
-No dashboards to navigate. Just ask what you want to know — and get answers grounded in what actually happened, not guesses. DayTrail gives the AI direct access to your sessions, tasks, and activity so every answer is sourced from your real day.
-
-> *"How much time did I spend on each app today?"*  
-> *"What was my most fragmented day this week?"*  
-> *"Which projects have I been ignoring?"*
-
-Works with Claude, GPT-4, Gemini, or a local Ollama model.
-
-### AI Insights — patterns you wouldn't have noticed yourself
-
-![AI Insights showing proactive pattern cards: AI dominance, fragmented sessions, open loops](docs/screenshots/05-insights.png)
-
-Every few hours, DayTrail runs a quiet background analysis and surfaces what's worth knowing — things you wouldn't have thought to ask for. A "Needs Attention" card fires an OS notification. Every insight has a one-click "Explore in chat" button that takes you straight into a conversation about it.
-
-This is the difference between a tracker and an AI-native app.
-
-### AI Impact — because AI work is real work
-
-![AI Impact view showing per-tool usage: ChatGPT, Claude, and Claude Code with durations](docs/screenshots/02-ai-impact.png)
-
-DayTrail doesn't lump AI tools into "browsing" or ignore them. It tracks which tools (ChatGPT, Claude, Codex, Copilot, Cursor…), for how long, and on which projects — because that's increasingly where the real work happens.
 
 ### Daily & Weekly Reports — a digest you're not embarrassed to share
 
@@ -160,13 +189,15 @@ See [PRIVACY.md](PRIVACY.md) for the complete model.
 
 ## Tiny footprint. No Electron bloat.
 
-Built with Tauri + Rust — no bundled Chromium runtime. The macOS Apple Silicon DMG is about **9.8 MB**. Windows installers are under **6 MB**. DayTrail runs light and stays out of your way.
+Built with Tauri + Rust — no bundled Chromium runtime. DayTrail ships as a small native desktop app instead of bundling a whole browser engine. Current release installers are roughly **10-12 MB on macOS** and **6-9 MB on Windows**, depending on installer format.
 
 ---
 
 ## Download
 
-**macOS (Apple Silicon) — Homebrew (recommended):**
+The fastest install paths are also listed in [Quick Start](#quick-start).
+
+**macOS Apple Silicon — Homebrew recommended:**
 
 ```sh
 brew tap varaprasadreddy9676/tap
