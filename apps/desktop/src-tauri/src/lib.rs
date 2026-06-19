@@ -15,7 +15,7 @@ pub mod store;
 pub mod store_materialization;
 pub mod tray;
 
-use std::{fs, io::Write, time::Duration};
+use std::time::Duration;
 
 use tauri::{Manager, RunEvent};
 
@@ -26,58 +26,8 @@ use crate::{
     tray::{setup_tray, show_main_window},
 };
 
-/// Enforce single-instance via a PID file. Returns `false` if another live
-/// instance already holds the lock (caller should exit). On success, writes our
-/// PID to the lock file.
-fn acquire_instance_lock() -> bool {
-    let lock_path = dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("ai.daytrail.desktop")
-        .join("daytrail.lock");
-
-    let _ = fs::create_dir_all(lock_path.parent().unwrap());
-
-    // Check if a previous PID is still alive.
-    if let Ok(contents) = fs::read_to_string(&lock_path) {
-        if let Ok(pid) = contents.trim().parse::<u32>() {
-            // `kill -0 PID` succeeds (exit 0) only if the process is alive.
-            let alive = std::process::Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if alive && pid != std::process::id() {
-                eprintln!(
-                    "[DayTrail] Another instance is already running (PID {pid}) — exiting."
-                );
-                return false;
-            }
-        }
-    }
-
-    // Write our PID.
-    let mut file = match fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&lock_path)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[DayTrail] Failed to write lock file: {e}");
-            return true; // Non-fatal — allow startup.
-        }
-    };
-    let _ = file.write_all(format!("{}\n", std::process::id()).as_bytes());
-    true
-}
-
 pub fn run() {
     install_panic_logger();
-
-    if !acquire_instance_lock() {
-        std::process::exit(1);
-    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())

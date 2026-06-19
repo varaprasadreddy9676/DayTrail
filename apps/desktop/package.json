@@ -1,6 +1,6 @@
 {
   "name": "@daytrail/desktop",
-  "version": "0.1.26",
+  "version": "0.1.25",
   "private": false,
   "description": "Local-first DayTrail desktop app with work memory, AI review, timesheets, and optional Smart Break nudges.",
   "license": "MIT OR Apache-2.0",

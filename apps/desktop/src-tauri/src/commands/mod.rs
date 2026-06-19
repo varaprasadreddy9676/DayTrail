@@ -79,6 +79,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         privacy::delete_context_data,
         privacy::purge_captured_data,
         privacy::prune_captured_data,
+        privacy::prune_completed_tasks,
         privacy::apply_retention_policy,
         quick_note::add_quick_note,
         tracking::pause_tracking,
