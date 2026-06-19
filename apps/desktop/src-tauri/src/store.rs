@@ -7061,7 +7061,7 @@ Today is {now_str}."
                   AND url_redacted IS ?6
                   AND workspace_key IS ?7
                   AND sensitivity = ?8
-                  AND ?9 >= ended_at
+                  AND ?9 >= started_at
                   AND (?9 - ended_at) <= ?10
                 ORDER BY ended_at DESC
                 LIMIT 1
@@ -9167,10 +9167,7 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
         .map(|(app, app_events)| {
             let mut project_buckets: HashMap<String, UsageBucket> = HashMap::new();
             let mut app_ai_events = Vec::new();
-            let duration_ms = app_events
-                .iter()
-                .map(|event| event_duration_ms(event))
-                .sum();
+            let duration_ms = merge_event_intervals(&app_events);
 
             // (file_name, context) → (duration_ms, events)
             let mut file_buckets: HashMap<(String, Option<String>), (i64, usize)> = HashMap::new();
@@ -9257,8 +9254,19 @@ fn build_app_usage_summary(events: &[SourceEvent]) -> AppUsageSummary {
         .collect::<Vec<_>>();
     apps.sort_by_key(|app| std::cmp::Reverse(app.duration_ms));
 
+    // Total = union of all source_events intervals (not sum of per-app totals,
+    // which would double-count events if an app appears in two separate windows).
+    let all_events: Vec<&SourceEvent> = events
+        .iter()
+        .filter(|e| {
+            e.app.as_deref()
+                .and_then(clean_app_label)
+                .map(|a| !is_self_app_label(&a) && !is_idle_system_app(&a))
+                .unwrap_or(false)
+        })
+        .collect();
     AppUsageSummary {
-        total_duration_ms: apps.iter().map(|app| app.duration_ms).sum(),
+        total_duration_ms: merge_event_intervals(&all_events),
         apps,
     }
 }
@@ -11363,6 +11371,40 @@ fn event_duration_ms(event: &SourceEvent) -> i64 {
         .duration_ms
         .max(event.ended_at.saturating_sub(event.started_at))
         .max(0)
+}
+
+/// Compute the total duration of the union of event intervals (ms).
+/// Prevents double-counting when overlapping events exist.
+fn merge_event_intervals(events: &[&SourceEvent]) -> i64 {
+    let mut intervals: Vec<(i64, i64)> = events
+        .iter()
+        .map(|e| {
+            let start = e.started_at;
+            let end = e.ended_at.max(e.started_at + e.duration_ms).max(start);
+            (start, end)
+        })
+        .filter(|(s, e)| e > s)
+        .collect();
+    intervals.sort_unstable_by_key(|&(s, _)| s);
+
+    let mut total = 0_i64;
+    let mut merge_start = i64::MIN;
+    let mut merge_end = i64::MIN;
+    for (s, e) in intervals {
+        if s <= merge_end {
+            merge_end = merge_end.max(e);
+        } else {
+            if merge_end > merge_start {
+                total += merge_end - merge_start;
+            }
+            merge_start = s;
+            merge_end = e;
+        }
+    }
+    if merge_end > merge_start {
+        total += merge_end - merge_start;
+    }
+    total
 }
 
 fn push_example(examples: &mut Vec<String>, value: String) {

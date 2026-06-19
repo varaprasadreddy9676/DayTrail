@@ -1927,8 +1927,40 @@ function buildHourBuckets(
 
   const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5-minute gap = "away"
 
-  return working.map((bucket): HourBucket => {
+  return working.map((bucket, hourIndex): HourBucket => {
     const sortedEvents = bucket.events.sort((left, right) => left.startedAt - right.startedAt);
+    const hourStart = dayStart + hourIndex * hourMs;
+    const hourEnd = hourStart + hourMs;
+
+    // Recompute durationMs as the union of event intervals (not sum) to avoid
+    // double-counting overlapping events from different sources.
+    const intervals = sortedEvents.map((event) => {
+      const rawStart = Number.isFinite(event.startedAt) ? event.startedAt : event.createdAt;
+      const rawEnd = Number.isFinite(event.endedAt) ? event.endedAt : rawStart + event.durationMs;
+      return {
+        start: Math.max(rawStart, hourStart, dayStart),
+        end: Math.min(Math.max(rawEnd, rawStart + 1), hourEnd, dayEnd),
+      };
+    }).filter((iv) => iv.end > iv.start).sort((a, b) => a.start - b.start);
+
+    let mergedDurationMs = 0;
+    let mergeStart = -1;
+    let mergeEnd = -1;
+    for (const iv of intervals) {
+      if (mergeStart === -1) {
+        mergeStart = iv.start;
+        mergeEnd = iv.end;
+      } else if (iv.start <= mergeEnd) {
+        mergeEnd = Math.max(mergeEnd, iv.end);
+      } else {
+        mergedDurationMs += mergeEnd - mergeStart;
+        mergeStart = iv.start;
+        mergeEnd = iv.end;
+      }
+    }
+    if (mergeStart !== -1) {
+      mergedDurationMs += mergeEnd - mergeStart;
+    }
 
     // Detect idle gaps between consecutive events
     const idleGaps: IdleGap[] = [];
@@ -1945,7 +1977,7 @@ function buildHourBuckets(
     return {
       hour: bucket.hour,
       label: bucket.label,
-      durationMs: bucket.durationMs,
+      durationMs: mergedDurationMs,
       manualDurationMs: bucket.manualDurationMs,
       events: sortedEvents,
       apps: [...bucket.apps.values()]
