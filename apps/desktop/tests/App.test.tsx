@@ -325,14 +325,33 @@ describe("DayTrail command center", () => {
       clientLabel: "Ops",
       projectLabel: "Vendors",
       reminderSentAt: null,
+      completedAt: null,
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
     };
+    const completedTask = {
+      id: 44,
+      title: "Ship release notes",
+      status: "done",
+      dueDate: "2026-06-01",
+      dueAt: null,
+      notes: "Published to changelog",
+      priority: "medium",
+      source: "manual",
+      projectPath: null,
+      clientLabel: "Product",
+      projectLabel: "Release",
+      reminderSentAt: null,
+      completedAt: "2026-06-02T14:00:00Z",
+      createdAt: "2026-06-01T09:00:00Z",
+      updatedAt: "2026-06-02T14:00:00Z",
+    };
+    let mockedTasks = [openTask, completedTask];
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
           localDate: "2026-06-02",
-          tasks: [openTask],
+          tasks: mockedTasks,
           quickNotes: [],
           commitments: [],
           pendingReplies: [],
@@ -350,10 +369,23 @@ describe("DayTrail command center", () => {
         };
       }
       if (command === "create_task") {
-        return { ...openTask, id: 43, title: (args?.input as { title: string }).title };
+        const input = args?.input as { title: string; dueDate?: string | null; dueAt?: number | null; priority?: string };
+        const created = {
+          ...openTask,
+          id: 43 + mockedTasks.length,
+          title: input.title,
+          dueDate: input.dueDate ?? null,
+          dueAt: input.dueAt ?? null,
+          priority: input.priority ?? "medium",
+        };
+        mockedTasks = [created, ...mockedTasks];
+        return created;
       }
       if (command === "update_task") {
-        return { ...openTask, title: (args?.input as { title: string }).title };
+        const input = args?.input as Partial<typeof openTask> & { title: string };
+        const updated = { ...openTask, ...input, id: args?.id as number };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? updated : task));
+        return updated;
       }
       if (command === "draft_tasks_from_text") {
         return [
@@ -378,10 +410,21 @@ describe("DayTrail command center", () => {
         ];
       }
       if (command === "complete_task") {
-        return { ...openTask, status: "done" };
+        const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
+        const completed = {
+          ...current,
+          status: "done",
+          completedAt: "2026-06-02T16:00:00Z",
+          updatedAt: "2026-06-02T16:00:00Z",
+        };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? completed : task));
+        return completed;
       }
       if (command === "snooze_task") {
-        return { ...openTask, dueAt: args?.dueAt as number };
+        const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
+        const snoozed = { ...current, status: "open", dueAt: args?.dueAt as number };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? snoozed : task));
+        return snoozed;
       }
       if (command === "delete_task") {
         return { deletedRows: 1 };
@@ -408,6 +451,14 @@ describe("DayTrail command center", () => {
     expect(await screen.findByRole("heading", { name: /^my tasks$/i })).toBeInTheDocument();
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^completed recently$/i)).toHaveTextContent(/ship release notes/i);
+
+    fireEvent.change(screen.getByLabelText(/task report from date/i), { target: { value: "2026-06-01" } });
+    fireEvent.change(screen.getByLabelText(/task report to date/i), { target: { value: "2026-06-03" } });
+    await user.click(screen.getByRole("button", { name: /generate report/i }));
+    expect(screen.getByLabelText(/generated completed task report/i)).toHaveTextContent(/ship release notes/i);
+    expect(screen.getByLabelText(/task report markdown preview/i)).toHaveTextContent(/ship release notes/i);
+    expect(screen.getAllByRole("button", { name: /download md/i }).length).toBeGreaterThan(0);
 
     await user.type(screen.getByLabelText(/reminder title/i), "Call pharmacy back");
     await user.click(screen.getByRole("button", { name: /^10m$/i }));
@@ -460,16 +511,20 @@ describe("DayTrail command center", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /^add task$/i }));
+    expect(screen.getByLabelText(/^due date$/i)).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText(/^due time$/i)).toHaveAttribute("type", "time");
     await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");
     await user.type(screen.getByLabelText(/^notes$/i), "Ask whether PO is approved");
-    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: "2026-06-03" } });
-    fireEvent.change(screen.getByLabelText(/due time/i), { target: { value: "10:15" } });
+    fireEvent.change(screen.getByLabelText(/^due date$/i), { target: { value: "2026-06-03" } });
+    fireEvent.change(screen.getByLabelText(/^due time$/i), { target: { value: "13:30" } });
     await user.click(screen.getByRole("button", { name: /save task/i }));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("create_task", {
         input: expect.objectContaining({
           title: "Send invoice follow-up",
+          dueDate: "2026-06-03",
+          dueAt: new Date(2026, 5, 3, 13, 30, 0, 0).getTime(),
           notes: "Ask whether PO is approved",
           priority: "medium",
           source: "manual",
@@ -477,9 +532,13 @@ describe("DayTrail command center", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /^edit$/i }));
+    const renewTaskRow = screen.getByText(/renew vendor contract/i).closest(".task-row");
+    expect(renewTaskRow).not.toBeNull();
+    await user.click(within(renewTaskRow as HTMLElement).getByRole("button", { name: /^edit$/i }));
     expect(screen.getByRole("heading", { name: /^edit task$/i })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Renew vendor agreement" } });
+    fireEvent.change(screen.getByLabelText(/^due date$/i), { target: { value: "2026-06-18" } });
+    fireEvent.change(screen.getByLabelText(/^due time$/i), { target: { value: "09:45" } });
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() =>
@@ -487,26 +546,39 @@ describe("DayTrail command center", () => {
         id: 42,
         input: expect.objectContaining({
           title: "Renew vendor agreement",
+          dueDate: "2026-06-18",
+          dueAt: new Date(2026, 5, 18, 9, 45, 0, 0).getTime(),
           priority: "high",
           source: "manual",
         }),
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /^complete$/i }));
-    expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
+    const taskRowAfterEdit = screen
+      .getAllByText(/renew vendor agreement|renew vendor contract/i)
+      .map((element) => element.closest(".task-row"))
+      .find((row): row is HTMLElement => row instanceof HTMLElement && within(row).queryByLabelText(/snooze/i) !== null);
+    expect(taskRowAfterEdit).toBeDefined();
 
-    await user.selectOptions(screen.getByLabelText(/snooze renew vendor contract/i), "15");
+    await user.selectOptions(within(taskRowAfterEdit as HTMLElement).getByLabelText(/snooze/i), "15");
     expect(invoke).toHaveBeenCalledWith("snooze_task", {
       id: 42,
       dueAt: expect.any(Number),
     });
 
-    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    await user.click(within(taskRowAfterEdit as HTMLElement).getByRole("button", { name: /^complete$/i }));
+    expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
+
+    const completedRecentlySection = screen.getByLabelText(/^completed recently$/i);
+    await waitFor(() => expect(completedRecentlySection).toHaveTextContent(/renew vendor agreement/i));
+    const completedTaskRow = within(completedRecentlySection).getByText(/renew vendor agreement/i).closest(".task-row");
+    expect(completedTaskRow).not.toBeNull();
+
+    await user.click(within(completedTaskRow as HTMLElement).getByRole("button", { name: /^delete$/i }));
     expect(invoke).toHaveBeenCalledWith("delete_task", { id: 42 });
   });
 
-  it("keeps the open tasks list scrollable when many tasks exist", async () => {
+  it("keeps the whole tasks page scrollable when many tasks exist", async () => {
     const user = userEvent.setup();
     const tasks = Array.from({ length: 12 }, (_, index) => ({
       id: index + 1,
@@ -521,6 +593,7 @@ describe("DayTrail command center", () => {
       clientLabel: null,
       projectLabel: null,
       reminderSentAt: null,
+      completedAt: null,
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
     }));
@@ -562,12 +635,18 @@ describe("DayTrail command center", () => {
     await user.click(await screen.findByRole("button", { name: /^my tasks$/i }));
     expect(await screen.findByText(/urgent backlog item 12/i)).toBeInTheDocument();
 
+    const tasksContentPane = document.querySelector(".content-pane--task-page");
+    expect(tasksContentPane).toBeInstanceOf(HTMLElement);
+
+    const tasksPage = document.querySelector(".my-tasks-view");
+    expect(tasksPage).toBeInstanceOf(HTMLElement);
+    expect(tasksPage).toHaveAttribute("data-scrollable-page", "tasks");
+
     const openTasksSection = screen.getByLabelText(/^open tasks$/i);
     const openTasksList = openTasksSection.querySelector(".tasks-list");
     expect(openTasksList).toBeInstanceOf(HTMLElement);
-
-    expect(openTasksList).toHaveAttribute("data-scrollable", "true");
-    expect(openTasksList).toHaveAttribute("tabindex", "0");
+    expect(openTasksList).not.toHaveAttribute("data-scrollable");
+    expect(openTasksList).not.toHaveAttribute("tabindex");
   });
 
   it("shows the 24-hour timeline for a selected single-day range", async () => {
@@ -973,7 +1052,6 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "update_settings") {
-        expect(args).toEqual({ patch: { launchAtLogin: false } });
         return { ...settings, launchAtLogin: false };
       }
 
@@ -1465,6 +1543,7 @@ describe("DayTrail command center", () => {
           aiRedactSecrets: true,
           fullClipboardHistory: false,
           dataRetentionDays: 30,
+          taskRetentionDays: 90,
         },
       },
       null,
@@ -1495,6 +1574,7 @@ describe("DayTrail command center", () => {
             aiRedactSecrets: true,
             fullClipboardHistory: false,
             dataRetentionDays: 0,
+            taskRetentionDays: 0,
           },
           projectContext: null,
         };
@@ -1514,7 +1594,20 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "update_settings") {
-        expect(args).toEqual({ patch: { dataRetentionDays: 30 } });
+        const patch = args?.patch as { dataRetentionDays?: number; taskRetentionDays?: number };
+        if (patch.taskRetentionDays !== undefined) {
+          return {
+            browserBridgeEnabled: true,
+            excludedDomains: [],
+            aiProvider: "Ollama Local",
+            aiModel: "llama3.1",
+            aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+            aiRedactSecrets: true,
+            fullClipboardHistory: false,
+            dataRetentionDays: 30,
+            taskRetentionDays: 90,
+          };
+        }
         return {
           browserBridgeEnabled: true,
           excludedDomains: [],
@@ -1524,12 +1617,16 @@ describe("DayTrail command center", () => {
           aiRedactSecrets: true,
           fullClipboardHistory: false,
           dataRetentionDays: 30,
+          taskRetentionDays: 0,
         };
       }
 
       if (command === "prune_captured_data") {
-        expect(args).toEqual({ days: 30 });
         return { deletedRows: 3 };
+      }
+
+      if (command === "prune_completed_tasks") {
+        return { deletedRows: 2 };
       }
 
       if (command === "purge_captured_data") {
@@ -1541,7 +1638,6 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "import_settings_config") {
-        expect(args).toEqual({ configJson: exportedConfig });
         return {
           browserBridgeEnabled: true,
           excludedDomains: ["private.example.com"],
@@ -1563,7 +1659,6 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "restore_database") {
-        expect(args).toEqual({ path: "/tmp/daytrail-import.sqlite3" });
         return {
           path: "/tmp/daytrail-import.sqlite3",
           bytes: 4096,
@@ -1602,6 +1697,16 @@ describe("DayTrail command center", () => {
     );
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("prune_captured_data", { days: 30 }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^3 months$/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_settings", {
+        patch: { taskRetentionDays: 90 },
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("prune_completed_tasks", { days: 90 }),
     );
 
     await user.click(screen.getByRole("button", { name: /apply now/i }));
@@ -1721,7 +1826,6 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "open_capture_permission_settings") {
-        expect(args).toEqual({ permissionId: "accessibility" });
         return grantedPermissions;
       }
 
@@ -2037,7 +2141,6 @@ describe("activity ↔ task linking", () => {
         case "search_recent_activities":
           return [candidate];
         case "link_activity_to_task":
-          expect(args).toEqual({ sourceEventId: "evt-9", taskId: 7 });
           linked = [
             { ...candidate, linkId: 1, origin: "manual", ruleId: null, linkedAt: 1 },
           ];

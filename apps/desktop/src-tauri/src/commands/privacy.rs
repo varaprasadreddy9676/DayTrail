@@ -34,6 +34,17 @@ pub fn prune_captured_data(
         .map_err(Into::into)
 }
 
+
+#[tauri::command]
+pub fn prune_completed_tasks(
+    store: State<'_, WorktraceStore>,
+    days: i64,
+) -> Result<PrivacyDeleteSummary, CommandError> {
+    store
+        .prune_completed_tasks_older_than_days(days)
+        .map_err(Into::into)
+}
+
 #[tauri::command]
 pub fn apply_retention_policy(
     store: State<'_, WorktraceStore>,

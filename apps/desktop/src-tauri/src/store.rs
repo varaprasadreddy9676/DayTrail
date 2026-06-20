@@ -130,6 +130,7 @@ impl WorktraceStore {
                 client_label TEXT,
                 project_label TEXT,
                 reminder_sent_at INTEGER,
+                completed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -584,6 +585,7 @@ impl WorktraceStore {
         Self::ensure_column(&conn, "tasks", "client_label", "TEXT")?;
         Self::ensure_column(&conn, "tasks", "project_label", "TEXT")?;
         Self::ensure_column(&conn, "tasks", "reminder_sent_at", "INTEGER")?;
+        Self::ensure_column(&conn, "tasks", "completed_at", "TEXT")?;
         Self::migrate_quick_notes_schema(&conn)?;
         Self::migrate_legacy_compatible_columns(&conn)?;
         Self::migrate_url_redactions(&conn)?;
@@ -594,6 +596,8 @@ impl WorktraceStore {
                 ON tasks(status, due_date);
             CREATE INDEX IF NOT EXISTS idx_tasks_status_due_at
                 ON tasks(status, due_at);
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_completed_at
+                ON tasks(status, completed_at);
             CREATE INDEX IF NOT EXISTS idx_activity_created_at
                 ON activity_events(created_at);
             CREATE INDEX IF NOT EXISTS idx_source_events_time
@@ -1128,9 +1132,9 @@ impl WorktraceStore {
             r#"
             INSERT INTO tasks (
                 title, status, due_date, due_at, notes, priority, source, project_path,
-                client_label, project_label, reminder_sent_at, created_at, updated_at
+                client_label, project_label, reminder_sent_at, completed_at, created_at, updated_at
             )
-            VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10)
+            VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, ?10, ?10)
             "#,
             params![
                 title,
@@ -1265,10 +1269,12 @@ impl WorktraceStore {
                     r#"
                     SELECT id, title, status, due_date, due_at, notes, priority, source,
                            project_path, client_label, project_label, reminder_sent_at,
-                           created_at, updated_at
+                           completed_at, created_at, updated_at
                     FROM tasks
                     WHERE status = ?1
                     ORDER BY
+                        CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+                        CASE WHEN status = 'done' THEN COALESCE(completed_at, updated_at) END DESC,
                         CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
                         due_at,
                         COALESCE(due_date, '9999-12-31'),
@@ -1284,9 +1290,11 @@ impl WorktraceStore {
                     r#"
                     SELECT id, title, status, due_date, due_at, notes, priority, source,
                            project_path, client_label, project_label, reminder_sent_at,
-                           created_at, updated_at
+                           completed_at, created_at, updated_at
                     FROM tasks
                     ORDER BY
+                        CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+                        CASE WHEN status = 'done' THEN COALESCE(completed_at, updated_at) END DESC,
                         CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
                         due_at,
                         COALESCE(due_date, '9999-12-31'),
@@ -1305,7 +1313,7 @@ impl WorktraceStore {
         let now = now_utc();
         let conn = self.lock()?;
         conn.execute(
-            "UPDATE tasks SET status = 'done', updated_at = ?1 WHERE id = ?2",
+            "UPDATE tasks SET status = 'done', completed_at = ?1, updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )?;
         Self::get_task_locked(&conn, id)
@@ -1319,7 +1327,7 @@ impl WorktraceStore {
         conn.execute(
             r#"
             UPDATE tasks
-            SET status = 'open', due_at = ?1, due_date = ?2, reminder_sent_at = NULL, updated_at = ?3
+            SET status = 'open', due_at = ?1, due_date = ?2, reminder_sent_at = NULL, completed_at = NULL, updated_at = ?3
             WHERE id = ?4
             "#,
             params![due_at, due_date, now, id],
@@ -1339,7 +1347,7 @@ impl WorktraceStore {
             r#"
             SELECT id, title, status, due_date, due_at, notes, priority, source,
                    project_path, client_label, project_label, reminder_sent_at,
-                   created_at, updated_at
+                   completed_at, created_at, updated_at
             FROM tasks
             WHERE status = 'open'
               AND due_at IS NOT NULL
@@ -1479,7 +1487,7 @@ impl WorktraceStore {
             r#"
             SELECT t.id, t.title, t.status, t.due_date, t.due_at, t.notes, t.priority, t.source,
                    t.project_path, t.client_label, t.project_label, t.reminder_sent_at,
-                   t.created_at, t.updated_at
+                   t.completed_at, t.created_at, t.updated_at
             FROM activity_task_links l
             JOIN tasks t ON t.id = l.task_id
             WHERE l.source_event_id = ?1
@@ -2054,6 +2062,10 @@ impl WorktraceStore {
                     settings.data_retention_days =
                         value.parse().unwrap_or(settings.data_retention_days);
                 }
+                "task_retention_days" => {
+                    settings.task_retention_days =
+                        value.parse().unwrap_or(settings.task_retention_days);
+                }
                 "recovery_enabled" => {
                     settings.recovery_enabled = matches!(value.as_str(), "1" | "true");
                 }
@@ -2254,6 +2266,13 @@ impl WorktraceStore {
             );
             Self::upsert_setting_locked(&conn, "data_retention_days", &value.to_string(), &now)?;
         }
+        if let Some(value) = patch.task_retention_days {
+            anyhow::ensure!(
+                value == 0 || (1..=3650).contains(&value),
+                "task retention must be 0 or between 1 and 3650 days"
+            );
+            Self::upsert_setting_locked(&conn, "task_retention_days", &value.to_string(), &now)?;
+        }
         if let Some(value) = patch.recovery_enabled {
             Self::upsert_setting_locked(
                 &conn,
@@ -2396,6 +2415,7 @@ impl WorktraceStore {
             show_capture_confidence: Some(settings.show_capture_confidence),
             show_ai_details: Some(settings.show_ai_details),
             data_retention_days: Some(settings.data_retention_days),
+            task_retention_days: Some(settings.task_retention_days),
             recovery_enabled: Some(settings.recovery_enabled),
             recovery_threshold_minutes: Some(settings.recovery_threshold_minutes),
             work_hours_enabled: Some(settings.work_hours_enabled),
@@ -2648,7 +2668,7 @@ impl WorktraceStore {
             r#"
             SELECT id, title, status, due_date, due_at, notes, priority, source,
                    project_path, client_label, project_label, reminder_sent_at,
-                   created_at, updated_at
+                   completed_at, created_at, updated_at
             FROM tasks
             WHERE status = 'open'
             ORDER BY
@@ -5610,12 +5630,47 @@ Today is {now_str}."
         self.prune_captured_data_before(cutoff_ms)
     }
 
+    pub fn prune_completed_tasks_older_than_days(&self, days: i64) -> Result<PrivacyDeleteSummary> {
+        anyhow::ensure!(days > 0, "task retention days must be greater than zero");
+        anyhow::ensure!(days <= 3650, "task retention days cannot exceed 3650");
+        let cutoff_ms = now_ms().saturating_sub(days.saturating_mul(24 * 60 * 60 * 1000));
+        let cutoff_iso = Utc
+            .timestamp_millis_opt(cutoff_ms)
+            .single()
+            .map(|date| date.to_rfc3339_opts(SecondsFormat::Secs, true))
+            .unwrap_or_else(now_utc);
+
+        let conn = self.lock()?;
+        // completed_at is stored as UTC RFC3339 text (for example, 2026-06-02T14:00:00Z).
+        // Lexicographic comparison is safe only while that normalized format is preserved.
+        let deleted_rows = conn.execute(
+            r#"
+            DELETE FROM tasks
+            WHERE status = 'done'
+              AND COALESCE(completed_at, updated_at, created_at) < ?1
+            "#,
+            params![cutoff_iso],
+        )?;
+        Ok(PrivacyDeleteSummary { deleted_rows })
+    }
+
     pub fn apply_retention_policy(&self) -> Result<PrivacyDeleteSummary> {
-        let days = self.get_settings()?.data_retention_days;
-        if days <= 0 {
-            return Ok(PrivacyDeleteSummary { deleted_rows: 0 });
+        let settings = self.get_settings()?;
+        let mut deleted_rows = 0;
+
+        if settings.data_retention_days > 0 {
+            deleted_rows += self
+                .prune_captured_data_older_than_days(settings.data_retention_days)?
+                .deleted_rows;
         }
-        self.prune_captured_data_older_than_days(days)
+
+        if settings.task_retention_days > 0 {
+            deleted_rows += self
+                .prune_completed_tasks_older_than_days(settings.task_retention_days)?
+                .deleted_rows;
+        }
+
+        Ok(PrivacyDeleteSummary { deleted_rows })
     }
 
     fn prune_captured_data_before(&self, cutoff_ms: i64) -> Result<PrivacyDeleteSummary> {
@@ -6991,7 +7046,7 @@ Today is {now_str}."
             r#"
             SELECT id, title, status, due_date, due_at, notes, priority, source,
                    project_path, client_label, project_label, reminder_sent_at,
-                   created_at, updated_at
+                   completed_at, created_at, updated_at
             FROM tasks
             WHERE id = ?1
             "#,
@@ -7713,8 +7768,9 @@ Today is {now_str}."
             client_label: row.get(9)?,
             project_label: row.get(10)?,
             reminder_sent_at: row.get(11)?,
-            created_at: row.get(12)?,
-            updated_at: row.get(13)?,
+            completed_at: row.get(12)?,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
         })
     }
 
@@ -10097,7 +10153,7 @@ fn build_unclosed_loop_inbox(
     let mut items = Vec::new();
     let mut seen = HashSet::new();
 
-    for task in tasks.iter().take(8) {
+    for task in tasks.iter().filter(|task| task.status == TaskStatus::Open).take(8) {
         let id = format!("task-{}", task.id);
         if hidden_loop_ids.contains(&id) {
             continue;
