@@ -72,6 +72,7 @@ pub struct Task {
     pub client_label: Option<String>,
     pub project_label: Option<String>,
     pub reminder_sent_at: Option<i64>,
+    pub completed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -143,6 +144,8 @@ pub struct Settings {
     #[serde(default)]
     pub data_retention_days: i64,
     #[serde(default)]
+    pub task_retention_days: i64,
+    #[serde(default)]
     pub recovery_enabled: bool,
     #[serde(default = "default_recovery_threshold_minutes")]
     pub recovery_threshold_minutes: i64,
@@ -207,6 +210,7 @@ impl Default for Settings {
             show_capture_confidence: false,
             show_ai_details: default_show_ai_details(),
             data_retention_days: 0,
+            task_retention_days: 0,
             recovery_enabled: false,
             recovery_threshold_minutes: default_recovery_threshold_minutes(),
             work_hours_enabled: default_work_hours_enabled(),
@@ -239,6 +243,7 @@ pub struct SettingsPatch {
     pub show_capture_confidence: Option<bool>,
     pub show_ai_details: Option<String>,
     pub data_retention_days: Option<i64>,
+    pub task_retention_days: Option<i64>,
     pub recovery_enabled: Option<bool>,
     pub recovery_threshold_minutes: Option<i64>,
     pub work_hours_enabled: Option<bool>,
