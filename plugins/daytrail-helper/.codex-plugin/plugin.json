@@ -1,0 +1,30 @@
+{
+  "name": "daytrail-helper",
+  "version": "0.1.0",
+  "description": "Read-only local connector for DayTrail activity, tasks, reports, and insights.",
+  "author": {
+    "name": "Sai"
+  },
+  "homepage": "https://github.com/varaprasadreddy9676/DayTrail",
+  "repository": "https://github.com/varaprasadreddy9676/DayTrail",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["daytrail", "time-tracking", "work-memory", "productivity", "local-first"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DayTrail Helper",
+    "shortDescription": "Ask Codex about your local DayTrail work history.",
+    "longDescription": "DayTrail Helper connects Codex to the local DayTrail SQLite database in read-only mode. Use it to summarize today, search recent activity, inspect open tasks, review AI tool usage, and pull generated reports without opening the DayTrail app.",
+    "developerName": "Sai",
+    "category": "Productivity",
+    "capabilities": ["Read", "Interactive", "Local"],
+    "defaultPrompt": [
+      "Summarize my DayTrail activity today.",
+      "Show my open DayTrail tasks.",
+      "Search DayTrail for recent AI usage."
+    ],
+    "brandColor": "#0A84FF",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  },
+  "mcpServers": "./.mcp.json"
+}

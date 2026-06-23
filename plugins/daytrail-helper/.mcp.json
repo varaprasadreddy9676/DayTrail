@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "daytrail": {
+      "command": "python3",
+      "args": ["./scripts/daytrail_mcp.py"],
+      "cwd": ".",
+      "env": {
+        "DAYTRAIL_READ_ONLY": "1"
+      }
+    }
+  }
+}
