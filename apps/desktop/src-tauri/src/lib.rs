@@ -277,7 +277,7 @@ fn spawn_insight_scheduler(store: WorktraceStore, app: tauri::AppHandle, interva
         std::thread::sleep(Duration::from_secs(90));
         loop {
             let hour = chrono::Local::now().hour();
-            if hour >= 7 && hour < 22 {
+            if (7..22).contains(&hour) {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     store.generate_and_store_insights()
                 }));

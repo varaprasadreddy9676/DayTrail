@@ -2101,6 +2101,8 @@ fn terminal_bridge_metadata_records_cli_folder_context() {
             updated_at: Some("2026-05-23T09:10:00Z".into()),
             event_type: None,
             last_command: None,
+            git_branch: None,
+            git_repo: None,
         })
         .expect("ingest terminal metadata");
 
@@ -2140,6 +2142,8 @@ fn terminal_bridge_metadata_does_not_store_terminal_capability_as_app() {
             updated_at: Some("2026-05-23T09:10:00Z".into()),
             event_type: Some("command".into()),
             last_command: Some("printf daytrail qa --api-key secret".into()),
+            git_branch: None,
+            git_repo: None,
         })
         .expect("ingest terminal metadata");
 
@@ -3298,6 +3302,8 @@ fn detects_terminal_ai_usage_and_marks_terminal_health_ok_when_signal_exists() {
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
             event_type: Some("command".into()),
             last_command: Some("gemini --yolo".into()),
+            git_branch: None,
+            git_repo: None,
         })
         .expect("terminal bridge metadata");
 
@@ -3443,6 +3449,8 @@ fn detects_project_from_workspace_storage_and_terminal_metadata() {
             updated_at: Some("2026-05-23T08:00:00Z".into()),
             event_type: None,
             last_command: None,
+            git_branch: None,
+            git_repo: None,
         })
         .expect("terminal metadata"),
     )

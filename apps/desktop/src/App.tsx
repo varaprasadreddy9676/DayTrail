@@ -6503,7 +6503,7 @@ function TaskListSection({
                   }
                   type="button"
                 >
-                  {expandedTaskId === task.id ? "Hide links" : "Links & rules"}
+                  {expandedTaskId === task.id ? "Hide details" : "Details"}
                 </button>
                 <button className="button compact" onClick={() => onEditTask(task)} type="button">
                   Edit

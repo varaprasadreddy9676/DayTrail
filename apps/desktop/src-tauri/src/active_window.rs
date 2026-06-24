@@ -967,9 +967,7 @@ fn run_git(workspace_path: &str, args: &[&str]) -> Option<String> {
 pub fn detect_git_context(workspace_path: &str) -> Option<GitContext> {
     // Use git as a subprocess so macOS TCC attributes the Documents-folder
     // access to git rather than DayTrail, preventing repeated permission popups.
-    if run_git(workspace_path, &["rev-parse", "--git-dir"]).is_none() {
-        return None;
-    }
+    run_git(workspace_path, &["rev-parse", "--git-dir"])?;
     let branch = run_git(workspace_path, &["branch", "--show-current"]);
     let repo_root = run_git(workspace_path, &["rev-parse", "--show-toplevel"]);
     let remote_origin = run_git(workspace_path, &["remote", "get-url", "origin"]);

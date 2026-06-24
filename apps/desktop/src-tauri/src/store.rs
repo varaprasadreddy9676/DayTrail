@@ -1547,7 +1547,7 @@ impl WorktraceStore {
                 TaskAppUsage { app, category, duration_ms }
             })
             .collect();
-        apps.sort_unstable_by(|a, b| b.duration_ms.cmp(&a.duration_ms));
+        apps.sort_unstable_by_key(|app| std::cmp::Reverse(app.duration_ms));
 
         // --- AI tools ---
         let mut ai_tools: Vec<String> = linked
@@ -3034,7 +3034,7 @@ impl WorktraceStore {
                     repo: meta
                         .get("git_repo")
                         .and_then(|v| v.as_str())
-                        .or_else(|| e.workspace_key.as_deref())
+                        .or(e.workspace_key.as_deref())
                         .unwrap_or_default()
                         .to_string(),
                     branch: meta.get("git_branch").and_then(|v| v.as_str()).map(str::to_string),
@@ -10100,8 +10100,8 @@ fn build_inferred_work_blocks(
     let mut evidence = events
         .iter()
         .filter(|event| event_duration_ms(event) > 0)
-        .filter(|event| from_ms.map_or(true, |from| event.ended_at > from))
-        .filter(|event| to_ms.map_or(true, |to| event.started_at < to))
+        .filter(|event| from_ms.is_none_or(|from| event.ended_at > from))
+        .filter(|event| to_ms.is_none_or(|to| event.started_at < to))
         .filter_map(|event| {
             presentation_inference_key(event).map(|(key, clean_title)| InferenceEvidence {
                 event,
@@ -13965,8 +13965,7 @@ fn parse_shell_args(input: &str) -> Vec<String> {
     let mut current = String::new();
     let mut in_single = false;
     let mut in_double = false;
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
+    for c in input.chars() {
         match c {
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,

@@ -1955,8 +1955,9 @@ describe("activity ↔ task linking", () => {
       await screen.findByRole("heading", { level: 1, name: /^my tasks$/i }),
     ).toBeInTheDocument();
 
-    // Expand the per-task links & rules panel.
-    await user.click(screen.getByRole("button", { name: /links & rules/i }));
+    // Expand the per-task detail panel, then switch to the links tab.
+    await user.click(screen.getByRole("button", { name: /^details$/i }));
+    await user.click(await screen.findByRole("tab", { name: /links & rules/i }));
     expect(await screen.findByText(/linked activities/i)).toBeInTheDocument();
     expect(screen.getByText(/no activities linked yet/i)).toBeInTheDocument();
     await waitFor(() =>
@@ -2051,7 +2052,8 @@ describe("activity ↔ task linking", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
-    await user.click(await screen.findByRole("button", { name: /links & rules/i }));
+    await user.click(await screen.findByRole("button", { name: /^details$/i }));
+    await user.click(await screen.findByRole("tab", { name: /links & rules/i }));
     await user.click(await screen.findByRole("button", { name: /link an activity/i }));
 
     await user.click(screen.getByRole("button", { name: /^search$/i }));
@@ -2091,7 +2093,8 @@ describe("activity ↔ task linking", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
-    await user.click(await screen.findByRole("button", { name: /links & rules/i }));
+    await user.click(await screen.findByRole("button", { name: /^details$/i }));
+    await user.click(await screen.findByRole("tab", { name: /links & rules/i }));
 
     await user.selectOptions(screen.getByLabelText(/rule matcher/i), "regex");
     fireEvent.change(screen.getByLabelText(/rule pattern/i), {

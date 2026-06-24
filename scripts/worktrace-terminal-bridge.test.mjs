@@ -12,9 +12,15 @@ const isWindows = process.platform === 'win32';
 test('terminal bridge writes redacted command metadata', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'worktrace-terminal-'));
   const outFile = join(dir, 'terminal-bridge.json');
+  const {
+    DAYTRAIL_TERMINAL_BRIDGE,
+    DAYTRAIL_TERMINAL_EVENT,
+    DAYTRAIL_TERMINAL_COMMAND,
+    ...cleanEnv
+  } = process.env;
 
   const env = {
-    ...process.env,
+    ...cleanEnv,
     WORKTRACE_TERMINAL_BRIDGE: outFile,
     WORKTRACE_TERMINAL_EVENT: 'command',
     WORKTRACE_TERMINAL_COMMAND: 'curl https://api.example.test --api-key secret-token',
