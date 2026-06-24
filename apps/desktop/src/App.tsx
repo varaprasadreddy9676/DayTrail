@@ -492,6 +492,40 @@ type TaskMatchField = "title" | "url" | "app" | "source" | "any";
 type TaskMatcherType = "contains" | "wildcard" | "regex";
 type LinkOrigin = "manual" | "rule";
 
+type BackendTaskAppUsage = {
+  app: string;
+  category: string;
+  durationMs: number;
+};
+
+type BackendTaskWorkSession = {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  apps: string[];
+};
+
+type BackendTaskActivitySummary = {
+  taskId: number;
+  totalMs: number;
+  linkedCount: number;
+  apps: BackendTaskAppUsage[];
+  aiTools: string[];
+  workSessions: BackendTaskWorkSession[];
+};
+
+type BackendTaskLinkSuggestion = {
+  eventId: string;
+  app: string;
+  title?: string | null;
+  workspaceKey?: string | null;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  matchReason: string;
+  score: number;
+};
+
 type BackendLinkedActivity = BackendSourceEvent & {
   linkId: number;
   origin: LinkOrigin;
@@ -6545,12 +6579,16 @@ function linkedActivityLabel(activity: BackendLinkedActivity): string {
 }
 
 /**
- * Per-task panel for linking recorded activities and managing auto-match rules.
+ * Per-task panel: Timeline (time proof) + Links & Rules (activity linking).
  * Loads its data lazily the first time it is expanded.
  */
 function TaskLinksPanel({ task }: { task: BackendTask }) {
+  const [activeTab, setActiveTab] = useState<"timeline" | "links">("timeline");
   const [activities, setActivities] = useState<BackendLinkedActivity[]>([]);
   const [rules, setRules] = useState<BackendTaskMatchRule[]>([]);
+  const [activitySummary, setActivitySummary] = useState<BackendTaskActivitySummary | null>(null);
+  const [suggestions, setSuggestions] = useState<BackendTaskLinkSuggestion[]>([]);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(() => new Set());
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -6562,12 +6600,16 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
   const [pickerSearched, setPickerSearched] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [nextActivities, nextRules] = await Promise.all([
+    const [nextActivities, nextRules, nextSummary, nextSuggestions] = await Promise.all([
       invokeTauri<BackendLinkedActivity[]>("list_task_activities", { taskId: task.id }),
       invokeTauri<BackendTaskMatchRule[]>("list_task_rules", { taskId: task.id }),
+      invokeTauri<BackendTaskActivitySummary>("get_task_activity_summary", { taskId: task.id }),
+      invokeTauri<BackendTaskLinkSuggestion[]>("suggest_task_links", { taskId: task.id, limit: 8 }),
     ]);
     setActivities(nextActivities ?? []);
     setRules(nextRules ?? []);
+    setActivitySummary(nextSummary ?? null);
+    setSuggestions(nextSuggestions ?? []);
     setLoaded(true);
   }, [task.id]);
 
@@ -6658,8 +6700,64 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
 
   const linkedIds = new Set(activities.map((activity) => activity.id));
 
+  const acceptSuggestion = (suggestion: BackendTaskLinkSuggestion) =>
+    runMutation(async () => {
+      await invokeTauriStrict<unknown>("link_activity_to_task", {
+        sourceEventId: suggestion.eventId,
+        taskId: task.id,
+      });
+      setDismissedSuggestions((prev) => new Set(prev).add(suggestion.eventId));
+    }, "Linked.");
+
+  const dismissSuggestion = (eventId: string) =>
+    setDismissedSuggestions((prev) => new Set(prev).add(eventId));
+
+  const visibleSuggestions = suggestions.filter(
+    (s) => !dismissedSuggestions.has(s.eventId) && !linkedIds.has(s.eventId),
+  );
+
   return (
-    <div className="task-links-panel" aria-label={`Links and rules for ${task.title}`}>
+    <div className="task-links-panel" aria-label={`Activity and links for ${task.title}`}>
+      {/* ── Tab switcher ── */}
+      <div className="task-panel-tabs" role="tablist">
+        <button
+          aria-selected={activeTab === "timeline"}
+          className="button compact"
+          onClick={() => setActiveTab("timeline")}
+          role="tab"
+          type="button"
+        >
+          Timeline
+          {activitySummary && activitySummary.totalMs > 0
+            ? ` · ${formatDuration(activitySummary.totalMs)}`
+            : ""}
+        </button>
+        <button
+          aria-selected={activeTab === "links"}
+          className="button compact"
+          onClick={() => setActiveTab("links")}
+          role="tab"
+          type="button"
+        >
+          Links & Rules
+          {activities.length > 0 ? ` · ${activities.length}` : ""}
+        </button>
+      </div>
+
+      {/* ── Timeline tab ── */}
+      {activeTab === "timeline" && (
+        <TaskActivityTimeline
+          busy={busy}
+          loaded={loaded}
+          summary={activitySummary}
+          suggestions={visibleSuggestions}
+          onAccept={acceptSuggestion}
+          onDismiss={dismissSuggestion}
+        />
+      )}
+
+      {/* ── Links & Rules tab ── */}
+      {activeTab === "links" && (
       <section className="task-links-section">
         <header>
           <h4>Linked activities</h4>
@@ -6884,9 +6982,158 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
           </button>
         </div>
       </section>
+      )} {/* end links tab */}
 
       {status && <p className="task-links-status">{status}</p>}
       {error && <p className="task-links-error">{error}</p>}
+    </div>
+  );
+}
+
+function TaskActivityTimeline({
+  busy,
+  loaded,
+  summary,
+  suggestions,
+  onAccept,
+  onDismiss,
+}: {
+  busy: boolean;
+  loaded: boolean;
+  summary: BackendTaskActivitySummary | null;
+  suggestions: BackendTaskLinkSuggestion[];
+  onAccept: (s: BackendTaskLinkSuggestion) => void;
+  onDismiss: (eventId: string) => void;
+}) {
+  if (!loaded) {
+    return <p className="task-links-empty">Loading…</p>;
+  }
+
+  const hasData = summary && (summary.totalMs > 0 || summary.linkedCount > 0);
+
+  return (
+    <div className="task-timeline">
+      {/* ── Time proof header ── */}
+      <div className="task-timeline-header">
+        <div className="task-timeline-stat">
+          <strong>{hasData ? formatDuration(summary.totalMs) : "—"}</strong>
+          <span>tracked on this task</span>
+        </div>
+        {summary && summary.linkedCount > 0 && (
+          <div className="task-timeline-stat">
+            <strong>{summary.linkedCount}</strong>
+            <span>linked activities</span>
+          </div>
+        )}
+        {summary && summary.workSessions.length > 0 && (
+          <div className="task-timeline-stat">
+            <strong>{summary.workSessions.length}</strong>
+            <span>work session{summary.workSessions.length === 1 ? "" : "s"}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── App breakdown ── */}
+      {summary && summary.apps.length > 0 && (
+        <div className="task-timeline-apps">
+          <span className="task-timeline-label">Apps used</span>
+          <div className="task-timeline-app-list">
+            {summary.apps.map((appUsage) => (
+              <span className="task-timeline-app-chip" key={appUsage.app}>
+                <span
+                  className="task-app-dot"
+                  style={{ background: appColor(appUsage.app) }}
+                />
+                {appUsage.app}
+                <em>{formatDuration(appUsage.durationMs)}</em>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── AI tools ── */}
+      {summary && summary.aiTools.length > 0 && (
+        <div className="task-timeline-apps">
+          <span className="task-timeline-label">AI tools</span>
+          <div className="task-timeline-app-list">
+            {summary.aiTools.map((tool) => (
+              <span className="task-timeline-app-chip ai-chip" key={tool}>{tool}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Work sessions ── */}
+      {summary && summary.workSessions.length > 0 && (
+        <div className="task-timeline-sessions">
+          <span className="task-timeline-label">Work sessions</span>
+          {summary.workSessions.map((session, idx) => (
+            <div className="task-session-row" key={idx}>
+              <div className="task-session-bar">
+                <span
+                  className="task-session-bar-fill"
+                  style={{
+                    width: `${Math.min(100, Math.round((session.durationMs / Math.max(summary.totalMs, 1)) * 100))}%`,
+                  }}
+                />
+              </div>
+              <div className="task-session-meta">
+                <span>{formatDuration(session.durationMs)}</span>
+                <span>{new Date(session.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                <span className="task-session-apps">{session.apps.slice(0, 3).join(", ")}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!hasData && suggestions.length === 0 && (
+        <div className="task-links-empty">
+          <strong>No tracked time yet</strong>
+          <span>Link activities in the Links &amp; Rules tab, or DayTrail will suggest matches below as you work.</span>
+        </div>
+      )}
+
+      {/* ── Auto-link suggestions ── */}
+      {suggestions.length > 0 && (
+        <div className="task-suggestions">
+          <span className="task-timeline-label">
+            Looks like you worked on this task
+          </span>
+          {suggestions.map((s) => (
+            <div className="task-suggestion-row" key={s.eventId}>
+              <div className="task-suggestion-info">
+                <span className="task-suggestion-title">
+                  {s.title || s.workspaceKey || s.app}
+                </span>
+                <span className="task-suggestion-meta">
+                  {s.app} · {formatDuration(s.durationMs)} ·{" "}
+                  {new Date(s.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                </span>
+                <span className="task-suggestion-reason">{s.matchReason}</span>
+              </div>
+              <div className="task-suggestion-actions">
+                <button
+                  className="button compact primary"
+                  disabled={busy}
+                  onClick={() => onAccept(s)}
+                  type="button"
+                >
+                  Link
+                </button>
+                <button
+                  className="button compact"
+                  onClick={() => onDismiss(s.eventId)}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

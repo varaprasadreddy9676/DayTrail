@@ -1416,6 +1416,50 @@ pub struct ActiveWorkContextInput {
     pub billable: Option<bool>,
 }
 
+// ── Task Activity Timeline ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAppUsage {
+    pub app: String,
+    pub category: String,
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskWorkSession {
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub duration_ms: i64,
+    pub apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskActivitySummary {
+    pub task_id: i64,
+    pub total_ms: i64,
+    pub linked_count: i64,
+    pub apps: Vec<TaskAppUsage>,
+    pub ai_tools: Vec<String>,
+    pub work_sessions: Vec<TaskWorkSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskLinkSuggestion {
+    pub event_id: String,
+    pub app: String,
+    pub title: Option<String>,
+    pub workspace_key: Option<String>,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub duration_ms: i64,
+    pub match_reason: String,
+    pub score: i32,
+}
+
 // ── Daily Goals ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

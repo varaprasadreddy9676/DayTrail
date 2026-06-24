@@ -1522,6 +1522,224 @@ impl WorktraceStore {
         Ok(activities)
     }
 
+    /// Build a rich summary of all activity linked to a task.
+    pub fn get_task_activity_summary(
+        &self,
+        task_id: i64,
+    ) -> Result<crate::models::TaskActivitySummary> {
+        use crate::models::{TaskActivitySummary, TaskAppUsage, TaskWorkSession};
+        let linked = self.list_task_activities(task_id)?;
+
+        // --- Merge total time ---
+        let event_refs: Vec<&SourceEvent> = linked.iter().map(|a| &a.event).collect();
+        let total_ms = merge_event_intervals(&event_refs);
+
+        // --- Per-app aggregation ---
+        let mut app_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for activity in &linked {
+            let app = activity.event.app.clone().unwrap_or_else(|| activity.event.source.clone());
+            *app_map.entry(app).or_default() += activity.event.duration_ms;
+        }
+        let mut apps: Vec<TaskAppUsage> = app_map
+            .into_iter()
+            .map(|(app, duration_ms)| {
+                let category = categorize_app(&app.to_ascii_lowercase()).to_string();
+                TaskAppUsage { app, category, duration_ms }
+            })
+            .collect();
+        apps.sort_unstable_by(|a, b| b.duration_ms.cmp(&a.duration_ms));
+
+        // --- AI tools ---
+        let mut ai_tools: Vec<String> = linked
+            .iter()
+            .flat_map(|a| {
+                a.event
+                    .metadata_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| v.get("ai_tools").cloned())
+                    .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+                    .unwrap_or_default()
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        ai_tools.sort();
+
+        // --- Group events into work sessions (30-min gap = new session) ---
+        let session_gap_ms = 30 * 60 * 1_000_i64;
+        let mut sorted_events = linked.clone();
+        sorted_events.sort_unstable_by_key(|a| a.event.started_at);
+
+        let mut work_sessions: Vec<TaskWorkSession> = Vec::new();
+        let mut current_session: Option<(i64, i64, Vec<String>)> = None; // (start, end, apps)
+
+        for activity in &sorted_events {
+            let ev_start = activity.event.started_at;
+            let ev_end = activity.event.ended_at.max(ev_start);
+            let app = activity
+                .event
+                .app
+                .clone()
+                .unwrap_or_else(|| activity.event.source.clone());
+
+            if let Some((sess_start, sess_end, ref mut sess_apps)) = current_session {
+                if ev_start <= sess_end + session_gap_ms {
+                    // extend session
+                    let new_end = ev_end.max(sess_end);
+                    if !sess_apps.contains(&app) {
+                        sess_apps.push(app.clone());
+                    }
+                    current_session = Some((sess_start, new_end, sess_apps.clone()));
+                    continue;
+                } else {
+                    let merged_ms = sess_end - sess_start;
+                    work_sessions.push(TaskWorkSession {
+                        started_at: sess_start,
+                        ended_at: sess_end,
+                        duration_ms: merged_ms.max(0),
+                        apps: sess_apps.clone(),
+                    });
+                }
+            }
+            current_session = Some((ev_start, ev_end, vec![app]));
+        }
+        if let Some((sess_start, sess_end, sess_apps)) = current_session {
+            work_sessions.push(TaskWorkSession {
+                started_at: sess_start,
+                ended_at: sess_end,
+                duration_ms: (sess_end - sess_start).max(0),
+                apps: sess_apps,
+            });
+        }
+        work_sessions.reverse(); // most recent first
+
+        Ok(TaskActivitySummary {
+            task_id,
+            total_ms,
+            linked_count: linked.len() as i64,
+            apps,
+            ai_tools,
+            work_sessions,
+        })
+    }
+
+    /// Return scored candidate source events that are not yet linked to the task
+    /// but likely relate to it, based on keyword overlap with the task title.
+    pub fn suggest_task_links(
+        &self,
+        task_id: i64,
+        limit: usize,
+    ) -> Result<Vec<crate::models::TaskLinkSuggestion>> {
+        use crate::models::TaskLinkSuggestion;
+        // Get task title
+        let conn = self.lock()?;
+        let title: Option<String> = conn
+            .query_row(
+                "SELECT title FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(title) = title else {
+            return Ok(Vec::new());
+        };
+        drop(conn);
+
+        // Extract meaningful keywords (>3 chars, not stop words)
+        let stop_words = [
+            "with", "that", "this", "from", "have", "they", "been", "will", "would", "could",
+            "should", "into", "about", "task", "work", "done", "open", "note",
+        ];
+        let keywords: Vec<String> = title
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 3)
+            .map(|w| w.to_ascii_lowercase())
+            .filter(|w| !stop_words.contains(&w.as_str()))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        if keywords.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Already-linked event ids
+        let already_linked: std::collections::HashSet<String> = self
+            .list_task_activities(task_id)?
+            .into_iter()
+            .map(|a| a.event.id.clone())
+            .collect();
+
+        // Scan last 30 days
+        let thirty_days_ms = 30_i64 * 24 * 60 * 60 * 1_000;
+        let from_ms = now_ms() - thirty_days_ms;
+        let events = self.list_source_events_between(Some(from_ms), None, 5_000)?;
+
+        let mut scored: Vec<(i32, String, crate::models::TaskLinkSuggestion)> = events
+            .into_iter()
+            .filter(|e| !already_linked.contains(&e.id) && e.event_type != "git_commit")
+            .filter_map(|e| {
+                let mut score = 0_i32;
+                let mut reasons: Vec<String> = Vec::new();
+
+                let title_lower = e.title.as_deref().unwrap_or("").to_ascii_lowercase();
+                let ws_lower = e.workspace_key.as_deref().unwrap_or("").to_ascii_lowercase();
+                let domain_lower = e.domain.as_deref().unwrap_or("").to_ascii_lowercase();
+
+                for kw in &keywords {
+                    if title_lower.contains(kw.as_str()) {
+                        score += 10;
+                        if reasons.iter().all(|r: &String| !r.starts_with("title")) {
+                            reasons.push(format!("title matches \"{kw}\""));
+                        }
+                    }
+                    if ws_lower.contains(kw.as_str()) {
+                        score += 10;
+                        if reasons.iter().all(|r: &String| !r.starts_with("project")) {
+                            reasons.push(format!("project path matches \"{kw}\""));
+                        }
+                    }
+                    if !domain_lower.is_empty() && domain_lower.contains(kw.as_str()) {
+                        score += 5;
+                        if reasons.iter().all(|r: &String| !r.starts_with("domain")) {
+                            reasons.push(format!("domain matches \"{kw}\""));
+                        }
+                    }
+                }
+
+                if score == 0 {
+                    return None;
+                }
+
+                let app = e.app.clone().unwrap_or_else(|| e.source.clone());
+                let reason = reasons.join(", ");
+                Some((
+                    score,
+                    e.started_at.to_string(),
+                    TaskLinkSuggestion {
+                        event_id: e.id,
+                        app,
+                        title: e.title,
+                        workspace_key: e.workspace_key,
+                        started_at: e.started_at,
+                        ended_at: e.ended_at,
+                        duration_ms: e.duration_ms,
+                        match_reason: reason,
+                        score,
+                    },
+                ))
+            })
+            .collect();
+
+        scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+        Ok(scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, suggestion)| suggestion)
+            .collect())
+    }
+
     /// Recent recorded activities, optionally filtered by a case-insensitive
     /// substring over title/url/app/domain. Used by the manual-link picker so
     /// users can attach an existing activity to a task after the fact.
