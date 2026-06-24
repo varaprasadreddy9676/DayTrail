@@ -6758,6 +6758,7 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
 
       {/* ── Links & Rules tab ── */}
       {activeTab === "links" && (
+      <>
       <section className="task-links-section">
         <header>
           <h4>Linked activities</h4>
@@ -6982,6 +6983,7 @@ function TaskLinksPanel({ task }: { task: BackendTask }) {
           </button>
         </div>
       </section>
+      </>
       )} {/* end links tab */}
 
       {status && <p className="task-links-status">{status}</p>}
@@ -11454,7 +11456,7 @@ function GoalManagerPanel() {
   const [addMinutes, setAddMinutes] = useState("0");
 
   useEffect(() => {
-    void invokeTauri<BackendDailyGoal[]>("list_daily_goals").then(setGoals).catch(() => null);
+    void invokeTauri<BackendDailyGoal[]>("list_daily_goals").then((g) => setGoals(g ?? [])).catch(() => null);
   }, []);
 
   const save = async () => {
@@ -11469,7 +11471,7 @@ function GoalManagerPanel() {
         dailyTargetMs: targetMs,
       },
     });
-    setGoals((previous) => [...previous, created]);
+    if (created) setGoals((previous) => [...previous, created]);
     setAddLabel("");
     setAddMatch("");
     setAddHours("2");
