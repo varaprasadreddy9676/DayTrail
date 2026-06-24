@@ -3105,6 +3105,38 @@ export default function App() {
     };
   }, []);
 
+  // Detect midnight rollover and laptop-wake: reset "today" date filters so
+  // the timeline doesn't stay pinned to yesterday after the date changes.
+  useEffect(() => {
+    function advanceDateIfStale() {
+      // Use functional setters so we read current state without adding it to
+      // deps (which would restart the interval on every date change).
+      setTimelineRangePreset((preset) => {
+        if (preset !== "today") return preset;
+        const today = formatLocalDateInput(new Date());
+        setTimelineFromDate((prev) => (prev !== today ? today : prev));
+        setTimelineToDate((prev) => (prev !== today ? today : prev));
+        setReviewFromDate((prev) => (prev !== today ? today : prev));
+        setReviewToDate((prev) => (prev !== today ? today : prev));
+        return preset;
+      });
+    }
+
+    function onVisible() {
+      if (document.visibilityState === "visible") advanceDateIfStale();
+    }
+
+    // Check immediately on mount (handles the "app was open from yesterday" case).
+    advanceDateIfStale();
+    // Check every minute for live midnight crossover.
+    const id = window.setInterval(advanceDateIfStale, 60_000);
+    // Check when the user brings the app back to focus (laptop wake / app switch).
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
