@@ -55,6 +55,22 @@ Also verify the installed desktop app manually:
 - Ask AI chat: queries are routed to the relevant captured data and answered by
   the configured LLM; conversation history is maintained within the session;
   eight suggested starter prompts are shown in the empty state.
+- Task Activity Timeline: expanding a task in the Tasks view shows a Timeline
+  tab with total tracked time, per-app breakdown, AI tools, and work sessions
+  grouped by 30-minute gaps; the Links & Rules tab remains accessible via the
+  second tab.
+- Auto-link suggestions: the Timeline tab surfaces scored candidate activities
+  matching the task title's keywords (title, project path, domain); Accept
+  links the activity, Dismiss hides the suggestion for the session.
+- Goal tracking: goals created in Settings → Daily Goals appear as progress
+  bars in the Today view; progress is computed from merged source event
+  intervals for the matching app, project path, or category.
+- Streak & momentum: the Today view shows current consecutive-day streak,
+  best streak in the last 30 days, average daily tracked time, and active day
+  count; the threshold is 30 minutes of tracked time per day.
+- Git commit capture: `git commit -m "..."` commands in the terminal bridge
+  produce a `git_commit` source event; Today view shows a "Code shipped" panel
+  listing commit messages, repo names, branches, and timestamps.
 
 ## Public README And Screenshots
 
@@ -76,6 +92,9 @@ Also verify the installed desktop app manually:
 - README mentions weekly digest, replay/restore, idle recovery, proactive
   insights, Ask AI chat, and interruption-friendly positioning consistently with
   the app UI.
+- README mentions Task Activity Timeline, auto-link suggestions, goal tracking,
+  streak & momentum, and git commit capture with accurate descriptions matching
+  current app behavior.
 - Screenshots use realistic demo data and do not expose secrets, private
   customers, private email addresses, internal IPs, or local-only paths.
 - Platform status and known limitations are accurate for the release being

@@ -63,7 +63,8 @@ DayTrail closes that gap. Not by watching you, but by remembering what your comp
 | Effort | No timers, no manual notes | Start/stop timers and edits | Passive, but opaque |
 | Footprint | Small Tauri + Rust desktop app | Often heavier desktop stacks | Higher CPU/RAM from rich capture |
 | AI | Optional, BYO key or local Ollama | Usually none | Built in, usually subscription-based |
-| Developer context | Apps, tabs, projects, files, terminals, AI tools | Mostly app names and categories | General activity, often screenshot-heavy |
+| Developer context | Apps, tabs, projects, files, terminals, AI tools, git commits | Mostly app names and categories | General activity, often screenshot-heavy |
+| Task evidence | Time proof per task — apps used, work sessions, AI tools, auto-matched activity | Manual time entries | None |
 
 DayTrail is not trying to be surveillance software. It is trying to be a private work memory: enough context to reconstruct your day, without sending your life to someone else's server.
 
@@ -94,6 +95,9 @@ DayTrail shows you the exact moments your attention fragmented — context switc
 
 **How much of your work runs through AI**
 ChatGPT, Claude, Copilot, Cursor — DayTrail tracks all of them as first-class work. You'll know which tools you actually rely on, for how long, and on which projects. As AI becomes woven into how we work, this matters more every week.
+
+**What actually happened on each task**
+Not just "I worked on this task today" — but which apps you used, for how long, across which work sessions, and whether AI tools were involved. Every task becomes evidence-backed. When you need to know if you actually touched something last Tuesday, DayTrail tells you.
 
 **What to say at your standup**
 Source-backed. Specific. No reconstructing from memory the night before.
@@ -167,6 +171,32 @@ One click generates a source-backed report of everything you worked on — sessi
 ![Activity view showing a work session broken down by app and AI tool](docs/screenshots/03-activity.png)
 
 Every work session breaks down into the apps, projects, and AI tools behind it. A single block of time tells the whole story — not just "I worked on Project X" but how you moved through it.
+
+### Task Activity Timeline — tasks with proof of work
+
+Most task apps say "task exists." DayTrail says "here is what actually happened on this task."
+
+When you expand any task, the **Timeline** tab shows the full evidence record: total time tracked, every app involved, work sessions grouped by continuous blocks, and any AI tools detected. No manual logging. The connection between your work and your task list forms automatically.
+
+**Auto-link suggestions** go further. DayTrail scores every unlinked activity against your task's title keywords — if a source event mentions the same project path, domain, or keyword, it surfaces as a candidate. One click links it. One click dismisses it. You decide; DayTrail does the finding.
+
+Over time, tasks become receipts: "Worked 1h 42m across VS Code, GitLab, and Claude. Three sessions, two days."
+
+### Goal Tracking — targets you can actually verify
+
+Set a daily time target for any app, project path, or category ("3h/day on Code", "2h/day on `/Users/me/client-project`", "1h/day on development"). DayTrail tracks progress through the day using the same interval-merged event data that powers the timeline — no double-counting, no inflation from tab switches.
+
+Progress bars appear in the Today view as you work. Add and remove goals in **Settings → Daily Goals**.
+
+### Momentum View — know if the streak is real
+
+At the bottom of the Today view, a streak summary shows how many consecutive days you've had meaningful tracked time (≥ 30 minutes, configurable). Current streak, best streak in the last 30 days, average daily tracked time, and active day count.
+
+It doesn't require habits or manual check-ins. It's just the record, automatically.
+
+### Git Commit Integration — code shipped, captured automatically
+
+If you use the terminal bridge, DayTrail now detects `git commit` commands and captures the commit message, repository, and branch as a first-class event. A **Code shipped** panel in the Today view shows every commit made today — without you doing anything extra.
 
 ### Capture Health — it tells you when something breaks
 
@@ -338,7 +368,8 @@ DayTrail needs **Accessibility** permission to read window titles. Open **Settin
 4. Allow OS notifications for Focus Mode nudges, Smart Breaks, and proactive AI insights.
 5. Set your **working hours** in Settings → Capture Health so DayTrail never asks "were you away?" at midnight.
 6. Add an AI provider in Settings if you want generated digests, proactive insights, and Ask AI answers. Claude, GPT-4, Gemini, or a local Ollama model all work.
-7. Leave DayTrail running from startup. One full workday of capture is when it starts to get interesting.
+7. Optionally add daily time goals in **Settings → Daily Goals** — pick an app, project path, or category and set a target.
+8. Leave DayTrail running from startup. One full workday of capture is when it starts to get interesting.
 
 ---
 
