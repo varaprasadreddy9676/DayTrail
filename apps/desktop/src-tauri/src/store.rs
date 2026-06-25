@@ -2380,6 +2380,12 @@ impl WorktraceStore {
                     settings.min_gap_minutes =
                         value.parse().unwrap_or(settings.min_gap_minutes);
                 }
+                "premium_notifications_enabled" => {
+                    settings.premium_notifications_enabled = matches!(value.as_str(), "1" | "true");
+                }
+                "notification_sound" => {
+                    settings.notification_sound = normalize_notification_sound(&value);
+                }
                 _ => {}
             }
         }
@@ -2601,6 +2607,22 @@ impl WorktraceStore {
             );
             Self::upsert_setting_locked(&conn, "min_gap_minutes", &value.to_string(), &now)?;
         }
+        if let Some(value) = patch.premium_notifications_enabled {
+            Self::upsert_setting_locked(
+                &conn,
+                "premium_notifications_enabled",
+                if value { "true" } else { "false" },
+                &now,
+            )?;
+        }
+        if let Some(value) = patch.notification_sound {
+            let value = normalize_notification_sound(&value);
+            anyhow::ensure!(
+                matches!(value.as_str(), "daytrail" | "glass" | "subtle" | "none"),
+                "notification sound must be daytrail, glass, subtle, or none"
+            );
+            Self::upsert_setting_locked(&conn, "notification_sound", &value, &now)?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -2706,6 +2728,8 @@ impl WorktraceStore {
             work_start_hour: Some(settings.work_start_hour),
             work_end_hour: Some(settings.work_end_hour),
             min_gap_minutes: Some(settings.min_gap_minutes),
+            premium_notifications_enabled: Some(settings.premium_notifications_enabled),
+            notification_sound: Some(settings.notification_sound),
         })?;
 
         {
@@ -13748,6 +13772,15 @@ fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     normalized.sort();
     normalized.dedup();
     normalized
+}
+
+fn normalize_notification_sound(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "glass" => "glass".to_string(),
+        "subtle" => "subtle".to_string(),
+        "none" => "none".to_string(),
+        _ => "daytrail".to_string(),
+    }
 }
 
 fn is_excluded(value: &str, excluded_values: &[String]) -> bool {

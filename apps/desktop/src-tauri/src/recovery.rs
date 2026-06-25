@@ -366,20 +366,17 @@ pub fn evaluate(
         eprintln!("failed to record Smart Break reminder: {error:#}");
     }
 
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app
-        .notification()
-        .builder()
-        .title(
-            decision
-                .title
-                .unwrap_or_else(|| "Give your eyes a reset".to_string()),
-        )
-        .body(decision.body.unwrap_or_else(|| {
+    crate::daytrail_notification::notify(
+        app,
+        Some(store),
+        crate::daytrail_notification::DaytrailNotificationKind::Recovery,
+        decision
+            .title
+            .unwrap_or_else(|| "Give your eyes a reset".to_string()),
+        decision.body.unwrap_or_else(|| {
             "Look away, stand up, or take a two-minute reset before you continue.".to_string()
-        }))
-        .sound(crate::platform::notification_sound())
-        .show();
+        }),
+    );
 }
 
 pub fn record_event(

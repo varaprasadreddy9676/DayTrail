@@ -19,7 +19,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::active_window::ActiveWindowInfo;
+use crate::{active_window::ActiveWindowInfo, store::WorktraceStore};
 
 const DEFAULT_GRACE_SECS: i64 = 45;
 const DEFAULT_COOLDOWN_SECS: i64 = 180;
@@ -293,7 +293,7 @@ pub fn snooze(minutes: u32) -> Option<FocusStatus> {
 /// Called from the capture watcher each tick. Accumulates on/off-task time and
 /// fires a nudge notification when the user has drifted past the grace period.
 /// Auto-ends the session when its duration elapses.
-pub fn evaluate(app: &AppHandle, info: &ActiveWindowInfo) {
+pub fn evaluate(app: &AppHandle, store: &WorktraceStore, info: &ActiveWindowInfo) {
     let nudge: Option<(String, String)> = {
         let Ok(mut guard) = SESSION.lock() else {
             return;
@@ -365,15 +365,14 @@ pub fn evaluate(app: &AppHandle, info: &ActiveWindowInfo) {
     };
 
     if let Some((title, body)) = nudge {
-        use tauri_plugin_notification::NotificationExt;
         focus_log(&format!("nudge: {body}"));
-        let _ = app
-            .notification()
-            .builder()
-            .title(title)
-            .body(body)
-            .sound(crate::platform::notification_sound())
-            .show();
+        crate::daytrail_notification::notify(
+            app,
+            Some(store),
+            crate::daytrail_notification::DaytrailNotificationKind::Focus,
+            title,
+            body,
+        );
     }
 }
 

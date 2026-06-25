@@ -154,6 +154,10 @@ pub struct Settings {
     pub work_end_hour: i64,
     #[serde(default = "default_min_gap_minutes")]
     pub min_gap_minutes: i64,
+    #[serde(default)]
+    pub premium_notifications_enabled: bool,
+    #[serde(default = "default_notification_sound")]
+    pub notification_sound: String,
 }
 
 fn default_experience_mode() -> String {
@@ -182,6 +186,10 @@ fn default_work_end_hour() -> i64 {
 
 fn default_min_gap_minutes() -> i64 {
     10
+}
+
+fn default_notification_sound() -> String {
+    "daytrail".into()
 }
 
 impl Default for Settings {
@@ -213,6 +221,8 @@ impl Default for Settings {
             work_start_hour: default_work_start_hour(),
             work_end_hour: default_work_end_hour(),
             min_gap_minutes: default_min_gap_minutes(),
+            premium_notifications_enabled: false,
+            notification_sound: default_notification_sound(),
         }
     }
 }
@@ -245,6 +255,8 @@ pub struct SettingsPatch {
     pub work_start_hour: Option<i64>,
     pub work_end_hour: Option<i64>,
     pub min_gap_minutes: Option<i64>,
+    pub premium_notifications_enabled: Option<bool>,
+    pub notification_sound: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

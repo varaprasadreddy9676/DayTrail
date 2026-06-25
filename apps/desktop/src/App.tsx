@@ -139,6 +139,18 @@ type BackendSettings = {
   workStartHour?: number;
   workEndHour?: number;
   minGapMinutes?: number;
+  premiumNotificationsEnabled?: boolean;
+  notificationSound?: "daytrail" | "glass" | "subtle" | "none";
+};
+
+type DaytrailNotificationPayload = {
+  id: string;
+  kind: "focus" | "recovery" | "away" | "task" | "insight" | "update" | "info";
+  title: string;
+  body: string;
+  sound: "daytrail" | "glass" | "subtle" | "none";
+  createdAtMs: number;
+  ttlMs: number;
 };
 
 type BackendStorageLocationInfo = {
@@ -885,6 +897,53 @@ function errorMessage(error: unknown) {
   }
 
   return "No error detail returned by desktop bridge";
+}
+
+function playPremiumNotificationSound(sound: DaytrailNotificationPayload["sound"]) {
+  if (sound === "none" || sound === "glass") {
+    return;
+  }
+  const AudioContextCtor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+  try {
+    const context = new AudioContextCtor();
+    const now = context.currentTime;
+    const output = context.createGain();
+    output.gain.setValueAtTime(0.0001, now);
+    output.gain.exponentialRampToValueAtTime(sound === "subtle" ? 0.035 : 0.07, now + 0.018);
+    output.gain.exponentialRampToValueAtTime(0.0001, now + (sound === "subtle" ? 0.2 : 0.34));
+    output.connect(context.destination);
+
+    const primary = context.createOscillator();
+    primary.type = "sine";
+    primary.frequency.setValueAtTime(sound === "subtle" ? 660 : 740, now);
+    primary.frequency.exponentialRampToValueAtTime(sound === "subtle" ? 880 : 1180, now + 0.09);
+    primary.connect(output);
+    primary.start(now);
+    primary.stop(now + (sound === "subtle" ? 0.18 : 0.3));
+
+    if (sound === "daytrail") {
+      const accent = context.createOscillator();
+      const accentGain = context.createGain();
+      accent.type = "triangle";
+      accent.frequency.setValueAtTime(1480, now + 0.06);
+      accentGain.gain.setValueAtTime(0.0001, now + 0.04);
+      accentGain.gain.exponentialRampToValueAtTime(0.035, now + 0.08);
+      accentGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+      accent.connect(accentGain);
+      accentGain.connect(context.destination);
+      accent.start(now + 0.04);
+      accent.stop(now + 0.26);
+    }
+
+    window.setTimeout(() => void context.close().catch(() => undefined), 500);
+  } catch {
+    // Browsers can block audio before interaction. Notification still renders.
+  }
 }
 
 type AiConfig = {
@@ -2654,6 +2713,15 @@ function snoozeDueFields(preset: TaskSnoozePreset) {
 }
 
 const SMART_BREAK_THRESHOLD_OPTIONS = [25, 30, 45, 60, 90] as const;
+const NOTIFICATION_SOUND_OPTIONS: Array<{
+  value: NonNullable<BackendSettings["notificationSound"]>;
+  label: string;
+}> = [
+  { value: "daytrail", label: "DayTrail" },
+  { value: "glass", label: "Glass" },
+  { value: "subtle", label: "Subtle" },
+  { value: "none", label: "Silent" },
+];
 
 function timelineSegmentLabel(label: string, durationMs: number, details?: string[]) {
   const suffix = details && details.length > 0 ? ` · ${details.join(", ")}` : "";
@@ -2818,6 +2886,8 @@ function WorkContextEditorModal({
 export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const [premiumNotification, setPremiumNotification] = useState<DaytrailNotificationPayload | null>(null);
+  const premiumNotificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const addToast = useCallback((kind: ToastKind, title: string, message?: string, dedupeKey?: string) => {
     const id = nextToastId();
@@ -2849,6 +2919,14 @@ export default function App() {
     if (timer) clearTimeout(timer);
     toastTimers.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const dismissPremiumNotification = useCallback(() => {
+    if (premiumNotificationTimer.current) {
+      clearTimeout(premiumNotificationTimer.current);
+      premiumNotificationTimer.current = null;
+    }
+    setPremiumNotification(null);
   }, []);
 
   const [activeView, setActiveView] = useState<ViewKey>("today");
@@ -3276,6 +3354,33 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!hasTauriRuntime() || !hasTauriEventRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    listen<DaytrailNotificationPayload>("daytrail-notification", (event) => {
+      const payload = event.payload;
+      if (!payload?.id || !payload.title) return;
+      if (premiumNotificationTimer.current) {
+        clearTimeout(premiumNotificationTimer.current);
+      }
+      setPremiumNotification(payload);
+      playPremiumNotificationSound(payload.sound);
+      premiumNotificationTimer.current = setTimeout(() => {
+        setPremiumNotification((current) => (current?.id === payload.id ? null : current));
+        premiumNotificationTimer.current = null;
+      }, Math.max(1800, payload.ttlMs || 6200));
+    })
+      .then((fn) => { unlisten = fn; })
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+      if (premiumNotificationTimer.current) {
+        clearTimeout(premiumNotificationTimer.current);
+        premiumNotificationTimer.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isTyping =
@@ -3587,6 +3692,19 @@ export default function App() {
     );
     setSaveState("Settings saved");
     addToast("success", toastTitle, undefined, "settings-save");
+  }
+
+  async function testDayTrailNotification() {
+    if (!hasTauriRuntime()) {
+      addToast("info", "Notification preview", "This preview runs inside the installed DayTrail app.");
+      return;
+    }
+    const sent = await invokeTauri("test_daytrail_notification");
+    if (!sent) {
+      addToast("error", "Notification test failed", "DayTrail could not send the preview notification.");
+      return;
+    }
+    addToast("success", "Notification preview sent");
   }
 
   async function saveLaunchAtLogin(value: boolean) {
@@ -4782,6 +4900,7 @@ export default function App() {
               onSaveRetentionDays={saveRetentionDays}
               onSaveExperienceSettings={saveExperienceSettings}
               onSaveLaunchAtLogin={saveLaunchAtLogin}
+              onTestNotification={testDayTrailNotification}
               permissionStatus={permissionStatus}
               permissionSummary={permissionSummary}
               saveAiConfig={saveAiConfig}
@@ -4812,6 +4931,7 @@ export default function App() {
           setCommandQuery={setCommandQuery}
         />
       )}
+      <PremiumNotificationIsland notification={premiumNotification} onDismiss={dismissPremiumNotification} />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {logOfflineOpen && (
         <div className="offline-modal-backdrop" onClick={() => setLogOfflineOpen(false)}>
@@ -5069,6 +5189,41 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
           <button className="toast-close" onClick={() => onDismiss(toast.id)} type="button" aria-label="Dismiss">×</button>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PremiumNotificationIsland({
+  notification,
+  onDismiss,
+}: {
+  notification: DaytrailNotificationPayload | null;
+  onDismiss: () => void;
+}) {
+  if (!notification) return null;
+  return (
+    <div
+      className="premium-notification-region"
+      role="status"
+      aria-live="polite"
+      aria-label="DayTrail notification"
+    >
+      <div className="premium-notification-island" data-kind={notification.kind}>
+        <span className="premium-notification-glow" aria-hidden="true" />
+        <img className="premium-notification-icon" src="/daytrail-icon.png" alt="" />
+        <div className="premium-notification-copy">
+          <strong>{notification.title}</strong>
+          <span>{notification.body}</span>
+        </div>
+        <button
+          className="premium-notification-close"
+          onClick={onDismiss}
+          type="button"
+          aria-label="Dismiss notification"
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }
@@ -10504,6 +10659,7 @@ function SettingsView({
   onSaveExperienceSettings,
   onSaveLaunchAtLogin,
   onSaveRetentionDays,
+  onTestNotification,
   onTriggerBrowserAutomation,
   permissionStatus,
   permissionSummary,
@@ -10543,6 +10699,7 @@ function SettingsView({
   onSaveExperienceSettings: (patch: Partial<BackendSettings>) => Promise<void>;
   onSaveLaunchAtLogin: (value: boolean) => void;
   onSaveRetentionDays: (days: number) => void;
+  onTestNotification: () => void;
   onTriggerBrowserAutomation: () => void;
   permissionStatus: string;
   permissionSummary: BackendCapturePermissionSummary | null;
@@ -10624,6 +10781,8 @@ function SettingsView({
   const workStartHour = optimisticSettings.workStartHour ?? 9;
   const workEndHour = optimisticSettings.workEndHour ?? 18;
   const minGapMinutes = optimisticSettings.minGapMinutes ?? 10;
+  const premiumNotificationsEnabled = Boolean(optimisticSettings.premiumNotificationsEnabled);
+  const notificationSound = optimisticSettings.notificationSound ?? "daytrail";
 
   return (
     <div className="view-frame settings-view">
@@ -10802,6 +10961,63 @@ function SettingsView({
                   <div className="status-row" data-state="muted">
                     <span>To stop DayTrail completely</span>
                     <strong>Use Quit DayTrail</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <span>Notifications</span>
+                    <h2>Choose how DayTrail nudges you</h2>
+                  </div>
+                  <strong>{premiumNotificationsEnabled ? "Premium island" : "Native"}</strong>
+                </div>
+                <div className="status-matrix">
+                  <label className="settings-toggle-row">
+                    <span>
+                      <strong>Premium notification island</strong>
+                      <em>
+                        Show a compact top-center island with DayTrail glow when the app window is open.
+                        Native notifications still handle background fallback.
+                      </em>
+                    </span>
+                    <input
+                      checked={premiumNotificationsEnabled}
+                      onChange={(event) =>
+                        saveSettingsPatch({ premiumNotificationsEnabled: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                  </label>
+                  <div className="settings-preset-row">
+                    <span>Sound</span>
+                    <div className="settings-preset-buttons" role="group" aria-label="Notification sound">
+                      {NOTIFICATION_SOUND_OPTIONS.map((option) => (
+                        <button
+                          aria-pressed={notificationSound === option.value}
+                          className="settings-preset-button"
+                          key={option.value}
+                          onClick={() => saveSettingsPatch({ notificationSound: option.value })}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="status-row" data-state={premiumNotificationsEnabled ? "ok" : "muted"}>
+                    <span>Island behavior</span>
+                    <strong>Focus, breaks, reminders, insights</strong>
+                  </div>
+                  <div className="status-row" data-state={notificationSound === "none" ? "muted" : "ok"}>
+                    <span>Current sound</span>
+                    <strong>{NOTIFICATION_SOUND_OPTIONS.find((item) => item.value === notificationSound)?.label ?? "DayTrail"}</strong>
+                  </div>
+                  <div className="settings-inline-actions">
+                    <button className="button compact" onClick={onTestNotification} type="button">
+                      <Icon name="ritual" />
+                      Test notification
+                    </button>
                   </div>
                 </div>
               </section>

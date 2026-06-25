@@ -932,6 +932,8 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert_eq!(defaults.data_retention_days, 0);
     assert!(!defaults.recovery_enabled);
     assert_eq!(defaults.recovery_threshold_minutes, 30);
+    assert!(!defaults.premium_notifications_enabled);
+    assert_eq!(defaults.notification_sound, "daytrail");
 
     let updated = store
         .update_settings(SettingsPatch {
@@ -943,6 +945,8 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
             data_retention_days: Some(90),
             recovery_enabled: Some(true),
             recovery_threshold_minutes: Some(45),
+            premium_notifications_enabled: Some(true),
+            notification_sound: Some("subtle".into()),
             ..SettingsPatch::default()
         })
         .expect("update display settings");
@@ -955,6 +959,16 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert_eq!(updated.data_retention_days, 90);
     assert!(updated.recovery_enabled);
     assert_eq!(updated.recovery_threshold_minutes, 45);
+    assert!(updated.premium_notifications_enabled);
+    assert_eq!(updated.notification_sound, "subtle");
+
+    let normalized = store
+        .update_settings(SettingsPatch {
+            notification_sound: Some("unknown".into()),
+            ..SettingsPatch::default()
+        })
+        .expect("normalize unknown sound");
+    assert_eq!(normalized.notification_sound, "daytrail");
 }
 
 #[test]

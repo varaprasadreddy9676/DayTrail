@@ -1,6 +1,7 @@
 pub mod active_window;
 pub mod app_icons;
 pub mod commands;
+pub mod daytrail_notification;
 pub mod error;
 pub mod focus;
 pub mod llm;
@@ -21,6 +22,7 @@ use tauri::{Manager, RunEvent};
 
 use crate::{
     active_window::spawn_active_window_watcher,
+    daytrail_notification::DaytrailNotificationKind,
     models::Task,
     store::WorktraceStore,
     tray::{setup_tray, show_main_window},
@@ -163,14 +165,13 @@ fn spawn_task_reminder_scheduler(store: WorktraceStore, app: tauri::AppHandle, i
             continue;
         };
         for task in tasks {
-            post_task_reminder(&app, &task);
+            post_task_reminder(&app, &store, &task);
             let _ = store.mark_task_reminder_sent(task.id, now);
         }
     });
 }
 
-fn post_task_reminder(app: &tauri::AppHandle, task: &Task) {
-    use tauri_plugin_notification::NotificationExt;
+fn post_task_reminder(app: &tauri::AppHandle, store: &WorktraceStore, task: &Task) {
     let title = if task.title.trim().is_empty() {
         "Reminder due"
     } else {
@@ -189,13 +190,7 @@ fn post_task_reminder(app: &tauri::AppHandle, task: &Task) {
         .map(str::trim)
         .or_else(|| (!context.is_empty()).then_some(context.as_str()))
         .unwrap_or("Due now - open DayTrail to complete or snooze.");
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .sound(crate::platform::notification_sound())
-        .show();
+    crate::daytrail_notification::notify(app, Some(store), DaytrailNotificationKind::Task, title, body);
 }
 
 /// Record every panic to a crash log before the default handler runs, so a
@@ -285,7 +280,7 @@ fn spawn_insight_scheduler(store: WorktraceStore, app: tauri::AppHandle, interva
                     Ok(Ok(insights)) => {
                         for insight in &insights {
                             if insight.priority == "high" {
-                                post_proactive_insight(&app, insight);
+                                post_proactive_insight(&app, &store, insight);
                             }
                         }
                     }
@@ -298,15 +293,18 @@ fn spawn_insight_scheduler(store: WorktraceStore, app: tauri::AppHandle, interva
     });
 }
 
-fn post_proactive_insight(app: &tauri::AppHandle, insight: &crate::models::ProactiveInsight) {
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app
-        .notification()
-        .builder()
-        .title(&insight.title)
-        .body(&insight.body)
-        .sound(crate::platform::notification_sound())
-        .show();
+fn post_proactive_insight(
+    app: &tauri::AppHandle,
+    store: &WorktraceStore,
+    insight: &crate::models::ProactiveInsight,
+) {
+    crate::daytrail_notification::notify(
+        app,
+        Some(store),
+        DaytrailNotificationKind::Insight,
+        &insight.title,
+        &insight.body,
+    );
 }
 
 /// Strip the macOS quarantine xattr from the running app bundle. This removes

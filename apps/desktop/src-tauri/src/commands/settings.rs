@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::{
     app_icons::app_icon_data_url,
+    daytrail_notification::{self, DaytrailNotificationKind},
     error::CommandError,
     models::{DatabaseTransferResult, Settings, SettingsPatch, StorageLocationInfo},
     store::WorktraceStore,
@@ -45,6 +46,21 @@ pub fn update_settings(
     patch: SettingsPatch,
 ) -> Result<Settings, CommandError> {
     store.update_settings(patch).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn test_daytrail_notification(
+    app: AppHandle,
+    store: State<'_, WorktraceStore>,
+) -> Result<(), CommandError> {
+    daytrail_notification::notify(
+        &app,
+        Some(&store),
+        DaytrailNotificationKind::Info,
+        "DayTrail notification preview",
+        "Premium island and sound settings are working. Native fallback remains available in the background.",
+    );
+    Ok(())
 }
 
 #[tauri::command]

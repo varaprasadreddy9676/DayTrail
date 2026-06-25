@@ -14,10 +14,15 @@ const SERVICE_NAME: &str = "ai.daytrail.desktop";
 /// sound" so a nudge feels intentional, not like a silent system blip. macOS
 /// "Glass" is a crisp, premium-feeling chime; Windows/Linux use their pleasant
 /// default notification sound.
-pub(crate) fn notification_sound() -> &'static str {
+pub(crate) fn notification_sound_named(sound: &str) -> &'static str {
+    let sound = sound.trim().to_ascii_lowercase();
     #[cfg(target_os = "macos")]
     {
-        "Glass"
+        match sound.as_str() {
+            "glass" => "Glass",
+            "subtle" => "Pop",
+            _ => "Glass",
+        }
     }
     #[cfg(target_os = "windows")]
     {
@@ -25,7 +30,10 @@ pub(crate) fn notification_sound() -> &'static str {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        "message-new-instant"
+        match sound.as_str() {
+            "subtle" => "message",
+            _ => "message-new-instant",
+        }
     }
 }
 

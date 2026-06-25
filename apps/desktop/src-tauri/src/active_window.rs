@@ -126,7 +126,7 @@ fn watcher_tick(
         if let Err(error) = store.record_idle_gap_candidate("resume", started_at, now_epoch) {
             watcher_log(&format!("idle candidate skipped after resume: {error}"));
         }
-        maybe_notify_away(app, wall_gap_ms);
+        maybe_notify_away(app, store, wall_gap_ms);
     }
 
     let can_record = should_record(idle_ms, IDLE_SKIP_THRESHOLD_MS);
@@ -186,7 +186,7 @@ fn watcher_tick(
 
     // Focus Mode: nudge if the user has drifted onto a distraction. No-op unless
     // a focus session is active.
-    crate::focus::evaluate(app, &info);
+    crate::focus::evaluate(app, store, &info);
     // Smart Breaks: local-only nudges after long uninterrupted screen
     // work. No-op while paused or idle.
     crate::recovery::evaluate(app, store, Some(&info), can_record, idle_ms);
@@ -300,26 +300,22 @@ const AWAY_NOTIFY_THRESHOLD_MS: i64 = 10 * 60 * 1000;
 /// After the process resumes from a long suspension (laptop sleep), post a
 /// native notification so the user can classify the away time — even if
 /// DayTrail's window was closed. Best-effort and non-fatal.
-fn maybe_notify_away(app: &AppHandle, gap_ms: i64) {
+fn maybe_notify_away(app: &AppHandle, store: &WorktraceStore, gap_ms: i64) {
     if gap_ms < AWAY_NOTIFY_THRESHOLD_MS {
         return;
     }
-    use tauri_plugin_notification::NotificationExt;
     let body = format!(
         "You were away about {}. Open DayTrail to log it as a meeting, break, or offline work.",
         humanize_duration_ms(gap_ms)
     );
-    match app
-        .notification()
-        .builder()
-        .title("Welcome back to DayTrail")
-        .body(&body)
-        .sound(crate::platform::notification_sound())
-        .show()
-    {
-        Ok(()) => watcher_log(&format!("away notification posted ({gap_ms}ms gap)")),
-        Err(error) => watcher_log(&format!("away notification failed: {error}")),
-    }
+    crate::daytrail_notification::notify(
+        app,
+        Some(store),
+        crate::daytrail_notification::DaytrailNotificationKind::Away,
+        "Welcome back to DayTrail",
+        &body,
+    );
+    watcher_log(&format!("away notification queued ({gap_ms}ms gap)"));
 }
 
 /// Humanize a millisecond duration as e.g. "27m" or "1h 34m". Pure for testing.

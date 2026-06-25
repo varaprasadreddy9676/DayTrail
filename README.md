@@ -114,7 +114,9 @@ Built with Tauri + Rust — no bundled Chromium runtime. DayTrail runs quietly i
 
 ![Focus Mode sidebar controls with focus label and duration choices](docs/screenshots/07-focus-mode.png)
 
-Start a focus block — 25, 50, or 90 minutes — and DayTrail sends a gentle native notification when you've drifted to YouTube, Reddit, WhatsApp, or other distractions. It reminds you. It never blocks apps. It never judges. And every session is saved, so you can review later whether the block actually stayed on track.
+Start a focus block — 25, 50, or 90 minutes — and DayTrail sends a gentle notification when you've drifted to YouTube, Reddit, WhatsApp, or other distractions. It reminds you. It never blocks apps. It never judges. And every session is saved, so you can review later whether the block actually stayed on track.
+
+By default these are quiet native OS notifications. If you want something more polished, enable **Premium notification island** in Settings → Capture Health. DayTrail then shows compact Dynamic Island-style nudges with a subtle glow when the app window is visible, falls back to native notifications in the background, and lets you choose DayTrail, Glass, Subtle, or Silent sounds.
 
 The difference between a nudge at minute three and discovering the drift at hour two is enormous.
 
@@ -140,7 +142,7 @@ Examples of insights DayTrail can surface:
 - You have two open commitments that haven't been touched in four days
 - Your AI tool usage doubled but the project output didn't
 
-High-priority insights fire an OS notification. All of them live in the Insights view — dismissable, filterable, with a one-click "Explore in chat" button that takes you directly into a conversation about what was found.
+High-priority insights fire a notification. All of them live in the Insights view — dismissable, filterable, with a one-click "Explore in chat" button that takes you directly into a conversation about what was found.
 
 ![Native macOS notification from DayTrail showing a proactive AI usage insight](docs/screenshots/09-proactive-notification.png)
 
@@ -154,7 +156,7 @@ DayTrail also tracks which AI tools you actually rely on, for how long, and on w
 
 ### Smart Breaks — sustainable work without another dashboard
 
-Enabled optionally in Settings. When turned on, DayTrail watches the same foreground-window signals it already uses and notices when you've been at it for a while. It sends blink reminders, posture resets, and short break prompts — at the interval you choose. It stays quiet during calls, presentation-like contexts, or when you step away. No extra card on your Today screen. No medical claims. Just the kind of nudge a good colleague might give you.
+Enabled optionally in Settings. When turned on, DayTrail watches the same foreground-window signals it already uses and notices when you've been at it for a while. It sends blink reminders, posture resets, and short break prompts — at the interval you choose, using your native notification style or the optional premium island. It stays quiet during calls, presentation-like contexts, or when you step away. No extra card on your Today screen. No medical claims. Just the kind of nudge a good colleague might give you.
 
 ### Replay / restore — pick up exactly where you were
 
@@ -365,7 +367,7 @@ DayTrail needs **Accessibility** permission to read window titles. Open **Settin
 1. Install the app and grant macOS Accessibility (or Windows equivalent) when prompted.
 2. Enable browser extension support if you want tab titles and domains.
 3. Install editor and terminal integrations for project and file context.
-4. Allow OS notifications for Focus Mode nudges, Smart Breaks, and proactive AI insights.
+4. Allow OS notifications for Focus Mode nudges, Smart Breaks, proactive AI insights, and task reminders.
 5. Set your **working hours** in Settings → Capture Health so DayTrail never asks "were you away?" at midnight.
 6. Add an AI provider in Settings if you want generated digests, proactive insights, and Ask AI answers. Claude, GPT-4, Gemini, or a local Ollama model all work.
 7. Optionally add daily time goals in **Settings → Daily Goals** — pick an app, project path, or category and set a target.
