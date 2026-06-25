@@ -1,5 +1,6 @@
 import { invoke as invokeTauriCore } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11788,10 +11789,24 @@ type UpdateState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "available"; update: Update }
+  | { phase: "manual_available"; info: BackendUpdateInfo; pluginError: string }
   | { phase: "downloading"; downloaded: number; total: number | null }
   | { phase: "ready" }
   | { phase: "error"; message: string }
-  | { phase: "up_to_date" };
+  | { phase: "up_to_date"; message?: string };
+
+type BackendUpdateInfo = {
+  currentVersion: string;
+  currentBuildUnix?: number | null;
+  latestVersion?: string | null;
+  latestBuildAt?: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  downloadUrl?: string | null;
+  releaseNotes?: string | null;
+  error?: string | null;
+  homebrewManaged: boolean;
+};
 
 const UPDATE_SNOOZE_KEY = "daytrail:update:snoozedUntil:";
 const UPDATE_SNOOZE_MS = 8 * 60 * 60 * 1000;
@@ -11809,6 +11824,19 @@ function snooze(version: string) {
   try { localStorage.setItem(updateSnoozeKey(version), String(Date.now() + UPDATE_SNOOZE_MS)); } catch { /* */ }
 }
 
+async function openExternalUrl(url?: string | null) {
+  if (!url) return;
+  try {
+    if (hasTauriRuntime()) {
+      await openUrl(url);
+      return;
+    }
+  } catch (error) {
+    console.warn("Could not open URL with Tauri opener", error);
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
   const [version, setVersion] = useState<string | null>(null);
   const [state, setState] = useState<UpdateState>({ phase: "idle" });
@@ -11824,6 +11852,7 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
     try {
       const update = await checkUpdate();
       if (!update?.available) {
+        updateRef.current = null;
         setState({ phase: "up_to_date" });
         if (silent) setTimeout(() => setState({ phase: "idle" }), 3000);
         return;
@@ -11835,8 +11864,33 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
       updateRef.current = update;
       setState({ phase: "available", update });
     } catch (err) {
-      setState({ phase: "error", message: errorMessage(err) });
-      if (silent) setTimeout(() => setState({ phase: "idle" }), 4000);
+      const pluginError = errorMessage(err);
+      updateRef.current = null;
+      const fallback = await invokeTauri<BackendUpdateInfo>("check_for_updates");
+      if (fallback?.updateAvailable) {
+        const fallbackVersion = fallback.latestVersion ?? "";
+        if (fallbackVersion && isSnoozed(fallbackVersion)) {
+          setState({ phase: "idle" });
+          return;
+        }
+        setState({ phase: "manual_available", info: fallback, pluginError });
+        return;
+      }
+      const fallbackError = fallback?.error?.trim();
+      if (fallback && !fallbackError) {
+        setState({
+          phase: "up_to_date",
+          message: `GitHub release check succeeded, but the signed updater is unavailable: ${pluginError}`,
+        });
+      } else {
+        setState({
+          phase: "error",
+          message: fallbackError
+            ? `${pluginError} Fallback release check also failed: ${fallbackError}`
+            : pluginError,
+        });
+      }
+      if (silent) setTimeout(() => setState({ phase: "idle" }), 8000);
     }
   }, []);
 
@@ -11889,12 +11943,21 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
   }
 
   function handleSnooze() {
-    if (updateRef.current) snooze(updateRef.current.version ?? "");
+    if (updateRef.current) {
+      snooze(updateRef.current.version ?? "");
+    } else if (state.phase === "manual_available" && state.info.latestVersion) {
+      snooze(state.info.latestVersion);
+    }
     setState({ phase: "idle" });
   }
 
   async function handleRestart() {
     await relaunch();
+  }
+
+  async function handleManualDownload() {
+    if (state.phase !== "manual_available") return;
+    await openExternalUrl(state.info.downloadUrl ?? state.info.releaseUrl);
   }
 
   // Settings card (always visible in Settings → About).
@@ -11911,24 +11974,45 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
           {state.phase === "checking" ? "Checking…" : "Check now"}
         </button>
       </div>
-      <span className="settings-about-copy">
-        {state.phase === "up_to_date" ? "Up to date." :
-         state.phase === "error" ? "Couldn't check right now." :
-         "Checks on startup and when you return to the app. Snooze for 8h."}
-      </span>
+      <div className="settings-about-copy">
+        <span>
+          {state.phase === "up_to_date" ? "Up to date." :
+           state.phase === "error" ? "Couldn't check right now." :
+           state.phase === "manual_available" ? "A new version is available. Open the release to update." :
+           "Checks on startup and when you return to the app. Snooze for 8h."}
+        </span>
+        {(state.phase === "error" || (state.phase === "up_to_date" && state.message)) && (
+          <span className="settings-about-error-detail">{state.message}</span>
+        )}
+      </div>
     </div>
   );
 
-  if (state.phase !== "available" && state.phase !== "downloading" && state.phase !== "ready") {
+  if (
+    state.phase !== "available" &&
+    state.phase !== "manual_available" &&
+    state.phase !== "downloading" &&
+    state.phase !== "ready"
+  ) {
     return dialogOnly ? null : card;
   }
 
   const update = updateRef.current;
-  const headline = update?.version ? `DayTrail ${update.version} is available` : "A new DayTrail build is available";
-  const notes = update?.body?.trim() ?? "";
+  const manualInfo = state.phase === "manual_available" ? state.info : null;
+  const availableVersion = update?.version ?? manualInfo?.latestVersion ?? null;
+  const headline = availableVersion ? `DayTrail ${availableVersion} is available` : "A new DayTrail build is available";
+  const notes = update?.body?.trim() ?? manualInfo?.releaseNotes?.trim() ?? "";
   const pct = state.phase === "downloading" && state.total
     ? Math.round((state.downloaded / state.total) * 100)
     : null;
+  const dialogCopy =
+    state.phase === "ready"
+      ? "Update installed. Restart to run the new version."
+      : state.phase === "downloading"
+        ? pct !== null ? `Downloading… ${pct}%` : "Downloading…"
+        : state.phase === "manual_available"
+          ? "The signed in-app updater could not run on this build. Download the latest release from GitHub to update safely."
+          : "DayTrail will download and install the update for you.";
 
   return (
     <>
@@ -11945,13 +12029,7 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
             <img alt="" className="update-dialog-icon" src="/daytrail-icon.png" />
             <div className="update-dialog-heading">
               <h3 id="update-dialog-title">{headline}</h3>
-              <p className="update-dialog-copy">
-                {state.phase === "ready"
-                  ? "Update installed. Restart to run the new version."
-                  : state.phase === "downloading"
-                    ? pct !== null ? `Downloading… ${pct}%` : "Downloading…"
-                    : "DayTrail will download and install the update for you."}
-              </p>
+              <p className="update-dialog-copy">{dialogCopy}</p>
             </div>
           </div>
 
@@ -11966,10 +12044,17 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
 
           <dl className="update-dialog-versions">
             {version && <div><dt>Current</dt><dd>v{version}</dd></div>}
-            {update?.version && <div><dt>Available</dt><dd>v{update.version}</dd></div>}
+            {availableVersion && <div><dt>Available</dt><dd>v{availableVersion}</dd></div>}
           </dl>
 
-          {notes && state.phase === "available" && (
+          {state.phase === "manual_available" && (
+            <div className="update-dialog-warning">
+              <span>Signed updater detail</span>
+              <code>{state.pluginError}</code>
+            </div>
+          )}
+
+          {notes && (state.phase === "available" || state.phase === "manual_available") && (
             <div className="update-dialog-notes" aria-label="Release notes">
               <span className="update-dialog-notes-label">What's new</span>
               <pre className="update-dialog-notes-body">{notes}</pre>
@@ -11985,6 +12070,10 @@ function UpdateChecker({ dialogOnly = false }: { dialogOnly?: boolean }) {
             {state.phase === "ready" ? (
               <button className="button compact primary" onClick={handleRestart} type="button">
                 Restart now
+              </button>
+            ) : state.phase === "manual_available" ? (
+              <button className="button compact primary" onClick={handleManualDownload} type="button">
+                Open download
               </button>
             ) : (
               <button className="button compact primary" onClick={handleInstall} disabled={state.phase === "downloading"} type="button">

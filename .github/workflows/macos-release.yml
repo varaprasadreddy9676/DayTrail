@@ -158,6 +158,8 @@ jobs:
           if-no-files-found: error
           path: |
             apps/desktop/src-tauri/target/release/bundle/macos/*.app
+            apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
             apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
 
       - name: Resolve release upload target
@@ -209,24 +211,44 @@ jobs:
           version="${TAG#v}"
           sig_file=$(ls apps/desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig)
           archive_name="$(basename "${sig_file%.sig}")"
-          signature=$(cat "$sig_file")
           pub_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           base_url="https://github.com/varaprasadreddy9676/DayTrail/releases/download/${TAG}"
+          latest_path="/tmp/latest.json"
 
-          cat > /tmp/latest.json <<EOF
-          {
-            "version": "${version}",
-            "pub_date": "${pub_date}",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${signature}",
-                "url": "${base_url}/${archive_name}"
-              }
-            }
-          }
+          if ! gh release download "${TAG}" --pattern "latest.json" --output "${latest_path}" --clobber 2>/dev/null; then
+            cat > "${latest_path}" <<EOF
+          {"version":"${version}","pub_date":"${pub_date}","platforms":{}}
           EOF
+          fi
 
-          gh release upload "${TAG}" /tmp/latest.json --clobber
+          LATEST_PATH="${latest_path}" \
+          VERSION="${version}" \
+          PUB_DATE="${pub_date}" \
+          SIGNATURE_FILE="${sig_file}" \
+          ARCHIVE_URL="${base_url}/${archive_name}" \
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = process.env.LATEST_PATH;
+          const data = JSON.parse(fs.readFileSync(path, "utf8"));
+          data.version = process.env.VERSION;
+          data.pub_date = process.env.PUB_DATE;
+          data.platforms = data.platforms || {};
+          data.platforms["darwin-aarch64"] = {
+            signature: fs.readFileSync(process.env.SIGNATURE_FILE, "utf8").trim(),
+            url: process.env.ARCHIVE_URL,
+          };
+          fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+          NODE
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const data = JSON.parse(fs.readFileSync("/tmp/latest.json", "utf8"));
+          if (!data.platforms?.["darwin-aarch64"]?.signature || !data.platforms?.["darwin-aarch64"]?.url) {
+            throw new Error("latest.json is missing darwin-aarch64 updater metadata");
+          }
+          NODE
+
+          gh release upload "${TAG}" "${latest_path}" --clobber
 
       - name: Update Homebrew cask
         if: steps.release_target.outputs.tag != ''

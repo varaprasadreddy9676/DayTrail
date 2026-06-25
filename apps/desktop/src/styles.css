@@ -7197,11 +7197,19 @@ textarea {
   color: var(--text-muted);
   font-size: 11px;
   line-height: 14px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
 }
 
 .settings-about-result {
   font-size: 12px;
   opacity: 0.85;
+}
+
+.settings-about-error-detail {
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
 }
 
 /* ── Update available dialog ──────────────────────────────────────────── */
@@ -7325,6 +7333,28 @@ textarea {
   color: var(--text-main);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.update-dialog-warning {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 40%, var(--border-subtle));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-control));
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.update-dialog-warning span {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.update-dialog-warning code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .update-dialog-actions {

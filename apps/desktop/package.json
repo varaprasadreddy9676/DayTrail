@@ -1,6 +1,6 @@
 {
   "name": "@daytrail/desktop",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "private": false,
   "description": "Local-first DayTrail desktop app with work memory, AI review, timesheets, and optional Smart Break nudges.",
   "license": "MIT OR Apache-2.0",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^18.3.1",

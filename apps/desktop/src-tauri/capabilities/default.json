@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "notification:default",
+    "process:default",
+    "updater:default",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://github.com/*" }, { "url": "https://ko-fi.com/*" }]
