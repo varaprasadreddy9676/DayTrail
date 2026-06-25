@@ -46,7 +46,7 @@ Also verify the installed desktop app manually:
 - In-app updater metadata is complete: the release `latest.json` is reachable
   from `/releases/latest/download/latest.json` and includes both
   `darwin-aarch64` and `windows-x86_64` platform entries with signed updater
-  archive URLs.
+  package URLs.
 - Daily report, weekly digest, and replay/restore flows generate source-backed
   output from the expected local date range, including weekly Smart Breaks.
 - Report generate buttons disable and show a loading state during LLM calls;
