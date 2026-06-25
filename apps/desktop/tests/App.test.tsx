@@ -506,6 +506,135 @@ describe("DayTrail command center", () => {
     expect(invoke).toHaveBeenCalledWith("delete_task", { id: 42 });
   });
 
+  it("moves a completed task into the Completed recently section", async () => {
+    const user = userEvent.setup();
+    const settings = { browserBridgeEnabled: true, excludedDomains: [] };
+    const openTask = {
+      id: 55,
+      title: "Tally Integration Avant BKG",
+      status: "open",
+      dueDate: null,
+      dueAt: null,
+      notes: null,
+      priority: "high",
+      source: "bulk-import",
+      projectPath: null,
+      clientLabel: null,
+      projectLabel: null,
+      reminderSentAt: null,
+      createdAt: "2026-06-25T08:00:00Z",
+      updatedAt: "2026-06-25T08:00:00Z",
+    };
+    const doneTask = { ...openTask, status: "done" };
+    let todayCallCount = 0;
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        todayCallCount += 1;
+        // First load: task is open. After complete_task refresh: task is done.
+        const tasks = todayCallCount === 1 ? [openTask] : [doneTask];
+        return {
+          localDate: "2026-06-25",
+          tasks,
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings,
+          projectContext: null,
+        };
+      }
+      if (command === "complete_task") {
+        return doneTask;
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: { invoke: invoke as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T> },
+    };
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^my tasks$/i }));
+
+    expect(await screen.findByText(/tally integration avant bkg/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^open tasks list$/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^completed recently list$/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^complete$/i }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("complete_task", { id: 55 }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^completed recently list$/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText(/^open tasks list$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 item/i)).toBeInTheDocument();
+  });
+
+  it("keeps completed tasks list scrollable when it has many items", async () => {
+    const user = userEvent.setup();
+    const doneTasks = Array.from({ length: 8 }, (_, i) => ({
+      id: i + 1,
+      title: `Completed integration ${i + 1}`,
+      status: "done",
+      dueDate: null,
+      dueAt: null,
+      notes: null,
+      priority: "medium",
+      source: "bulk-import",
+      projectPath: null,
+      clientLabel: null,
+      projectLabel: null,
+      reminderSentAt: null,
+      createdAt: "2026-06-25T08:00:00Z",
+      updatedAt: "2026-06-25T09:00:00Z",
+    }));
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "today") {
+        return {
+          localDate: "2026-06-25",
+          tasks: doneTasks,
+          quickNotes: [],
+          commitments: [],
+          pendingReplies: [],
+          aiOutputs: [],
+          meetings: [],
+          fieldVisits: [],
+          idleBlocks: [],
+          sourceEvents: [],
+          workSessions: [],
+          parallelStreams: [],
+          nextBestAction: null,
+          pauseState: { paused: false },
+          settings: { browserBridgeEnabled: true, excludedDomains: [] },
+          projectContext: null,
+        };
+      }
+      return null;
+    });
+
+    window.__TAURI__ = {
+      core: { invoke: invoke as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T> },
+    };
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^my tasks$/i }));
+
+    const completedList = await screen.findByLabelText(/^completed recently list$/i);
+    expect(completedList).toBeInTheDocument();
+    expect(completedList).toHaveAttribute("data-scrollable", "true");
+    expect(completedList).toHaveAttribute("tabindex", "0");
+  });
+
   it("keeps the open tasks list scrollable when many tasks exist", async () => {
     const user = userEvent.setup();
     const tasks = Array.from({ length: 12 }, (_, index) => ({
