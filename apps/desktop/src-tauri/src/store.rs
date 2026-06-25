@@ -2969,6 +2969,22 @@ impl WorktraceStore {
             tasks.push(row?);
         }
         drop(stmt);
+        let mut done_stmt = conn.prepare(
+            r#"
+            SELECT id, title, status, due_date, due_at, notes, priority, source,
+                   project_path, client_label, project_label, reminder_sent_at,
+                   created_at, updated_at
+            FROM tasks
+            WHERE status = 'done'
+            ORDER BY updated_at DESC
+            LIMIT 20
+            "#,
+        )?;
+        let done_rows = done_stmt.query_map([], Self::task_from_row)?;
+        for row in done_rows {
+            tasks.push(row?);
+        }
+        drop(done_stmt);
         drop(conn);
 
         let mut work_sessions =

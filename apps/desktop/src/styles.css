@@ -107,7 +107,7 @@ dd {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-columns: 155px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
@@ -6249,7 +6249,7 @@ textarea {
 
 @media (max-width: 1280px) {
   .app-shell {
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: 155px minmax(0, 1fr);
   }
 
   .today-split,
