@@ -7675,7 +7675,6 @@ textarea {
 .tasks-section {
   display: grid;
   min-height: 0;
-  overflow: hidden;
 }
 
 .tasks-section-head {
