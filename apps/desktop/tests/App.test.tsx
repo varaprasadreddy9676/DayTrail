@@ -236,7 +236,7 @@ describe("DayTrail command center", () => {
 
   it("creates a new manual task without an implicit due date or reminder", async () => {
     const user = userEvent.setup();
-    const createTaskMock = vi.fn().mockResolvedValue({
+    const createTaskMock = vi.fn(async (_args?: Record<string, unknown>): Promise<TestTask> => ({
       id: 71,
       title: "Unscheduled follow-up",
       status: "open",
@@ -252,7 +252,7 @@ describe("DayTrail command center", () => {
       completedAt: null,
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
-    });
+    }));
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       switch (command) {
         case "today":
@@ -373,7 +373,7 @@ describe("DayTrail command center", () => {
   it("manages overall tasks and reminders from My Tasks", async () => {
     const user = userEvent.setup();
     const settings = { browserBridgeEnabled: true, excludedDomains: [] };
-    const openTask = {
+    const openTask: TestTask = {
       id: 42,
       title: "Renew vendor contract",
       status: "open",
@@ -390,7 +390,7 @@ describe("DayTrail command center", () => {
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
     };
-    const completedTask = {
+    const completedTask: TestTask = {
       id: 44,
       title: "Ship release notes",
       status: "done",
@@ -407,7 +407,7 @@ describe("DayTrail command center", () => {
       createdAt: "2026-06-01T09:00:00Z",
       updatedAt: "2026-06-02T14:00:00Z",
     };
-    let mockedTasks = [openTask, completedTask];
+    let mockedTasks: TestTask[] = [openTask, completedTask];
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
@@ -431,7 +431,7 @@ describe("DayTrail command center", () => {
       }
       if (command === "create_task") {
         const input = args?.input as { title: string; dueDate?: string | null; dueAt?: number | null; priority?: string };
-        const created = {
+        const created: TestTask = {
           ...openTask,
           id: 43 + mockedTasks.length,
           title: input.title,
@@ -443,8 +443,8 @@ describe("DayTrail command center", () => {
         return created;
       }
       if (command === "update_task") {
-        const input = args?.input as Partial<typeof openTask> & { title: string };
-        const updated = { ...openTask, ...input, id: args?.id as number };
+        const input = args?.input as Partial<TestTask> & { title: string };
+        const updated: TestTask = { ...openTask, ...input, id: args?.id as number };
         mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? updated : task));
         return updated;
       }
@@ -472,7 +472,7 @@ describe("DayTrail command center", () => {
       }
       if (command === "complete_task") {
         const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
-        const completed = {
+        const completed: TestTask = {
           ...current,
           status: "done",
           completedAt: "2026-06-02T16:00:00Z",
@@ -483,7 +483,7 @@ describe("DayTrail command center", () => {
       }
       if (command === "snooze_task") {
         const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
-        const snoozed = { ...current, status: "open", dueAt: args?.dueAt as number };
+        const snoozed: TestTask = { ...current, status: "open", dueAt: args?.dueAt as number };
         mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? snoozed : task));
         return snoozed;
       }
@@ -1777,8 +1777,8 @@ describe("DayTrail command center", () => {
         taskRetentionDays: 0,
       };
     });
-    const pruneCapturedDataMock = vi.fn().mockResolvedValue({ deletedRows: 3 });
-    const importSettingsConfigMock = vi.fn().mockResolvedValue({
+    const pruneCapturedDataMock = vi.fn(async (_args?: Record<string, unknown>) => ({ deletedRows: 3 }));
+    const importSettingsConfigMock = vi.fn(async (_args?: Record<string, unknown>) => ({
       browserBridgeEnabled: true,
       excludedDomains: ["private.example.com"],
       aiProvider: "Ollama Local",
@@ -1786,14 +1786,14 @@ describe("DayTrail command center", () => {
       aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
       aiRedactSecrets: true,
       fullClipboardHistory: false,
-    });
-    const restoreDatabaseMock = vi.fn().mockResolvedValue({
+    }));
+    const restoreDatabaseMock = vi.fn(async (_args?: Record<string, unknown>) => ({
       path: "/tmp/daytrail-import.sqlite3",
       bytes: 4096,
       generatedAt: "2026-05-23T08:06:00Z",
       preRestoreBackupPath:
         "/Users/alice/Library/Application Support/ai.daytrail.desktop/backups/daytrail-backup-before-restore.sqlite3",
-    });
+    }));
 
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
@@ -2008,7 +2008,7 @@ describe("DayTrail command center", () => {
           : check,
       ),
     };
-    const openCapturePermissionSettingsMock = vi.fn().mockResolvedValue(grantedPermissions);
+    const openCapturePermissionSettingsMock = vi.fn(async (_args?: Record<string, unknown>) => grantedPermissions);
 
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
@@ -2143,7 +2143,18 @@ type TestTask = {
   id: number;
   title: string;
   status: "open" | "done";
+  dueDate?: string | null;
+  dueAt?: number | null;
+  notes?: string | null;
   priority?: string;
+  source?: string;
+  projectPath?: string | null;
+  clientLabel?: string | null;
+  projectLabel?: string | null;
+  reminderSentAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 function snapshotWithTasks(tasks: TestTask[]) {
