@@ -133,6 +133,7 @@ type BackendSettings = {
   showCaptureConfidence?: boolean;
   showAiDetails?: "summary" | "detailed";
   dataRetentionDays?: number;
+  taskRetentionDays?: number;
   recoveryEnabled?: boolean;
   recoveryThresholdMinutes?: number;
   workHoursEnabled?: boolean;
@@ -342,6 +343,7 @@ type BackendTask = {
   clientLabel?: string | null;
   projectLabel?: string | null;
   reminderSentAt?: number | null;
+  completedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -366,7 +368,31 @@ type TaskForm = {
   projectLabel: string;
 };
 
+
+type TaskReportDay = {
+  date: string;
+  items: BackendTask[];
+};
+
+type TaskReportResult = {
+  from: string;
+  to: string;
+  rangeLabel: string;
+  tasks: BackendTask[];
+  groups: TaskReportDay[];
+  generatedAt: number;
+  markdown: string;
+};
+
 const QUICK_REMINDER_PRESETS = [5, 10, 15, 25] as const;
+const TASK_REPORT_PRESET_DAYS = [7, 14, 30] as const;
+const TASK_RETENTION_OPTIONS = [
+  { days: 0, label: "No auto-delete" },
+  { days: 30, label: "1 month" },
+  { days: 90, label: "3 months" },
+  { days: 180, label: "6 months" },
+  { days: 365, label: "1 year" },
+] as const;
 type TaskSnoozePreset = "5" | "15" | "30" | "tomorrow";
 
 type BackendCalendarEvent = {
@@ -1275,16 +1301,51 @@ async function writeClipboardText(value: string) {
   document.body.removeChild(textarea);
 }
 
-function downloadTextFile(filename: string, contents: string, mimeType = "text/plain") {
-  const blob = new Blob([contents], { type: mimeType });
+async function downloadTextFile(filename: string, contents: string, mimeType = "text/plain") {
+  const filePicker = (window as typeof window & {
+    showSaveFilePicker?: (options?: {
+      suggestedName?: string;
+      types?: Array<{ description: string; accept: Record<string, string[]> }>;
+    }) => Promise<{
+      createWritable: () => Promise<{
+        write: (data: Blob | string) => Promise<void>;
+        close: () => Promise<void>;
+      }>;
+    }>;
+  }).showSaveFilePicker;
+
+  if (filePicker) {
+    try {
+      const handle = await filePicker({
+        suggestedName: filename,
+        types: [{ description: "Markdown", accept: { [mimeType]: [".md", ".txt"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(contents);
+      await writable.close();
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return false;
+      }
+      // Fall back to browser download without logging noisy save-picker errors.
+    }
+  }
+
+  const blob = new Blob([contents], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }, 1000);
+  return true;
 }
 
 function formatTimeRange(startedAt: number, endedAt: number) {
@@ -2621,6 +2682,18 @@ function mapAiConfig(settings?: BackendSettings): AiConfig {
   };
 }
 
+function localTimeInputFromDate(date: Date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function defaultTaskDueFields() {
+  const dueTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  return {
+    dueDate: formatLocalDateInput(new Date()),
+    dueTime: localTimeInputFromDate(dueTime),
+  };
+}
+
 function defaultTaskForm(): TaskForm {
   return {
     title: "",
@@ -2633,12 +2706,292 @@ function defaultTaskForm(): TaskForm {
   };
 }
 
+function localDateInputFromParts(year: number, month: number, day: number) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeTaskDueDateInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (isoDate) {
+    const year = Number(isoDate[1]);
+    const month = Number(isoDate[2]);
+    const day = Number(isoDate[3]);
+    const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      return "";
+    }
+
+    return localDateInputFromParts(year, month, day);
+  }
+
+  return "";
+}
+
+function normalizeTaskDueTimeInput(value: string) {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed) {
+    return "";
+  }
+
+  const twentyFourHour = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d{1,3})?)?$/.exec(trimmed);
+  if (twentyFourHour) {
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+  }
+
+  const twelveHour = /^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i.exec(trimmed);
+  if (twelveHour) {
+    const hour = Number(twelveHour[1]);
+    const minute = twelveHour[2] ? Number(twelveHour[2]) : 0;
+    if (hour >= 1 && hour <= 12 && minute >= 0 && minute <= 59) {
+      const normalizedHour = (hour % 12) + (twelveHour[3].toLowerCase() === "p" ? 12 : 0);
+      return `${String(normalizedHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+  }
+
+  return "";
+}
+
+function taskTimePickerValue(value: string) {
+  const normalized = normalizeTaskDueTimeInput(value);
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(normalized) ? normalized : "";
+}
+
+function parseTaskDueAt(dueDate: string, dueTime: string) {
+  const normalizedDate = normalizeTaskDueDateInput(dueDate);
+  const normalizedTime = taskTimePickerValue(dueTime);
+  if (!normalizedDate || !normalizedTime) {
+    return null;
+  }
+
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalizedDate);
+  const timeParts = /^(\d{2}):(\d{2})$/.exec(normalizedTime);
+  if (!dateParts || !timeParts) {
+    return Number.NaN;
+  }
+
+  const year = Number(dateParts[1]);
+  const month = Number(dateParts[2]);
+  const day = Number(dateParts[3]);
+  const hour = Number(timeParts[1]);
+  const minute = Number(timeParts[2]);
+  const dueAt = new Date(year, month - 1, day, hour, minute, 0, 0);
+
+  if (
+    Number.isNaN(dueAt.getTime()) ||
+    dueAt.getFullYear() !== year ||
+    dueAt.getMonth() !== month - 1 ||
+    dueAt.getDate() !== day ||
+    dueAt.getHours() !== hour ||
+    dueAt.getMinutes() !== minute
+  ) {
+    return Number.NaN;
+  }
+
+  return dueAt.getTime();
+}
+
+function formatTaskDueDateLabel(value: string) {
+  const normalizedDate = normalizeTaskDueDateInput(value);
+  if (!normalizedDate) {
+    return value;
+  }
+
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatTaskDueAtLabel(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "invalid date";
+  }
+
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function dateInputDaysAgo(daysInclusive: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - Math.max(0, daysInclusive - 1));
+  return formatLocalDateInput(date);
+}
+
+function parseLocalDateInputBounds(fromDate: string, toDate: string) {
+  const from = normalizeTaskDueDateInput(fromDate);
+  const to = normalizeTaskDueDateInput(toDate);
+  if (!from || !to) {
+    return null;
+  }
+
+  const fromParts = from.split("-").map(Number);
+  const toParts = to.split("-").map(Number);
+  const fromMs = new Date(fromParts[0], fromParts[1] - 1, fromParts[2], 0, 0, 0, 0).getTime();
+  const toMs = new Date(toParts[0], toParts[1] - 1, toParts[2], 23, 59, 59, 999).getTime();
+
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
+    return null;
+  }
+
+  return { from, to, fromMs, toMs };
+}
+
+function parseBackendDate(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function taskCompletionDate(task: BackendTask) {
+  return parseBackendDate(task.completedAt) ?? parseBackendDate(task.updatedAt) ?? parseBackendDate(task.createdAt);
+}
+
+function taskCompletionTimestamp(task: BackendTask) {
+  return taskCompletionDate(task)?.getTime() ?? null;
+}
+
+function taskCompletionDateKey(task: BackendTask) {
+  const date = taskCompletionDate(task);
+  return date ? formatLocalDateInput(date) : "unknown";
+}
+
+function compareCompletedTasks(a: BackendTask, b: BackendTask) {
+  return (taskCompletionTimestamp(b) ?? 0) - (taskCompletionTimestamp(a) ?? 0);
+}
+
+function groupCompletedTasksByDay(tasks: BackendTask[]): TaskReportDay[] {
+  const grouped = new Map<string, BackendTask[]>();
+
+  for (const task of tasks) {
+    const key = taskCompletionDateKey(task);
+    grouped.set(key, [...(grouped.get(key) ?? []), task]);
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([date, items]) => ({ date, items: items.sort(compareCompletedTasks) }));
+}
+
+function buildCompletedTaskReportMarkdown(report: Pick<TaskReportResult, "from" | "to" | "tasks" | "groups">) {
+  const lines = [
+    "# Completed Task Report",
+    "",
+    `Range: ${formatTaskDueDateLabel(report.from)} - ${formatTaskDueDateLabel(report.to)}`,
+    `Total completed tasks: ${report.tasks.length}`,
+    "",
+  ];
+
+  if (report.groups.length === 0) {
+    lines.push("No completed tasks in this range.");
+    return lines.join("\n");
+  }
+
+  for (const group of report.groups) {
+    lines.push(`## ${formatTaskDueDateLabel(group.date)}`, "");
+    for (const task of group.items) {
+      const completedAt = taskCompletionTimestamp(task);
+      const completedLabel = completedAt ? formatTaskDueAtLabel(completedAt) : "completion time unavailable";
+      lines.push(`- ${task.title} (${taskContextLabel(task)}; ${formatLoopLabel(task.priority || "medium")}; ${completedLabel})`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd();
+}
+
+function buildCompletedTaskReport(
+  completedTasks: BackendTask[],
+  fromDate: string,
+  toDate: string,
+): TaskReportResult | null {
+  const bounds = parseLocalDateInputBounds(fromDate, toDate);
+  if (!bounds) {
+    return null;
+  }
+
+  const tasksInRange = completedTasks.filter((task) => {
+    const completedAt = taskCompletionTimestamp(task);
+    return completedAt !== null && completedAt >= bounds.fromMs && completedAt <= bounds.toMs;
+  });
+  const groups = groupCompletedTasksByDay(tasksInRange);
+  const reportBase = {
+    from: bounds.from,
+    to: bounds.to,
+    rangeLabel: `${formatTaskDueDateLabel(bounds.from)} - ${formatTaskDueDateLabel(bounds.to)}`,
+    tasks: tasksInRange,
+    groups,
+  };
+
+  return {
+    ...reportBase,
+    generatedAt: Date.now(),
+    markdown: buildCompletedTaskReportMarkdown(reportBase),
+  };
+}
+
+function taskCompletionLabel(task: BackendTask) {
+  const completedAt = taskCompletionTimestamp(task);
+  return completedAt ? `Completed ${formatTaskDueAtLabel(completedAt)}` : "Completed";
+}
+
+function taskRowMetaLabel(task: BackendTask) {
+  return task.status === "done" ? taskCompletionLabel(task) : taskDueLabel(task);
+}
+
+function taskReminderHint(form: Pick<TaskForm, "dueDate" | "dueTime">) {
+  const dueDate = normalizeTaskDueDateInput(form.dueDate);
+  const dueTime = taskTimePickerValue(form.dueTime);
+  if (dueDate && dueTime) {
+    const dueAt = parseTaskDueAt(dueDate, dueTime);
+    if (typeof dueAt === "number" && !Number.isNaN(dueAt)) {
+      return `Reminder scheduled for ${formatTaskDueAtLabel(dueAt)}.`;
+    }
+    return "Choose a valid calendar date and time.";
+  }
+  if (dueDate) {
+    return "Date-only task: add a time to trigger a desktop reminder.";
+  }
+  if (dueTime) {
+    return "Choose a calendar date before setting a reminder time.";
+  }
+  return "Use the calendar and time pickers. Date plus time creates a desktop reminder.";
+}
+
 function taskFormFromTask(task: BackendTask): TaskForm {
-  const dueAtDate = task.dueAt ? new Date(task.dueAt) : null;
-  const dueDate = task.dueDate ?? (dueAtDate ? formatLocalDateInput(dueAtDate) : "");
-  const dueTime = dueAtDate
-    ? `${String(dueAtDate.getHours()).padStart(2, "0")}:${String(dueAtDate.getMinutes()).padStart(2, "0")}`
-    : "";
+  const dueAtDate = typeof task.dueAt === "number" ? new Date(task.dueAt) : null;
+  const validDueAtDate = dueAtDate && !Number.isNaN(dueAtDate.getTime()) ? dueAtDate : null;
+  const dueDate = validDueAtDate
+    ? formatLocalDateInput(validDueAtDate)
+    : normalizeTaskDueDateInput(task.dueDate ?? "");
+  const dueTime = validDueAtDate ? localTimeInputFromDate(validDueAtDate) : "";
 
   return {
     title: task.title,
@@ -2670,13 +3023,13 @@ function draftTasksFromTextFallback(text: string, priority: TaskForm["priority"]
 }
 
 function taskDueLabel(task: BackendTask) {
-  if (task.dueAt) {
-    return `Due ${formatTime(task.dueAt)}`;
+  if (typeof task.dueAt === "number") {
+    return `Reminder due ${formatTaskDueAtLabel(task.dueAt)}`;
   }
   if (task.dueDate) {
-    return `Due ${task.dueDate}`;
+    return `Due ${formatTaskDueDateLabel(task.dueDate)} · no reminder time`;
   }
-  return "No due date";
+  return "No reminder set";
 }
 
 function taskContextLabel(task: BackendTask) {
@@ -2952,6 +3305,7 @@ export default function App() {
   const [draftLaunchAtLogin, setDraftLaunchAtLogin] = useState(true);
   const [saveState, setSaveState] = useState("Local ready");
   const [todaySnapshot, setTodaySnapshot] = useState<BackendTodaySnapshot | null>(null);
+  const [taskPageTasks, setTaskPageTasks] = useState<BackendTask[] | null>(null);
   const [dismissedLoopIds, setDismissedLoopIds] = useState<Set<string>>(() => new Set());
   const [backendReady, setBackendReady] = useState(false);
   const [bridgeStatus, setBridgeStatus] = useState("Connecting to desktop bridge...");
@@ -3138,6 +3492,21 @@ export default function App() {
     await applyTodaySnapshot(snapshot);
     return snapshot;
   }
+
+  const refreshTaskPageTasks = useCallback(async () => {
+    const [openTasks, completedTasks] = await Promise.all([
+      invokeTauri<BackendTask[]>("list_tasks", { status: "open" }),
+      invokeTauri<BackendTask[]>("list_tasks", { status: "done" }),
+    ]);
+
+    if (!openTasks && !completedTasks) {
+      return null;
+    }
+
+    const tasks = [...(openTasks ?? []), ...(completedTasks ?? [])];
+    setTaskPageTasks(tasks);
+    return tasks;
+  }, []);
 
   async function loadStorageLocations() {
     const info = await invokeTauri<BackendStorageLocationInfo>("get_storage_locations");
@@ -3336,6 +3705,14 @@ export default function App() {
       setActiveStream(latestStream.id);
     }
   }, [activeView, latestStream.id]);
+
+  useEffect(() => {
+    if (activeView !== "tasks") {
+      return;
+    }
+
+    void refreshTaskPageTasks();
+  }, [activeView, refreshTaskPageTasks]);
 
   // Tray-action events emitted by the Rust tray handler
   useEffect(() => {
@@ -3797,6 +4174,32 @@ export default function App() {
     setIsDraftingTasks(false);
   }
 
+  function upsertTaskSnapshot(task: BackendTask) {
+    setTodaySnapshot((previous) => {
+      if (!previous) {
+        return previous;
+      }
+
+      const existingTask = previous.tasks.some((candidate) => candidate.id === task.id);
+      return {
+        ...previous,
+        tasks: existingTask
+          ? previous.tasks.map((candidate) => (candidate.id === task.id ? task : candidate))
+          : [task, ...previous.tasks],
+      };
+    });
+    setTaskPageTasks((previous) => {
+      if (!previous) {
+        return previous;
+      }
+
+      const existingTask = previous.some((candidate) => candidate.id === task.id);
+      return existingTask
+        ? previous.map((candidate) => (candidate.id === task.id ? task : candidate))
+        : [task, ...previous];
+    });
+  }
+
   async function submitTask(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const title = taskForm.title.trim();
@@ -3805,17 +4208,31 @@ export default function App() {
       return;
     }
 
-    const dueAt = taskForm.dueDate && taskForm.dueTime
-      ? new Date(`${taskForm.dueDate}T${taskForm.dueTime}:00`).getTime()
-      : null;
-    if (taskForm.dueDate && taskForm.dueTime && Number.isNaN(dueAt)) {
-      addToast("error", "Invalid due time", "Choose a valid date and time.");
+    const dueDate = normalizeTaskDueDateInput(taskForm.dueDate);
+    const dueTime = normalizeTaskDueTimeInput(taskForm.dueTime);
+    const hasDueDateInput = taskForm.dueDate.trim().length > 0;
+    const hasDueTimeInput = taskForm.dueTime.trim().length > 0;
+
+    if (hasDueDateInput && !dueDate) {
+      addToast("error", "Invalid due date", "Choose a valid date from the calendar picker.");
+      return;
+    }
+
+    if (hasDueTimeInput && !dueTime) {
+      addToast("error", "Invalid due time", "Choose a valid time from the time picker.");
+      return;
+    }
+
+    const effectiveDueDate = dueDate || (dueTime ? formatLocalDateInput(new Date()) : "");
+    const dueAt = effectiveDueDate && dueTime ? parseTaskDueAt(effectiveDueDate, dueTime) : null;
+    if (effectiveDueDate && dueTime && Number.isNaN(dueAt)) {
+      addToast("error", "Invalid due reminder", "Choose a valid calendar date and time.");
       return;
     }
 
     const input = {
       title,
-      dueDate: taskForm.dueDate || null,
+      dueDate: effectiveDueDate || null,
       dueAt,
       notes: taskForm.notes.trim() || null,
       priority: taskForm.priority,
@@ -3838,9 +4255,25 @@ export default function App() {
         });
 
     if (result) {
+      upsertTaskSnapshot({
+        ...result,
+        title: input.title,
+        dueDate: input.dueDate,
+        dueAt: input.dueAt,
+        notes: input.notes,
+        priority: input.priority,
+        source: input.source,
+        projectPath: input.projectPath,
+        clientLabel: input.clientLabel,
+        projectLabel: input.projectLabel,
+        reminderSentAt: input.dueAt !== editingTask?.dueAt ? null : result.reminderSentAt,
+      });
       closeTaskModal();
       addToast("success", editingTask ? "Task updated" : "Task added", title);
-      await refreshTodaySnapshot();
+      const refreshed = await refreshTodaySnapshot();
+      if (!refreshed) {
+        addToast("warning", "Task saved, refresh failed", "Reload DayTrail if the task list looks stale.");
+      }
     } else {
       addToast("error", editingTask ? "Could not update task" : "Could not add task", "Backend unavailable.");
     }
@@ -3939,8 +4372,19 @@ export default function App() {
   async function completeTask(task: BackendTask) {
     const result = await invokeTauri<BackendTask>("complete_task", { id: task.id });
     if (result) {
+      const completedAt = result.completedAt ?? result.updatedAt ?? new Date().toISOString();
+      upsertTaskSnapshot({
+        ...task,
+        ...result,
+        status: "done",
+        completedAt,
+        updatedAt: result.updatedAt ?? completedAt,
+      });
       addToast("success", "Task completed", task.title);
-      await refreshTodaySnapshot();
+      const refreshed = await refreshTodaySnapshot();
+      if (!refreshed) {
+        addToast("warning", "Task completed, refresh failed", "Reload DayTrail if the task list looks stale.");
+      }
     } else {
       addToast("error", "Task not completed", "Could not update the task.");
     }
@@ -3953,8 +4397,12 @@ export default function App() {
       dueAt: due.dueAt,
     });
     if (result) {
+      upsertTaskSnapshot(result);
       addToast("success", "Task snoozed", `Reminder moved to ${due.label}.`);
-      await refreshTodaySnapshot();
+      const refreshed = await refreshTodaySnapshot();
+      if (!refreshed) {
+        addToast("warning", "Task snoozed, refresh failed", "Reload DayTrail if the task list looks stale.");
+      }
     } else {
       addToast("error", "Task not snoozed", "Could not update the reminder.");
     }
@@ -3963,8 +4411,16 @@ export default function App() {
   async function deleteTask(task: BackendTask) {
     const result = await invokeTauri<BackendPrivacyDeleteSummary>("delete_task", { id: task.id });
     if (result) {
+      setTodaySnapshot((previous) => previous ? {
+        ...previous,
+        tasks: previous.tasks.filter((candidate) => candidate.id !== task.id),
+      } : previous);
+      setTaskPageTasks((previous) => previous?.filter((candidate) => candidate.id !== task.id) ?? previous);
       addToast("success", "Task deleted", task.title);
-      await refreshTodaySnapshot();
+      const refreshed = await refreshTodaySnapshot();
+      if (!refreshed) {
+        addToast("warning", "Task deleted, refresh failed", "Reload DayTrail if the task list looks stale.");
+      }
     } else {
       addToast("error", "Task not deleted", "Could not remove the task.");
     }
@@ -4344,6 +4800,67 @@ export default function App() {
     await loadStorageLocations();
   }
 
+  async function saveTaskRetentionDays(days: number) {
+    const normalizedDays = Number.isFinite(days) ? Math.max(0, Math.round(days)) : 0;
+    setStorageStatus("Saving completed-task retention policy...");
+    const savedSettings = await invokeTauri<BackendSettings>("update_settings", {
+      patch: { taskRetentionDays: normalizedDays },
+    });
+
+    if (!savedSettings) {
+      setStorageStatus("Completed-task retention policy failed");
+      addToast("error", "Task retention not saved", "Could not save the completed-task auto-delete setting.");
+      return;
+    }
+
+    setTodaySnapshot((previous) =>
+      previous ? { ...previous, settings: { ...previous.settings, ...savedSettings } } : previous,
+    );
+
+    if (normalizedDays > 0) {
+      const pruned = await invokeTauri<BackendPrivacyDeleteSummary>("prune_completed_tasks", {
+        days: normalizedDays,
+      });
+      setStorageStatus(
+        pruned
+          ? `Keeping completed tasks for ${normalizedDays} days. Removed ${pruned.deletedRows} old completed task(s).`
+          : `Keeping completed tasks for ${normalizedDays} days`,
+      );
+      await refreshTodaySnapshot();
+    } else {
+      setStorageStatus("Keeping completed tasks until manually deleted");
+    }
+
+    addToast(
+      "success",
+      "Task retention updated",
+      normalizedDays > 0
+        ? `Completed tasks auto-delete after ${normalizedDays} days.`
+        : "Completed tasks will not auto-delete.",
+    );
+  }
+
+  async function applyTaskRetentionNow() {
+    const days = todaySnapshot?.settings.taskRetentionDays ?? 0;
+    if (days <= 0) {
+      setStorageStatus("Completed tasks are set to keep forever");
+      addToast("info", "No task retention limit", "Choose a completed-task auto-delete window before applying.");
+      return;
+    }
+
+    setStorageStatus("Applying completed-task retention...");
+    const pruned = await invokeTauri<BackendPrivacyDeleteSummary>("prune_completed_tasks", { days });
+    if (!pruned) {
+      setStorageStatus("Completed-task retention failed");
+      addToast("error", "Task retention failed", "Could not delete old completed tasks.");
+      return;
+    }
+
+    setStorageStatus(`Removed ${pruned.deletedRows} old completed task(s).`);
+    addToast("success", "Task retention applied", `${pruned.deletedRows} completed task(s) removed.`);
+    await refreshTodaySnapshot();
+  }
+
   async function applyRetentionNow() {
     const days = todaySnapshot?.settings.dataRetentionDays ?? 0;
     if (days <= 0) {
@@ -4699,7 +5216,7 @@ export default function App() {
           </div>
         </header>
 
-        <section className="content-pane" aria-live="polite">
+        <section className={activeView === "tasks" ? "content-pane content-pane--task-page" : "content-pane"} aria-live="polite">
           {activeView === "today" && (
             <GlobalRangeControls
               fromDate={timelineFromDate}
@@ -4751,7 +5268,7 @@ export default function App() {
               onEditTask={(task) => openTaskModal("single", task)}
               onImportTasks={() => openTaskModal("bulk")}
               onSnoozeTask={snoozeTask}
-              tasks={effectiveSnapshot?.tasks ?? []}
+              tasks={taskPageTasks ?? effectiveSnapshot?.tasks ?? []}
             />
           )}
           {activeView === "hour" && (
@@ -4898,6 +5415,8 @@ export default function App() {
               onTriggerBrowserAutomation={triggerBrowserAutomation}
               onRestoreDatabase={restoreDatabase}
               onSaveRetentionDays={saveRetentionDays}
+              onApplyTaskRetentionNow={applyTaskRetentionNow}
+              onSaveTaskRetentionDays={saveTaskRetentionDays}
               onSaveExperienceSettings={saveExperienceSettings}
               onSaveLaunchAtLogin={saveLaunchAtLogin}
               onTestNotification={testDayTrailNotification}
@@ -5039,23 +5558,37 @@ export default function App() {
                   />
                 </label>
                 <div className="offline-modal-row">
-                  <label>
-                    Due date
+                  <div className="task-form-field">
+                    <label htmlFor="task-due-date">Due date</label>
                     <input
+                      aria-describedby="task-due-hint"
+                      id="task-due-date"
                       type="date"
-                      value={taskForm.dueDate}
-                      onChange={(e) => setTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                      value={normalizeTaskDueDateInput(taskForm.dueDate)}
+                      onChange={(e) => setTaskForm((prev) => ({
+                        ...prev,
+                        dueDate: normalizeTaskDueDateInput(e.target.value),
+                      }))}
                     />
-                  </label>
-                  <label>
-                    Due time
+                  </div>
+                  <div className="task-form-field">
+                    <label htmlFor="task-due-time">Due time</label>
                     <input
+                      aria-describedby="task-due-hint"
+                      id="task-due-time"
                       type="time"
-                      value={taskForm.dueTime}
-                      onChange={(e) => setTaskForm((prev) => ({ ...prev, dueTime: e.target.value }))}
+                      value={taskTimePickerValue(taskForm.dueTime)}
+                      onChange={(e) => setTaskForm((prev) => ({
+                        ...prev,
+                        dueTime: taskTimePickerValue(e.target.value),
+                        dueDate: prev.dueDate || formatLocalDateInput(new Date()),
+                      }))}
                     />
-                  </label>
+                  </div>
                 </div>
+                <p className="task-due-hint" id="task-due-hint">
+                  {taskReminderHint(taskForm)}
+                </p>
                 <label className="offline-modal-full">
                   Priority
                   <select
@@ -6492,9 +7025,23 @@ function MyTasksView({
 }) {
   const [quickReminderTitle, setQuickReminderTitle] = useState("");
   const [isSavingQuickReminder, setIsSavingQuickReminder] = useState(false);
+  const [taskReportFromDate, setTaskReportFromDate] = useState(() => dateInputDaysAgo(7));
+  const [taskReportToDate, setTaskReportToDate] = useState(() => formatLocalDateInput(new Date()));
+  const [taskReport, setTaskReport] = useState<TaskReportResult | null>(null);
+  const [taskReportError, setTaskReportError] = useState("");
+  const [taskReportStatus, setTaskReportStatus] = useState("");
+  const taskReportOutputRef = useRef<HTMLDivElement | null>(null);
+
   const openTasks = tasks.filter((task) => task.status !== "done");
-  const completedTasks = tasks.filter((task) => task.status === "done").slice(0, 20);
+  const completedTasks = tasks.filter((task) => task.status === "done").sort(compareCompletedTasks);
   const highCount = openTasks.filter((task) => task.priority === "high").length;
+  const taskReportBounds = useMemo(
+    () => parseLocalDateInputBounds(taskReportFromDate, taskReportToDate),
+    [taskReportFromDate, taskReportToDate],
+  );
+  const taskReportRangeLabel = taskReportBounds
+    ? `${formatTaskDueDateLabel(taskReportBounds.from)} - ${formatTaskDueDateLabel(taskReportBounds.to)}`
+    : "Invalid range";
 
   const submitQuickReminder = async (minutes: number) => {
     setIsSavingQuickReminder(true);
@@ -6505,8 +7052,53 @@ function MyTasksView({
     }
   };
 
+  const clearGeneratedTaskReport = () => {
+    setTaskReport(null);
+    setTaskReportError("");
+    setTaskReportStatus("");
+  };
+
+  const applyTaskReportPreset = (days: number) => {
+    setTaskReportFromDate(dateInputDaysAgo(days));
+    setTaskReportToDate(formatLocalDateInput(new Date()));
+    clearGeneratedTaskReport();
+  };
+
+  const generateTaskReport = () => {
+    const report = buildCompletedTaskReport(completedTasks, taskReportFromDate, taskReportToDate);
+    if (!report) {
+      setTaskReportError("Choose a valid from/to date range before generating the task report.");
+      setTaskReportStatus("");
+      setTaskReport(null);
+      return;
+    }
+
+    setTaskReportError("");
+    setTaskReportStatus("Report generated. Preview is shown below.");
+    setTaskReport(report);
+    window.setTimeout(() => {
+      taskReportOutputRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    }, 0);
+  };
+
+  const downloadTaskReport = async () => {
+    if (!taskReport) {
+      setTaskReportError("Generate the report before downloading it.");
+      return;
+    }
+
+    const downloaded = await downloadTextFile(
+      `daytrail-task-report-${taskReport.from}-to-${taskReport.to}.md`,
+      taskReport.markdown,
+      "text/markdown",
+    );
+    if (downloaded) {
+      setTaskReportStatus("Report download started. If your browser asks, choose where to save the Markdown file.");
+    }
+  };
+
   return (
-    <div className="view-frame my-tasks-view">
+    <div className="view-frame my-tasks-view" data-scrollable-page="tasks">
       <section className="tasks-hero" aria-label="Task summary">
         <div>
           <span>Backlog</span>
@@ -6571,8 +7163,120 @@ function MyTasksView({
         <div className="stat-card">
           <span>Completed</span>
           <strong>{completedTasks.length}</strong>
-          <em>recent</em>
+          <em>saved history</em>
         </div>
+      </section>
+
+      <section className="task-report-panel panel-block" aria-label="Completed task report">
+        <header className="task-report-head">
+          <div>
+            <span>Task report</span>
+            <h2>Completed tasks by day</h2>
+            <p>Select a frequency or range, then generate a day-wise completion report.</p>
+          </div>
+          <div className="task-report-action-row">
+            <button className="button primary" onClick={generateTaskReport} type="button">
+              {taskReport ? "Regenerate report" : "Generate report"}
+            </button>
+            {taskReport && (
+              <button
+                className="button compact"
+                onClick={() => void downloadTaskReport()}
+                type="button"
+              >
+                Download MD
+              </button>
+            )}
+          </div>
+        </header>
+        <div className="task-report-controls">
+          <div className="task-report-presets" role="group" aria-label="Task report frequency">
+            {TASK_REPORT_PRESET_DAYS.map((days) => (
+              <button className="range-chip" key={days} onClick={() => applyTaskReportPreset(days)} type="button">
+                Last {days} days
+              </button>
+            ))}
+          </div>
+          <label>
+            From
+            <input
+              aria-label="Task report from date"
+              type="date"
+              value={normalizeTaskDueDateInput(taskReportFromDate)}
+              onChange={(event) => {
+                setTaskReportFromDate(normalizeTaskDueDateInput(event.target.value));
+                clearGeneratedTaskReport();
+              }}
+            />
+          </label>
+          <label>
+            To
+            <input
+              aria-label="Task report to date"
+              type="date"
+              value={normalizeTaskDueDateInput(taskReportToDate)}
+              onChange={(event) => {
+                setTaskReportToDate(normalizeTaskDueDateInput(event.target.value));
+                clearGeneratedTaskReport();
+              }}
+            />
+          </label>
+        </div>
+        <p className="task-report-status">
+          {taskReport
+            ? `Report ready: ${taskReport.tasks.length} completed task${taskReport.tasks.length === 1 ? "" : "s"} for ${formatTaskDueDateLabel(taskReport.from)} - ${formatTaskDueDateLabel(taskReport.to)}.`
+            : `Ready to generate for ${taskReportRangeLabel}.`}
+          {taskReportStatus ? ` ${taskReportStatus}` : ""}
+        </p>
+        {taskReportError && <p className="task-report-error" role="alert">{taskReportError}</p>}
+        {taskReport && (
+          <div className="task-report-output" aria-label="Generated completed task report" ref={taskReportOutputRef}>
+            <div className="task-report-output-head">
+              <strong>{taskReport.tasks.length} completed task{taskReport.tasks.length === 1 ? "" : "s"} · {formatTaskDueDateLabel(taskReport.from)} - {formatTaskDueDateLabel(taskReport.to)}</strong>
+              <div className="task-report-output-actions">
+                <button
+                  className="button compact"
+                  onClick={() => void downloadTaskReport()}
+                  type="button"
+                >
+                  Download MD
+                </button>
+                <button
+                  className="button compact"
+                  onClick={() => void writeClipboardText(taskReport.markdown)}
+                  type="button"
+                >
+                  Copy report
+                </button>
+              </div>
+            </div>
+            {taskReport.groups.length === 0 ? (
+              <div className="tasks-empty compact-empty">
+                <strong>No completed tasks in this range</strong>
+                <span>Complete a task or choose a wider range.</span>
+              </div>
+            ) : (
+              taskReport.groups.map((group) => (
+                <article className="task-report-day" key={group.date}>
+                  <h3>{formatTaskDueDateLabel(group.date)}</h3>
+                  <span>{group.items.length} completed</span>
+                  <ul>
+                    {group.items.map((task) => (
+                      <li key={task.id}>
+                        <strong>{task.title}</strong>
+                        <em>{taskContextLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              ))
+            )}
+            <div className="task-report-markdown-preview" aria-label="Task report markdown preview">
+              <strong>Report preview</strong>
+              <pre>{taskReport.markdown}</pre>
+            </div>
+          </div>
+        )}
       </section>
 
       <TaskListSection
@@ -6648,7 +7352,7 @@ function TaskListSection({
               <div className="task-main">
                 <strong>{task.title}</strong>
                 <span>{task.notes || taskContextLabel(task)}</span>
-                <em>{taskDueLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
+                <em>{taskRowMetaLabel(task)} · {formatLoopLabel(task.priority || "medium")}</em>
               </div>
               <div className="task-actions">
                 <button
@@ -10660,6 +11364,8 @@ function SettingsView({
   onSaveLaunchAtLogin,
   onSaveRetentionDays,
   onTestNotification,
+  onApplyTaskRetentionNow,
+  onSaveTaskRetentionDays,
   onTriggerBrowserAutomation,
   permissionStatus,
   permissionSummary,
@@ -10700,6 +11406,8 @@ function SettingsView({
   onSaveLaunchAtLogin: (value: boolean) => void;
   onSaveRetentionDays: (days: number) => void;
   onTestNotification: () => void;
+  onApplyTaskRetentionNow: () => void;
+  onSaveTaskRetentionDays: (days: number) => void;
   onTriggerBrowserAutomation: () => void;
   permissionStatus: string;
   permissionSummary: BackendCapturePermissionSummary | null;
@@ -10775,6 +11483,20 @@ function SettingsView({
     return checkForSource(source)?.status ?? "waiting";
   };
   const retentionDays = storageInfo?.retentionDays ?? optimisticSettings.dataRetentionDays ?? 0;
+  const taskRetentionDays = optimisticSettings.taskRetentionDays ?? 0;
+  const [customTaskRetentionDays, setCustomTaskRetentionDays] = useState("");
+  const taskRetentionUsesCustomValue = taskRetentionDays > 0 && !TASK_RETENTION_OPTIONS.some((option) => option.days === taskRetentionDays);
+  useEffect(() => {
+    if (taskRetentionUsesCustomValue) {
+      setCustomTaskRetentionDays(String(taskRetentionDays));
+    }
+  }, [taskRetentionDays, taskRetentionUsesCustomValue]);
+  const saveCustomTaskRetentionDays = () => {
+    const parsedDays = Number(customTaskRetentionDays);
+    if (Number.isFinite(parsedDays) && parsedDays > 0) {
+      onSaveTaskRetentionDays(parsedDays);
+    }
+  };
   const recoveryEnabled = Boolean(optimisticSettings.recoveryEnabled);
   const recoveryThresholdMinutes = optimisticSettings.recoveryThresholdMinutes ?? 30;
   const workHoursEnabled = optimisticSettings.workHoursEnabled ?? true;
@@ -11498,8 +12220,12 @@ function SettingsView({
                   <strong>{storageInfo ? formatBytes(storageInfo.backupBytes) : "Waiting for desktop app"}</strong>
                 </div>
                 <div className="status-row" data-state={retentionDays > 0 ? "ok" : "muted"}>
-                  <span>Auto-delete</span>
-                  <strong>{retentionDays > 0 ? `Keep last ${retentionDays} days` : "Keep all data"}</strong>
+                  <span>Capture auto-delete</span>
+                  <strong>{retentionDays > 0 ? `Keep last ${retentionDays} days` : "Keep all captured data"}</strong>
+                </div>
+                <div className="status-row" data-state={taskRetentionDays > 0 ? "ok" : "muted"}>
+                  <span>Completed task auto-delete</span>
+                  <strong>{taskRetentionDays > 0 ? `After ${taskRetentionDays} days` : "No auto-delete"}</strong>
                 </div>
                 <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
                   <span>Current database</span>
@@ -11525,6 +12251,36 @@ function SettingsView({
                 ))}
                 <button className="button compact" onClick={onApplyRetentionNow} type="button">
                   Apply now
+                </button>
+              </div>
+              <div className="retention-controls task-retention-controls" aria-label="Auto-delete completed tasks">
+                <span>Auto-delete completed tasks</span>
+                {TASK_RETENTION_OPTIONS.map((option) => (
+                  <button
+                    aria-pressed={taskRetentionDays === option.days}
+                    className="range-chip"
+                    key={option.days}
+                    onClick={() => onSaveTaskRetentionDays(option.days)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                <label className="retention-custom-field">
+                  <span>Custom days</span>
+                  <input
+                    min="1"
+                    placeholder="Days"
+                    type="number"
+                    value={customTaskRetentionDays}
+                    onChange={(event) => setCustomTaskRetentionDays(event.target.value)}
+                  />
+                </label>
+                <button className="button compact" onClick={saveCustomTaskRetentionDays} type="button">
+                  Save custom
+                </button>
+                <button className="button compact" onClick={onApplyTaskRetentionNow} type="button">
+                  Apply tasks now
                 </button>
               </div>
               <div className="settings-action-list">

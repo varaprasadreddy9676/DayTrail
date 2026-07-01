@@ -863,6 +863,46 @@ button {
   background: color-mix(in srgb, var(--accent-main) 18%, var(--bg-surface));
 }
 
+
+.task-form-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.task-form-field input[type="date"],
+.task-form-field input[type="time"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.offline-modal input[type="date"],
+.offline-modal input[type="time"] {
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+.offline-modal input[type="date"]::-webkit-calendar-picker-indicator,
+.offline-modal input[type="time"]::-webkit-calendar-picker-indicator {
+  opacity: 0.82;
+  cursor: pointer;
+}
+
+.task-due-hint {
+  margin: -6px 0 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .bulk-task-textarea {
   min-height: 176px;
   line-height: 1.45;
@@ -6106,6 +6146,33 @@ textarea {
   font-weight: 700;
 }
 
+.task-retention-controls {
+  border-top: 0;
+}
+
+.retention-custom-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.retention-custom-field span {
+  white-space: nowrap;
+}
+
+.retention-custom-field input {
+  width: 86px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+
 .danger-action-row strong {
   color: var(--danger, #ff6b6b);
 }
@@ -6523,6 +6590,17 @@ textarea {
 
   .quick-reminder-presets {
     justify-content: flex-start;
+  }
+
+  .task-report-head,
+  .task-report-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-report-presets {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .settings-preset-row {
@@ -7731,7 +7809,15 @@ textarea {
 .my-tasks-view {
   display: grid;
   gap: 16px;
+  width: 100%;
   max-width: 1180px;
+  height: 100%;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 36px;
+  overscroll-behavior: contain;
 }
 
 .tasks-hero {
@@ -7824,9 +7910,187 @@ textarea {
   gap: 6px;
 }
 
+.task-report-panel {
+  display: grid;
+  gap: 0;
+  overflow: visible;
+}
+
+.task-report-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
+}
+
+.task-report-head span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-report-head h2 {
+  margin: 3px 0;
+  color: var(--text-main);
+  font-size: 16px;
+}
+
+.task-report-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-report-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-report-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(140px, 180px));
+  gap: 10px;
+  align-items: end;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-report-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-report-controls label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-report-controls input {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  color-scheme: dark;
+}
+
+.task-report-status,
+.task-report-error {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.task-report-status {
+  color: var(--text-muted);
+}
+
+.task-report-error {
+  color: var(--danger, #ff6b6b);
+}
+
+.task-report-output {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+
+.task-report-output-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-report-output-head > strong,
+.task-report-output > strong {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.task-report-day {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+}
+
+.task-report-day h3 {
+  margin: 0;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.task-report-day > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-report-day ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-report-day li {
+  display: grid;
+  gap: 2px;
+}
+
+.task-report-day li strong {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.task-report-day li em {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.task-report-markdown-preview {
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 62%, transparent);
+}
+
+.task-report-markdown-preview > strong {
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.task-report-markdown-preview pre {
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  color: var(--text-muted);
+  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+}
+
 .tasks-section {
   display: grid;
   min-height: 0;
+  overflow: visible;
 }
 
 .tasks-section-head {
@@ -7848,14 +8112,11 @@ textarea {
 
 .tasks-list {
   display: grid;
-  max-height: min(52vh, 520px);
   min-height: 0;
   align-content: start;
   gap: 8px;
-  overflow-y: auto;
+  overflow: visible;
   padding: 12px;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-width: thin;
 }
 
 .task-row {
@@ -8886,4 +9147,60 @@ textarea {
   gap: 5px;
   flex-shrink: 0;
   align-items: center;
+}
+
+/* Task page fixes: let the main page own scrolling and keep reports visible. */
+.content-pane--task-page {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.content-pane--task-page .my-tasks-view {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  padding-bottom: 96px;
+}
+
+.task-report-head > div:first-child {
+  min-width: 0;
+}
+
+.task-report-action-row,
+.task-report-output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-report-output {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.task-report-output-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+
+@media (max-width: 760px) {
+  .task-report-head,
+  .task-report-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-report-action-row,
+  .task-report-output-actions {
+    justify-content: stretch;
+  }
+
+  .task-report-action-row .button,
+  .task-report-output-actions .button {
+    flex: 1 1 100%;
+  }
 }

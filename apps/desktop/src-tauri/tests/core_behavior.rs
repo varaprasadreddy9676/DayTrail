@@ -930,6 +930,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(!defaults.show_capture_confidence);
     assert_eq!(defaults.show_ai_details, "summary");
     assert_eq!(defaults.data_retention_days, 0);
+    assert_eq!(defaults.task_retention_days, 0);
     assert!(!defaults.recovery_enabled);
     assert_eq!(defaults.recovery_threshold_minutes, 30);
     assert!(!defaults.premium_notifications_enabled);
@@ -943,6 +944,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
             show_capture_confidence: Some(true),
             show_ai_details: Some("detailed".into()),
             data_retention_days: Some(90),
+            task_retention_days: Some(180),
             recovery_enabled: Some(true),
             recovery_threshold_minutes: Some(45),
             premium_notifications_enabled: Some(true),
@@ -957,6 +959,7 @@ fn defaults_to_simple_mode_and_persists_display_settings() {
     assert!(updated.show_capture_confidence);
     assert_eq!(updated.show_ai_details, "detailed");
     assert_eq!(updated.data_retention_days, 90);
+    assert_eq!(updated.task_retention_days, 180);
     assert!(updated.recovery_enabled);
     assert_eq!(updated.recovery_threshold_minutes, 45);
     assert!(updated.premium_notifications_enabled);
@@ -1092,6 +1095,7 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
             ai_redact_secrets: Some(true),
             full_clipboard_history: Some(false),
             data_retention_days: Some(30),
+            task_retention_days: Some(90),
             recovery_enabled: Some(true),
             recovery_threshold_minutes: Some(60),
             ..SettingsPatch::default()
@@ -1132,6 +1136,7 @@ fn exports_and_imports_portable_settings_without_keychain_secret() {
     assert!(imported.ai_redact_secrets);
     assert!(!imported.full_clipboard_history);
     assert_eq!(imported.data_retention_days, 30);
+    assert_eq!(imported.task_retention_days, 90);
     assert!(imported.recovery_enabled);
     assert_eq!(imported.recovery_threshold_minutes, 60);
     assert_eq!(imported.ai_api_key_ref, None);
