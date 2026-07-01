@@ -1266,7 +1266,7 @@ fn clean_codex_context_title(value: &str) -> Option<String> {
     let mut title = first_line.split_whitespace().collect::<Vec<_>>().join(" ");
     const MAX_TITLE_LEN: usize = 90;
     if title.len() > MAX_TITLE_LEN {
-        title.truncate(MAX_TITLE_LEN);
+        title.truncate(title.floor_char_boundary(MAX_TITLE_LEN));
         title = title.trim_end().to_string();
     }
     (!title.is_empty() && !title.eq_ignore_ascii_case("Codex")).then_some(title)
@@ -3052,6 +3052,19 @@ mod tests {
 
         assert!(title.len() <= 90);
         assert!(title.starts_with("Please investigate"));
+    }
+
+    #[test]
+    fn trims_long_codex_titles_with_multibyte_char_at_truncation_boundary() {
+        // 89 ASCII chars followed by a 3-byte char (U+200E) straddle byte 90,
+        // the same shape that previously panicked in String::truncate.
+        let mut title = "a".repeat(89);
+        title.push('\u{200e}');
+        title.push_str(" more text after the boundary");
+
+        let cleaned = clean_codex_context_title(&title).expect("title");
+
+        assert!(cleaned.len() <= 90);
     }
 
     #[test]

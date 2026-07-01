@@ -911,6 +911,9 @@ function playPremiumNotificationSound(sound: DaytrailNotificationPayload["sound"
   }
   try {
     const context = new AudioContextCtor();
+    if (context.state === "suspended") {
+      void context.resume();
+    }
     const now = context.currentTime;
     const output = context.createGain();
     output.gain.setValueAtTime(0.0001, now);
@@ -2883,7 +2886,40 @@ function WorkContextEditorModal({
   );
 }
 
+type ThemePreference = "system" | "light" | "dark";
+const THEME_STORAGE_KEY = "daytrail-theme-preference";
+
+function loadThemePreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "light" || stored === "dark" || stored === "system") {
+      return stored;
+    }
+  } catch {
+    /* localStorage unavailable; fall back to system default */
+  }
+  return "system";
+}
+
 export default function App() {
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(loadThemePreference);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (themePreference === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.setAttribute("data-theme", themePreference);
+    }
+  }, [themePreference]);
+  const setThemePreference = useCallback((value: ThemePreference) => {
+    setThemePreferenceState(value);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, value);
+    } catch {
+      /* localStorage unavailable; theme choice just won't persist across restarts */
+    }
+  }, []);
+
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const [premiumNotification, setPremiumNotification] = useState<DaytrailNotificationPayload | null>(null);
@@ -3699,7 +3735,7 @@ export default function App() {
       addToast("info", "Notification preview", "This preview runs inside the installed DayTrail app.");
       return;
     }
-    const sent = await invokeTauri("test_daytrail_notification");
+    const sent = await invokeTauri<boolean>("test_daytrail_notification");
     if (!sent) {
       addToast("error", "Notification test failed", "DayTrail could not send the preview notification.");
       return;
@@ -4915,6 +4951,8 @@ export default function App() {
               storageInfo={storageInfo}
               storageStatus={storageStatus}
               terminalBridgeStatus={terminalBridgeStatus}
+              themePreference={themePreference}
+              onSetThemePreference={setThemePreference}
               toggleFolder={toggleFolder}
             />
           )}
@@ -10675,6 +10713,8 @@ function SettingsView({
   storageInfo,
   storageStatus,
   terminalBridgeStatus,
+  themePreference,
+  onSetThemePreference,
   toggleFolder,
 }: {
   aiConfig: AiConfig;
@@ -10715,11 +10755,26 @@ function SettingsView({
   storageInfo: BackendStorageLocationInfo | null;
   storageStatus: string;
   terminalBridgeStatus: string;
+  themePreference: ThemePreference;
+  onSetThemePreference: (value: ThemePreference) => void;
   toggleFolder: (folderId: string) => void;
 }) {
   const [activeSettings, setActiveSettings] = useState<
-    "mode" | "capture" | "ai" | "privacy" | "integrations" | "storage" | "shortcuts" | "advanced" | "about" | "goals"
-  >("mode");
+    | "general"
+    | "appearance"
+    | "notifications"
+    | "smartbreaks"
+    | "workinghours"
+    | "capture"
+    | "ai"
+    | "privacy"
+    | "storage"
+    | "shortcuts"
+    | "advanced"
+    | "about"
+    | "goals"
+  >("general");
+  const [settingsFilter, setSettingsFilter] = useState("");
   const [draftSettingsPatch, setDraftSettingsPatch] = useState<Partial<BackendSettings>>({});
   useEffect(() => {
     setDraftSettingsPatch({});
@@ -10742,14 +10797,28 @@ function SettingsView({
     detail: string;
     icon: IconName;
   }> = [
-    { id: "mode", label: "Mode", detail: "Simple or Pro experience", icon: "layout" },
-    { id: "capture", label: "Capture Health", detail: "Permissions and capture status", icon: "sync" },
+    { id: "general", label: "General", detail: "Launch at login and window behavior", icon: "apps" },
+    { id: "appearance", label: "Appearance", detail: "Simple or Pro experience", icon: "layout" },
+    { id: "notifications", label: "Notifications", detail: "Island, native, and sound", icon: "bell" },
+    { id: "smartbreaks", label: "Smart Breaks", detail: "Blink, posture, and break reminders", icon: "zap" },
+    { id: "workinghours", label: "Working Hours", detail: "When away prompts are asked", icon: "sync" },
+    { id: "capture", label: "Capture & Permissions", detail: "OS access and capture status", icon: "check" },
     { id: "privacy", label: "Privacy", detail: "What is stored and analyzed", icon: "warning" },
     { id: "ai", label: "AI Provider", detail: "Analysis model and routing", icon: "ritual" },
     { id: "storage", label: "Data Storage", detail: "Local data and exports", icon: "archive" },
-    { id: "advanced", label: "Advanced", detail: "Storage, exports, bridges, and endpoint", icon: "sliders" },
+    { id: "advanced", label: "Advanced", detail: "Bridges and technical endpoint", icon: "sliders" },
     { id: "goals", label: "Daily Goals", detail: "Set time targets per app or project", icon: "ritual" },
+    { id: "shortcuts", label: "Shortcuts", detail: "Keyboard shortcuts", icon: "return" },
+    { id: "about", label: "About", detail: "Version and app info", icon: "copy" },
   ];
+  const filteredSettingSections = settingsFilter.trim()
+    ? settingSections.filter((section) => {
+        const query = settingsFilter.trim().toLowerCase();
+        return (
+          section.label.toLowerCase().includes(query) || section.detail.toLowerCase().includes(query)
+        );
+      })
+    : settingSections;
   const checkForSource = (source: "desktop" | "browser" | "editor" | "terminal" | "ai") => {
     const checks = captureHealth?.checks ?? [];
     if (source === "desktop") {
@@ -10789,7 +10858,7 @@ function SettingsView({
       <div className="screen-titlebar">
         <div>
           <h2>Settings</h2>
-          <p>Configure mode, capture health, privacy, AI provider, and advanced data controls.</p>
+          <p>Search or browse general, notifications, privacy, AI, and data preferences.</p>
         </div>
         <div className="screen-actions">
           <span className="capture-pill">{captureHealth?.status?.replace("_", " ") ?? "Waiting"}</span>
@@ -10802,43 +10871,83 @@ function SettingsView({
 
       <div className="settings-pro-shell">
         <aside className="settings-pro-nav" aria-label="Settings sections">
-          {settingSections.map((section) => (
-            <button
-              aria-pressed={activeSettings === section.id}
-              key={section.id}
-              onClick={() => {
-                setActiveSettings(section.id);
-                if (section.id === "storage") {
-                  onLoadStorageInfo();
-                }
-              }}
-              type="button"
-            >
-              <Icon name={section.icon} />
-              <span>
-                <strong>{section.label}</strong>
-                <em>{section.detail}</em>
-              </span>
-              <Icon name="arrow" />
-            </button>
-          ))}
+          <label className="settings-search-box" htmlFor="settings-search">
+            <Icon name="search" />
+            <input
+              id="settings-search"
+              onChange={(event) => setSettingsFilter(event.target.value)}
+              placeholder="Search settings"
+              type="text"
+              value={settingsFilter}
+            />
+          </label>
+          <div className="settings-nav-list">
+            {filteredSettingSections.map((section) => (
+              <button
+                aria-label={`${section.label}: ${section.detail}`}
+                aria-pressed={activeSettings === section.id}
+                key={section.id}
+                onClick={() => {
+                  setActiveSettings(section.id);
+                  if (section.id === "storage") {
+                    onLoadStorageInfo();
+                  }
+                }}
+                title={section.detail}
+                type="button"
+              >
+                <Icon name={section.icon} />
+                <span>{section.label}</span>
+              </button>
+            ))}
+            {filteredSettingSections.length === 0 && (
+              <div className="settings-nav-empty">No settings match "{settingsFilter}"</div>
+            )}
+          </div>
           <div className="settings-help-card">
             <strong>Need help?</strong>
             <span>DayTrail stores metadata locally and does not keep clipboard text or file contents by default.</span>
           </div>
-          <UpdateChecker />
         </aside>
 
         <section className="settings-pro-content">
-          {activeSettings === "mode" && (
-            <section className="settings-section">
-              <div className="settings-section-header">
-                <div>
-                  <span>Experience mode</span>
-                  <h2>Choose how much detail DayTrail shows</h2>
+          {activeSettings === "appearance" && (
+            <>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <span>Theme</span>
+                    <h2>Light, dark, or match your system</h2>
+                  </div>
+                  <strong>
+                    {themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
+                  </strong>
                 </div>
-                <strong>{settingsView.mode === "pro" ? "Pro Mode" : "Simple Mode"}</strong>
-              </div>
+                <div className="settings-preset-row">
+                  <span>Appearance</span>
+                  <div className="settings-preset-buttons" role="group" aria-label="Theme">
+                    {(["system", "light", "dark"] as const).map((option) => (
+                      <button
+                        aria-pressed={themePreference === option}
+                        className="settings-preset-button"
+                        key={option}
+                        onClick={() => onSetThemePreference(option)}
+                        type="button"
+                      >
+                        {option === "system" ? "System" : option === "light" ? "Light" : "Dark"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <span>Experience mode</span>
+                    <h2>Choose how much detail DayTrail shows</h2>
+                  </div>
+                  <strong>{settingsView.mode === "pro" ? "Pro Mode" : "Simple Mode"}</strong>
+                </div>
               <div className="settings-card-grid">
                 <button
                   aria-pressed={settingsView.mode === "simple"}
@@ -10930,9 +11039,10 @@ function SettingsView({
                 </label>
               </div>
             </section>
+            </>
           )}
 
-          {activeSettings === "capture" && (
+          {activeSettings === "general" && (
             <>
               <section className="settings-section">
                 <div className="settings-section-header">
@@ -10964,6 +11074,11 @@ function SettingsView({
                   </div>
                 </div>
               </section>
+            </>
+          )}
+
+          {activeSettings === "notifications" && (
+            <>
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
@@ -11021,6 +11136,11 @@ function SettingsView({
                   </div>
                 </div>
               </section>
+            </>
+          )}
+
+          {activeSettings === "smartbreaks" && (
+            <>
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
@@ -11068,6 +11188,11 @@ function SettingsView({
                   </div>
                 </div>
               </section>
+            </>
+          )}
+
+          {activeSettings === "workinghours" && (
+            <>
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
@@ -11162,6 +11287,11 @@ function SettingsView({
                   </div>
                 </div>
               </section>
+            </>
+          )}
+
+          {activeSettings === "capture" && (
+            <>
               <section className="settings-section">
                 <div className="settings-section-header">
                   <div>
@@ -11340,21 +11470,11 @@ function SettingsView({
               <div className="settings-section-header">
                 <div>
                   <span>Advanced</span>
-                  <h2>Storage, exports, bridges, and technical settings</h2>
+                  <h2>Bridges and technical endpoint</h2>
                 </div>
                 <strong>{storageStatus}</strong>
               </div>
               <div className="settings-action-list">
-                <button className="settings-action-row" onClick={onOpenExports} type="button">
-                  <Icon name="archive" />
-                  <span><strong>Export activity data</strong><em>Open date-range JSON export and AI routine analysis.</em></span>
-                  <Icon name="arrow" />
-                </button>
-                <button className="settings-action-row" onClick={onOpenSavedNotes} type="button">
-                  <Icon name="copy" />
-                  <span><strong>Manage saved notes</strong><em>Review and delete saved scratchpad notes.</em></span>
-                  <Icon name="arrow" />
-                </button>
                 <button className="settings-action-row" onClick={onLoadStorageInfo} type="button">
                   <Icon name="sync" />
                   <span><strong>Load storage locations</strong><em>Show database and backup paths.</em></span>
@@ -11367,14 +11487,6 @@ function SettingsView({
                 </button>
               </div>
               <div className="status-matrix storage-location-list">
-                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
-                  <span>Current database</span>
-                  <strong>{storageInfo?.databasePath ?? "Load storage locations"}</strong>
-                </div>
-                <div className="status-row" data-state={storageInfo ? "ok" : "muted"}>
-                  <span>Backup folder</span>
-                  <strong>{storageInfo?.backupDir ?? "Load storage locations"}</strong>
-                </div>
                 <div className="status-row" data-state="ok">
                   <span>AI endpoint</span>
                   <strong>{aiConfig.endpoint}</strong>
@@ -11439,34 +11551,6 @@ function SettingsView({
                   items={settings?.excludedProjects ?? []}
                   onChange={(next) => void onSaveExperienceSettings({ excludedProjects: next })}
                 />
-              </div>
-            </section>
-          )}
-
-          {activeSettings === "integrations" && (
-            <section className="settings-section">
-              <div className="settings-section-header">
-                <div>
-                  <span>Integrations</span>
-                  <h2>Connected capture bridges</h2>
-                </div>
-                <strong>{captureHealth?.status?.replace("_", " ") ?? "Waiting"}</strong>
-              </div>
-              <div className="health-check-list">
-                {(captureHealth?.checks ?? []).map((check) => (
-                  <article className="health-check-row" data-state={check.status} key={check.id}>
-                    <span>{check.label}</span>
-                    <strong>{check.status.replace("_", " ")}</strong>
-                    <em>{check.detail}</em>
-                    <small>{check.lastSeenAt ? formatDateTime(check.lastSeenAt) : check.action || "Waiting"}</small>
-                  </article>
-                ))}
-                {(captureHealth?.checks ?? []).length === 0 && (
-                  <div className="empty-state compact-empty">
-                    <strong>No bridge status yet</strong>
-                    <span>Bridge status appears after the installed desktop app sees app, browser, editor, terminal, or AI signals.</span>
-                  </div>
-                )}
               </div>
             </section>
           )}
@@ -11643,6 +11727,7 @@ function SettingsView({
                   <span>Local-first work memory, AI usage tracking, and timesheet-grade daily reporting.</span>
                 </div>
               </div>
+              <UpdateChecker />
             </section>
           )}
           {activeSettings === "goals" && (

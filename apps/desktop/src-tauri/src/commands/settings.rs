@@ -52,15 +52,14 @@ pub fn update_settings(
 pub fn test_daytrail_notification(
     app: AppHandle,
     store: State<'_, WorktraceStore>,
-) -> Result<(), CommandError> {
-    daytrail_notification::notify(
+) -> Result<bool, CommandError> {
+    Ok(daytrail_notification::notify(
         &app,
         Some(&store),
         DaytrailNotificationKind::Info,
         "DayTrail notification preview",
         "Premium island and sound settings are working. Native fallback remains available in the background.",
-    );
-    Ok(())
+    ))
 }
 
 #[tauri::command]

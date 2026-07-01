@@ -50,7 +50,7 @@ pub fn notify(
     kind: DaytrailNotificationKind,
     title: impl Into<String>,
     body: impl Into<String>,
-) {
+) -> bool {
     let title = title.into();
     let body = body.into();
     let settings = store.and_then(|store| store.get_settings().ok());
@@ -63,10 +63,10 @@ pub fn notify(
         .unwrap_or("daytrail");
 
     if premium_enabled && emit_island(app, kind, &title, &body, sound) {
-        return;
+        return true;
     }
 
-    post_native(app, &title, &body, sound);
+    post_native(app, &title, &body, sound)
 }
 
 fn emit_island(
@@ -96,12 +96,12 @@ fn emit_island(
     window.emit(EVENT_NAME, payload).is_ok()
 }
 
-fn post_native(app: &tauri::AppHandle, title: &str, body: &str, sound: &str) {
+fn post_native(app: &tauri::AppHandle, title: &str, body: &str, sound: &str) -> bool {
     let mut builder = app.notification().builder().title(title).body(body);
     if let Some(native_sound) = native_sound(sound) {
         builder = builder.sound(native_sound);
     }
-    let _ = builder.show();
+    builder.show().is_ok()
 }
 
 fn normalize_sound(sound: &str) -> &'static str {

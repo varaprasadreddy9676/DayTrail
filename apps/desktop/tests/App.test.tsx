@@ -24,7 +24,7 @@ afterEach(() => {
 
 async function openAiSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /^settings$/i }));
-  await user.click(screen.getByRole("button", { name: /ai provider/i }));
+  await user.click(screen.getByRole("button", { name: /^ai provider:/i }));
 }
 
 function installLocalStorageMock() {
@@ -161,7 +161,7 @@ describe("DayTrail command center", () => {
     expect(screen.queryByRole("heading", { name: /blink, posture, and break reminders/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
-    await user.click(screen.getByRole("button", { name: /capture health/i }));
+    await user.click(screen.getByRole("button", { name: /^smart breaks:/i }));
     expect(screen.getByRole("heading", { name: /blink, posture, and break reminders/i })).toBeInTheDocument();
     expect(screen.getByText(/blink, posture, break/i)).toBeInTheDocument();
     expect(screen.getByText(/quiet during calls/i)).toBeInTheDocument();
@@ -967,25 +967,26 @@ describe("DayTrail command center", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: /^settings$/i }),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^appearance:/i }));
     expect(screen.getByText(/choose how much detail daytrail shows/i)).toBeInTheDocument();
     expect(screen.queryByText(/^unknown$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/default capture policy/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /ai provider/i }));
+    await user.click(screen.getByRole("button", { name: /^ai provider:/i }));
 
-    await user.selectOptions(screen.getByLabelText(/provider/i), "Gemini");
-    expect(screen.getByLabelText(/model/i)).toHaveValue("gemini-flash-latest");
+    await user.selectOptions(screen.getByLabelText(/^provider$/i), "Gemini");
+    expect(screen.getByLabelText(/^model$/i)).toHaveValue("gemini-flash-latest");
     await user.click(screen.getByText(/advanced endpoint/i));
-    expect(screen.getByLabelText(/endpoint/i)).toHaveValue(
+    expect(screen.getByLabelText(/^endpoint$/i)).toHaveValue(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
     );
 
     await user.selectOptions(
-      screen.getByLabelText(/provider/i),
+      screen.getByLabelText(/^provider$/i),
       "OpenAI Compatible",
     );
-    await user.clear(screen.getByLabelText(/model/i));
-    await user.type(screen.getByLabelText(/model/i), "gpt-4.1-mini");
+    await user.clear(screen.getByLabelText(/^model$/i));
+    await user.type(screen.getByLabelText(/^model$/i), "gpt-4.1-mini");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
     expect(screen.getByText(/openai compatible ready/i)).toBeInTheDocument();
@@ -1051,6 +1052,7 @@ describe("DayTrail command center", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^appearance:/i }));
 
     const simpleModeButton = screen.getByRole("button", { name: /simple mode timeline/i });
     const proModeButton = screen.getByRole("button", { name: /pro mode detailed activity/i });
@@ -1122,7 +1124,6 @@ describe("DayTrail command center", () => {
 
     expect(await screen.findByText(/waiting for captured activity/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
-    await user.click(screen.getByRole("button", { name: /capture health/i }));
     expect(screen.getByText(/keeps tracking in tray/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: /launch at login/i }));
@@ -1546,9 +1547,9 @@ describe("DayTrail command center", () => {
     expect(await screen.findByText(/waiting for captured activity/i)).toBeInTheDocument();
 
     await openAiSettings(user);
-    await user.selectOptions(screen.getByLabelText(/provider/i), "OpenAI Compatible");
-    await user.clear(screen.getByLabelText(/model/i));
-    await user.type(screen.getByLabelText(/model/i), "gpt-4.1-mini");
+    await user.selectOptions(screen.getByLabelText(/^provider$/i), "OpenAI Compatible");
+    await user.clear(screen.getByLabelText(/^model$/i));
+    await user.type(screen.getByLabelText(/^model$/i), "gpt-4.1-mini");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
     await waitFor(() =>
