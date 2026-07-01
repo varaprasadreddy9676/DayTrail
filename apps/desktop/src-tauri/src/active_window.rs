@@ -2349,9 +2349,9 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
                     "d={} role={:?} selected={:?} focused={:?} title={:?} value={:?} description={:?}",
                     depth, role,
                     selected, focused,
-                    &title[..title.len().min(60)],
-                    &value[..value.len().min(60)],
-                    &description[..description.len().min(60)]
+                    &title[..title.floor_char_boundary(60)],
+                    &value[..value.floor_char_boundary(60)],
+                    &description[..description.floor_char_boundary(60)]
                 ));
             }
 
@@ -2541,9 +2541,9 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
                                 &role,
                                 selected,
                                 focused,
-                                &title[..title.len().min(60)],
-                                &val[..val.len().min(60)],
-                                &description[..description.len().min(60)]
+                                &title[..title.floor_char_boundary(60)],
+                                &val[..val.floor_char_boundary(60)],
+                                &description[..description.floor_char_boundary(60)]
                             ));
 
                             if let Some((_, candidate)) = score_ax_context_candidate(
