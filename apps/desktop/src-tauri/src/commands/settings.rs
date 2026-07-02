@@ -58,7 +58,7 @@ pub fn test_daytrail_notification(
         Some(&store),
         DaytrailNotificationKind::Info,
         "DayTrail notification preview",
-        "Premium island and sound settings are working. Native fallback remains available in the background.",
+        "Your notification sound settings are working.",
     ))
 }
 

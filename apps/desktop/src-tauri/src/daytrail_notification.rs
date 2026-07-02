@@ -1,11 +1,13 @@
-use serde::Serialize;
-use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::{platform, store::WorktraceStore};
 
-const EVENT_NAME: &str = "daytrail-notification";
-const DEFAULT_TTL_MS: i64 = 6200;
+/// Height in points of the main display's physical notch (MacBook Pro
+/// 14"/16", 2021+), resolved once at startup — see
+/// `platform::main_screen_notch_height`. 0.0 means no notch. Not currently
+/// used to change notification behavior (see `notify`), but kept as
+/// groundwork for a future notch-anchored notification UI.
+pub struct NotchState(pub f64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DaytrailNotificationKind {
@@ -18,82 +20,21 @@ pub enum DaytrailNotificationKind {
     Info,
 }
 
-impl DaytrailNotificationKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Focus => "focus",
-            Self::Recovery => "recovery",
-            Self::Away => "away",
-            Self::Task => "task",
-            Self::Insight => "insight",
-            Self::Update => "update",
-            Self::Info => "info",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DaytrailNotificationPayload {
-    pub id: String,
-    pub kind: String,
-    pub title: String,
-    pub body: String,
-    pub sound: String,
-    pub created_at_ms: i64,
-    pub ttl_ms: i64,
-}
-
 pub fn notify(
     app: &tauri::AppHandle,
     store: Option<&WorktraceStore>,
-    kind: DaytrailNotificationKind,
+    _kind: DaytrailNotificationKind,
     title: impl Into<String>,
     body: impl Into<String>,
 ) -> bool {
     let title = title.into();
     let body = body.into();
-    let settings = store.and_then(|store| store.get_settings().ok());
-    let premium_enabled = settings
-        .as_ref()
-        .is_some_and(|settings| settings.premium_notifications_enabled);
-    let sound = settings
-        .as_ref()
-        .map(|settings| settings.notification_sound.as_str())
-        .unwrap_or("daytrail");
+    let sound = store
+        .and_then(|store| store.get_settings().ok())
+        .map(|settings| settings.notification_sound)
+        .unwrap_or_else(|| "daytrail".to_string());
 
-    if premium_enabled && emit_island(app, kind, &title, &body, sound) {
-        return true;
-    }
-
-    post_native(app, &title, &body, sound)
-}
-
-fn emit_island(
-    app: &tauri::AppHandle,
-    kind: DaytrailNotificationKind,
-    title: &str,
-    body: &str,
-    sound: &str,
-) -> bool {
-    let Some(window) = app.get_webview_window("main") else {
-        return false;
-    };
-    if window.is_visible().ok() != Some(true) {
-        return false;
-    }
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let payload = DaytrailNotificationPayload {
-        id: format!("{}-{now}", kind.as_str()),
-        kind: kind.as_str().to_string(),
-        title: title.to_string(),
-        body: body.to_string(),
-        sound: normalize_sound(sound).to_string(),
-        created_at_ms: now,
-        ttl_ms: DEFAULT_TTL_MS,
-    };
-    window.emit(EVENT_NAME, payload).is_ok()
+    post_native(app, &title, &body, &sound)
 }
 
 fn post_native(app: &tauri::AppHandle, title: &str, body: &str, sound: &str) -> bool {

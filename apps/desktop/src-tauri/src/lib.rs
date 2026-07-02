@@ -101,6 +101,10 @@ pub fn run() {
                 eprintln!("failed to apply data retention policy: {error:#}");
             }
             ensure_notification_permission(app.handle());
+            // AppKit's NSScreen is main-thread-only, so resolve notch presence
+            // once here (setup runs on the main thread) instead of querying it
+            // from the background threads that later call daytrail_notification::notify.
+            app.manage(daytrail_notification::NotchState(platform::main_screen_notch_height()));
             app.manage(store.clone());
             setup_tray(app, store.clone())?;
             spawn_active_window_watcher(

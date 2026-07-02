@@ -37,6 +37,31 @@ pub(crate) fn notification_sound_named(sound: &str) -> &'static str {
     }
 }
 
+/// Height in points of the main display's physical camera-housing notch
+/// (MacBook Pro 14"/16", 2021+), or 0.0 if the display has no notch. A
+/// notched display reports a non-zero top `safeAreaInsets` value; non-notched
+/// Macs report zero. Must be called from the main thread — AppKit's
+/// `NSScreen` is not thread-safe, so this is resolved once at startup and
+/// cached rather than queried per-notification.
+#[cfg(target_os = "macos")]
+pub(crate) fn main_screen_notch_height() -> f64 {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return 0.0;
+    };
+    let Some(screen) = NSScreen::mainScreen(mtm) else {
+        return 0.0;
+    };
+    screen.safeAreaInsets().top
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn main_screen_notch_height() -> f64 {
+    0.0
+}
+
 pub(crate) fn hidden_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);
