@@ -234,6 +234,67 @@ describe("DayTrail command center", () => {
     );
   });
 
+  it("creates a new manual task without an implicit due date or reminder", async () => {
+    const user = userEvent.setup();
+    const createTaskMock = vi.fn(async (_args?: Record<string, unknown>): Promise<TestTask> => ({
+      id: 71,
+      title: "Unscheduled follow-up",
+      status: "open",
+      dueDate: null,
+      dueAt: null,
+      notes: null,
+      priority: "medium",
+      source: "manual",
+      projectPath: null,
+      clientLabel: null,
+      projectLabel: null,
+      reminderSentAt: null,
+      completedAt: null,
+      createdAt: "2026-06-02T09:00:00Z",
+      updatedAt: "2026-06-02T09:00:00Z",
+    }));
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      switch (command) {
+        case "today":
+          return snapshotWithTasks([]);
+        case "list_tasks":
+          return [];
+        case "create_task":
+          return createTaskMock(args);
+        default:
+          return null;
+      }
+    });
+
+    installInvoke(invoke);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^my tasks$/i }));
+    await user.click(await screen.findByRole("button", { name: /^add task$/i }));
+
+    expect(screen.getByLabelText(/^due date$/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^due time$/i)).toHaveValue("");
+
+    await user.type(screen.getByLabelText(/^title$/i), "Unscheduled follow-up");
+    await user.click(screen.getByRole("button", { name: /save task/i }));
+
+    await waitFor(() =>
+      expect(createTaskMock).toHaveBeenCalledWith({
+        input: {
+          title: "Unscheduled follow-up",
+          dueDate: null,
+          dueAt: null,
+          notes: null,
+          priority: "medium",
+          source: "manual",
+          projectPath: null,
+          clientLabel: null,
+          projectLabel: null,
+        },
+      }),
+    );
+  });
+
   it("prompts for available updates from the automatic startup check", async () => {
     const user = userEvent.setup();
     installLocalStorageMock();
@@ -312,7 +373,7 @@ describe("DayTrail command center", () => {
   it("manages overall tasks and reminders from My Tasks", async () => {
     const user = userEvent.setup();
     const settings = { browserBridgeEnabled: true, excludedDomains: [] };
-    const openTask = {
+    const openTask: TestTask = {
       id: 42,
       title: "Renew vendor contract",
       status: "open",
@@ -325,14 +386,33 @@ describe("DayTrail command center", () => {
       clientLabel: "Ops",
       projectLabel: "Vendors",
       reminderSentAt: null,
+      completedAt: null,
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
     };
+    const completedTask: TestTask = {
+      id: 44,
+      title: "Ship release notes",
+      status: "done",
+      dueDate: "2026-06-01",
+      dueAt: null,
+      notes: "Published to changelog",
+      priority: "medium",
+      source: "manual",
+      projectPath: null,
+      clientLabel: "Product",
+      projectLabel: "Release",
+      reminderSentAt: null,
+      completedAt: "2026-06-02T14:00:00Z",
+      createdAt: "2026-06-01T09:00:00Z",
+      updatedAt: "2026-06-02T14:00:00Z",
+    };
+    let mockedTasks: TestTask[] = [openTask, completedTask];
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
           localDate: "2026-06-02",
-          tasks: [openTask],
+          tasks: mockedTasks,
           quickNotes: [],
           commitments: [],
           pendingReplies: [],
@@ -350,10 +430,23 @@ describe("DayTrail command center", () => {
         };
       }
       if (command === "create_task") {
-        return { ...openTask, id: 43, title: (args?.input as { title: string }).title };
+        const input = args?.input as { title: string; dueDate?: string | null; dueAt?: number | null; priority?: string };
+        const created: TestTask = {
+          ...openTask,
+          id: 43 + mockedTasks.length,
+          title: input.title,
+          dueDate: input.dueDate ?? null,
+          dueAt: input.dueAt ?? null,
+          priority: input.priority ?? "medium",
+        };
+        mockedTasks = [created, ...mockedTasks];
+        return created;
       }
       if (command === "update_task") {
-        return { ...openTask, title: (args?.input as { title: string }).title };
+        const input = args?.input as Partial<TestTask> & { title: string };
+        const updated: TestTask = { ...openTask, ...input, id: args?.id as number };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? updated : task));
+        return updated;
       }
       if (command === "draft_tasks_from_text") {
         return [
@@ -378,10 +471,21 @@ describe("DayTrail command center", () => {
         ];
       }
       if (command === "complete_task") {
-        return { ...openTask, status: "done" };
+        const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
+        const completed: TestTask = {
+          ...current,
+          status: "done",
+          completedAt: "2026-06-02T16:00:00Z",
+          updatedAt: "2026-06-02T16:00:00Z",
+        };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? completed : task));
+        return completed;
       }
       if (command === "snooze_task") {
-        return { ...openTask, dueAt: args?.dueAt as number };
+        const current = mockedTasks.find((task) => task.id === args?.id) ?? openTask;
+        const snoozed: TestTask = { ...current, status: "open", dueAt: args?.dueAt as number };
+        mockedTasks = mockedTasks.map((task) => (task.id === args?.id ? snoozed : task));
+        return snoozed;
       }
       if (command === "delete_task") {
         return { deletedRows: 1 };
@@ -408,6 +512,14 @@ describe("DayTrail command center", () => {
     expect(await screen.findByRole("heading", { name: /^my tasks$/i })).toBeInTheDocument();
     expect(screen.getAllByText(/renew vendor contract/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/confirm budget owner first/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^completed recently$/i)).toHaveTextContent(/ship release notes/i);
+
+    fireEvent.change(screen.getByLabelText(/task report from date/i), { target: { value: "2026-06-01" } });
+    fireEvent.change(screen.getByLabelText(/task report to date/i), { target: { value: "2026-06-03" } });
+    await user.click(screen.getByRole("button", { name: /generate report/i }));
+    expect(screen.getByLabelText(/generated completed task report/i)).toHaveTextContent(/ship release notes/i);
+    expect(screen.getByLabelText(/task report markdown preview/i)).toHaveTextContent(/ship release notes/i);
+    expect(screen.getAllByRole("button", { name: /download md/i }).length).toBeGreaterThan(0);
 
     await user.type(screen.getByLabelText(/reminder title/i), "Call pharmacy back");
     await user.click(screen.getByRole("button", { name: /^10m$/i }));
@@ -460,16 +572,24 @@ describe("DayTrail command center", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /^add task$/i }));
+    const emptyDueDateInput = screen.getByLabelText(/^due date$/i);
+    const emptyDueTimeInput = screen.getByLabelText(/^due time$/i);
+    expect(emptyDueDateInput).toHaveAttribute("type", "date");
+    expect(emptyDueDateInput).toHaveValue("");
+    expect(emptyDueTimeInput).toHaveAttribute("type", "time");
+    expect(emptyDueTimeInput).toHaveValue("");
     await user.type(screen.getByLabelText(/^title$/i), "Send invoice follow-up");
     await user.type(screen.getByLabelText(/^notes$/i), "Ask whether PO is approved");
-    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: "2026-06-03" } });
-    fireEvent.change(screen.getByLabelText(/due time/i), { target: { value: "10:15" } });
+    fireEvent.change(screen.getByLabelText(/^due date$/i), { target: { value: "2026-06-03" } });
+    fireEvent.change(screen.getByLabelText(/^due time$/i), { target: { value: "13:30" } });
     await user.click(screen.getByRole("button", { name: /save task/i }));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("create_task", {
         input: expect.objectContaining({
           title: "Send invoice follow-up",
+          dueDate: "2026-06-03",
+          dueAt: new Date(2026, 5, 3, 13, 30, 0, 0).getTime(),
           notes: "Ask whether PO is approved",
           priority: "medium",
           source: "manual",
@@ -477,9 +597,13 @@ describe("DayTrail command center", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /^edit$/i }));
+    const renewTaskRow = screen.getByText(/renew vendor contract/i).closest(".task-row");
+    expect(renewTaskRow).not.toBeNull();
+    await user.click(within(renewTaskRow as HTMLElement).getByRole("button", { name: /^edit$/i }));
     expect(screen.getByRole("heading", { name: /^edit task$/i })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Renew vendor agreement" } });
+    fireEvent.change(screen.getByLabelText(/^due date$/i), { target: { value: "2026-06-18" } });
+    fireEvent.change(screen.getByLabelText(/^due time$/i), { target: { value: "09:45" } });
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() =>
@@ -487,22 +611,35 @@ describe("DayTrail command center", () => {
         id: 42,
         input: expect.objectContaining({
           title: "Renew vendor agreement",
+          dueDate: "2026-06-18",
+          dueAt: new Date(2026, 5, 18, 9, 45, 0, 0).getTime(),
           priority: "high",
           source: "manual",
         }),
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /^complete$/i }));
-    expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
+    const taskRowAfterEdit = screen
+      .getAllByText(/renew vendor agreement|renew vendor contract/i)
+      .map((element) => element.closest(".task-row"))
+      .find((row): row is HTMLElement => row instanceof HTMLElement && within(row).queryByLabelText(/snooze/i) !== null);
+    expect(taskRowAfterEdit).toBeDefined();
 
-    await user.selectOptions(screen.getByLabelText(/snooze renew vendor contract/i), "15");
+    await user.selectOptions(within(taskRowAfterEdit as HTMLElement).getByLabelText(/snooze/i), "15");
     expect(invoke).toHaveBeenCalledWith("snooze_task", {
       id: 42,
       dueAt: expect.any(Number),
     });
 
-    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    await user.click(within(taskRowAfterEdit as HTMLElement).getByRole("button", { name: /^complete$/i }));
+    expect(invoke).toHaveBeenCalledWith("complete_task", { id: 42 });
+
+    const completedRecentlySection = screen.getByLabelText(/^completed recently$/i);
+    await waitFor(() => expect(completedRecentlySection).toHaveTextContent(/renew vendor agreement/i));
+    const completedTaskRow = within(completedRecentlySection).getByText(/renew vendor agreement/i).closest(".task-row");
+    expect(completedTaskRow).not.toBeNull();
+
+    await user.click(within(completedTaskRow as HTMLElement).getByRole("button", { name: /^delete$/i }));
     expect(invoke).toHaveBeenCalledWith("delete_task", { id: 42 });
   });
 
@@ -635,7 +772,7 @@ describe("DayTrail command center", () => {
     expect(completedList).toHaveAttribute("tabindex", "0");
   });
 
-  it("keeps the open tasks list scrollable when many tasks exist", async () => {
+  it("keeps the tasks page and long task lists scrollable when many tasks exist", async () => {
     const user = userEvent.setup();
     const tasks = Array.from({ length: 12 }, (_, index) => ({
       id: index + 1,
@@ -650,6 +787,7 @@ describe("DayTrail command center", () => {
       clientLabel: null,
       projectLabel: null,
       reminderSentAt: null,
+      completedAt: null,
       createdAt: "2026-06-02T09:00:00Z",
       updatedAt: "2026-06-02T09:00:00Z",
     }));
@@ -691,10 +829,16 @@ describe("DayTrail command center", () => {
     await user.click(await screen.findByRole("button", { name: /^my tasks$/i }));
     expect(await screen.findByText(/urgent backlog item 12/i)).toBeInTheDocument();
 
+    const tasksContentPane = document.querySelector(".content-pane--task-page");
+    expect(tasksContentPane).toBeInstanceOf(HTMLElement);
+
+    const tasksPage = document.querySelector(".my-tasks-view");
+    expect(tasksPage).toBeInstanceOf(HTMLElement);
+    expect(tasksPage).toHaveAttribute("data-scrollable-page", "tasks");
+
     const openTasksSection = screen.getByLabelText(/^open tasks$/i);
     const openTasksList = openTasksSection.querySelector(".tasks-list");
     expect(openTasksList).toBeInstanceOf(HTMLElement);
-
     expect(openTasksList).toHaveAttribute("data-scrollable", "true");
     expect(openTasksList).toHaveAttribute("tabindex", "0");
   });
@@ -1081,6 +1225,10 @@ describe("DayTrail command center", () => {
       fullClipboardHistory: false,
       launchAtLogin: true,
     };
+    const updateSettingsMock = vi.fn(async (_args?: Record<string, unknown>) => {
+      return { ...settings, launchAtLogin: false };
+    });
+
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
@@ -1104,8 +1252,7 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "update_settings") {
-        expect(args).toEqual({ patch: { launchAtLogin: false } });
-        return { ...settings, launchAtLogin: false };
+        return updateSettingsMock(args);
       }
 
       return null;
@@ -1129,7 +1276,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getByRole("checkbox", { name: /launch at login/i }));
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("update_settings", {
+      expect(updateSettingsMock).toHaveBeenCalledWith({
         patch: { launchAtLogin: false },
       }),
     );
@@ -1595,11 +1742,60 @@ describe("DayTrail command center", () => {
           aiRedactSecrets: true,
           fullClipboardHistory: false,
           dataRetentionDays: 30,
+          taskRetentionDays: 90,
         },
       },
       null,
       2,
     );
+    const updateSettingsMock = vi.fn(async (args?: Record<string, unknown>) => {
+      const patch = (args?.patch ?? {}) as {
+        dataRetentionDays?: number;
+        taskRetentionDays?: number;
+      };
+      if (patch.taskRetentionDays !== undefined) {
+        return {
+          browserBridgeEnabled: true,
+          excludedDomains: [],
+          aiProvider: "Ollama Local",
+          aiModel: "llama3.1",
+          aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+          aiRedactSecrets: true,
+          fullClipboardHistory: false,
+          dataRetentionDays: 30,
+          taskRetentionDays: 90,
+        };
+      }
+      return {
+        browserBridgeEnabled: true,
+        excludedDomains: [],
+        aiProvider: "Ollama Local",
+        aiModel: "llama3.1",
+        aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+        aiRedactSecrets: true,
+        fullClipboardHistory: false,
+        dataRetentionDays: 30,
+        taskRetentionDays: 0,
+      };
+    });
+    const pruneCapturedDataMock = vi.fn(async (_args?: Record<string, unknown>) => ({ deletedRows: 3 }));
+    const importSettingsConfigMock = vi.fn(async (_args?: Record<string, unknown>) => ({
+      browserBridgeEnabled: true,
+      excludedDomains: ["private.example.com"],
+      aiProvider: "Ollama Local",
+      aiModel: "llama3.1",
+      aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      aiRedactSecrets: true,
+      fullClipboardHistory: false,
+    }));
+    const restoreDatabaseMock = vi.fn(async (_args?: Record<string, unknown>) => ({
+      path: "/tmp/daytrail-import.sqlite3",
+      bytes: 4096,
+      generatedAt: "2026-05-23T08:06:00Z",
+      preRestoreBackupPath:
+        "/Users/alice/Library/Application Support/ai.daytrail.desktop/backups/daytrail-backup-before-restore.sqlite3",
+    }));
+
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
@@ -1625,6 +1821,7 @@ describe("DayTrail command center", () => {
             aiRedactSecrets: true,
             fullClipboardHistory: false,
             dataRetentionDays: 0,
+            taskRetentionDays: 0,
           },
           projectContext: null,
         };
@@ -1644,22 +1841,15 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "update_settings") {
-        expect(args).toEqual({ patch: { dataRetentionDays: 30 } });
-        return {
-          browserBridgeEnabled: true,
-          excludedDomains: [],
-          aiProvider: "Ollama Local",
-          aiModel: "llama3.1",
-          aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
-          aiRedactSecrets: true,
-          fullClipboardHistory: false,
-          dataRetentionDays: 30,
-        };
+        return updateSettingsMock(args);
       }
 
       if (command === "prune_captured_data") {
-        expect(args).toEqual({ days: 30 });
-        return { deletedRows: 3 };
+        return pruneCapturedDataMock(args);
+      }
+
+      if (command === "prune_completed_tasks") {
+        return { deletedRows: 2 };
       }
 
       if (command === "purge_captured_data") {
@@ -1671,16 +1861,7 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "import_settings_config") {
-        expect(args).toEqual({ configJson: exportedConfig });
-        return {
-          browserBridgeEnabled: true,
-          excludedDomains: ["private.example.com"],
-          aiProvider: "Ollama Local",
-          aiModel: "llama3.1",
-          aiEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
-          aiRedactSecrets: true,
-          fullClipboardHistory: false,
-        };
+        return importSettingsConfigMock(args);
       }
 
       if (command === "backup_database") {
@@ -1693,14 +1874,7 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "restore_database") {
-        expect(args).toEqual({ path: "/tmp/daytrail-import.sqlite3" });
-        return {
-          path: "/tmp/daytrail-import.sqlite3",
-          bytes: 4096,
-          generatedAt: "2026-05-23T08:06:00Z",
-          preRestoreBackupPath:
-            "/Users/alice/Library/Application Support/ai.daytrail.desktop/backups/daytrail-backup-before-restore.sqlite3",
-        };
+        return restoreDatabaseMock(args);
       }
 
       return null;
@@ -1726,17 +1900,27 @@ describe("DayTrail command center", () => {
 
     await user.click(screen.getByRole("button", { name: /^30 days$/i }));
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("update_settings", {
+      expect(updateSettingsMock).toHaveBeenCalledWith({
         patch: { dataRetentionDays: 30 },
       }),
     );
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("prune_captured_data", { days: 30 }),
+      expect(pruneCapturedDataMock).toHaveBeenCalledWith({ days: 30 }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^3 months$/i }));
+    await waitFor(() =>
+      expect(updateSettingsMock).toHaveBeenCalledWith({
+        patch: { taskRetentionDays: 90 },
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("prune_completed_tasks", { days: 90 }),
     );
 
     await user.click(screen.getByRole("button", { name: /apply now/i }));
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("prune_captured_data", { days: 30 }),
+      expect(pruneCapturedDataMock).toHaveBeenCalledWith({ days: 30 }),
     );
 
     await user.click(screen.getByRole("button", { name: /export configuration/i }));
@@ -1744,7 +1928,7 @@ describe("DayTrail command center", () => {
 
     await user.click(screen.getByRole("button", { name: /import configuration/i }));
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("import_settings_config", {
+      expect(importSettingsConfigMock).toHaveBeenCalledWith({
         configJson: exportedConfig,
       }),
     );
@@ -1759,7 +1943,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getByRole("button", { name: /restore database/i }));
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("restore_database", {
+      expect(restoreDatabaseMock).toHaveBeenCalledWith({
         path: "/tmp/daytrail-import.sqlite3",
       }),
     );
@@ -1825,6 +2009,8 @@ describe("DayTrail command center", () => {
           : check,
       ),
     };
+    const openCapturePermissionSettingsMock = vi.fn(async (_args?: Record<string, unknown>) => grantedPermissions);
+
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       if (command === "today") {
         return {
@@ -1851,8 +2037,7 @@ describe("DayTrail command center", () => {
       }
 
       if (command === "open_capture_permission_settings") {
-        expect(args).toEqual({ permissionId: "accessibility" });
-        return grantedPermissions;
+        return openCapturePermissionSettingsMock(args);
       }
 
       return null;
@@ -1880,7 +2065,7 @@ describe("DayTrail command center", () => {
     await user.click(screen.getAllByRole("button", { name: /open accessibility settings/i })[0]);
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_capture_permission_settings", {
+      expect(openCapturePermissionSettingsMock).toHaveBeenCalledWith({
         permissionId: "accessibility",
       }),
     );
@@ -1959,7 +2144,18 @@ type TestTask = {
   id: number;
   title: string;
   status: "open" | "done";
+  dueDate?: string | null;
+  dueAt?: number | null;
+  notes?: string | null;
   priority?: string;
+  source?: string;
+  projectPath?: string | null;
+  clientLabel?: string | null;
+  projectLabel?: string | null;
+  reminderSentAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 function snapshotWithTasks(tasks: TestTask[]) {
@@ -2156,6 +2352,19 @@ describe("activity ↔ task linking", () => {
       metadataJson: null,
       createdAt: 1,
     };
+    const linkActivityToTaskMock = vi.fn(async (args?: Record<string, unknown>) => {
+      linked = [
+        { ...candidate, linkId: 1, origin: "manual", ruleId: null, linkedAt: 1 },
+      ];
+      return {
+        id: 1,
+        sourceEventId: args?.sourceEventId,
+        taskId: args?.taskId,
+        origin: "manual",
+        ruleId: null,
+        createdAt: 1,
+      };
+    });
 
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
       switch (command) {
@@ -2168,11 +2377,7 @@ describe("activity ↔ task linking", () => {
         case "search_recent_activities":
           return [candidate];
         case "link_activity_to_task":
-          expect(args).toEqual({ sourceEventId: "evt-9", taskId: 7 });
-          linked = [
-            { ...candidate, linkId: 1, origin: "manual", ruleId: null, linkedAt: 1 },
-          ];
-          return { id: 1, sourceEventId: "evt-9", taskId: 7, origin: "manual", ruleId: null, createdAt: 1 };
+          return linkActivityToTaskMock(args);
         default:
           return null;
       }
@@ -2192,7 +2397,7 @@ describe("activity ↔ task linking", () => {
 
     await user.click(screen.getByRole("button", { name: /^link$/i }));
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("link_activity_to_task", {
+      expect(linkActivityToTaskMock).toHaveBeenCalledWith({
         sourceEventId: "evt-9",
         taskId: 7,
       }),
