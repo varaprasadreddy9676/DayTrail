@@ -1366,23 +1366,19 @@ kbd {
   overflow: auto;
   overflow-x: hidden;
   padding: 14px;
-  overscroll-behavior: contain;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
 
-/* Today is a managed grid of zones that each own their scroll — the frame
-   must not also scroll, or two scroll owners compete and wheel events get
-   trapped (classic nested-scroll dead-end). See #1 in the UI/UX review. */
-.view-frame.today-view {
-  overflow: hidden;
-}
-
+/* Today lays out its zones in a natural grid and lets the frame be the sole
+   vertical scroll owner. height: auto (not 100%) is essential: it lets the
+   zones grow past the viewport so the frame can scroll the whole page. The
+   timeline panel below also grows to natural height instead of scrolling
+   internally, which avoids the competing/nested scroll dead-end. */
 .today-view {
   display: grid;
   grid-template-rows: auto auto auto;
   gap: 10px;
-  height: 100%;
   min-height: 0;
   align-content: start;
 }
@@ -1816,8 +1812,11 @@ kbd {
 .panel-block.hourly-panel {
   display: flex;
   flex-direction: column;
-  height: min(720px, calc(100vh - 160px));
-  min-height: 360px;
+  /* No height cap and no internal scroll: the timeline grows to natural
+     height and the page frame is the single scroll owner for the whole
+     Today view. This is how native macOS apps (Mail, Calendar) present a
+     primary list — one page scroll, never a scrollbar nested inside a panel. */
+  min-height: 0;
 }
 
 .hour-legend {
@@ -1876,11 +1875,11 @@ kbd {
   display: grid;
   min-height: 0;
   align-content: start;
-  overflow-y: auto;
-  /* Contain scroll momentum so a wheel inside this list doesn't bleed into
-     the parent zone or hit a hard dead-end — keeps a single predictable
-     scroll owner. */
-  overscroll-behavior: contain;
+  /* Grow to natural height — do NOT scroll independently. An inner scroll
+     region here creates a wheel dead-end: when the list is already at its
+     top, momentum is captured and never reaches the page frame, so nothing
+     scrolls. The page frame is the single scroll owner for the whole view. */
+  overflow-y: visible;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
