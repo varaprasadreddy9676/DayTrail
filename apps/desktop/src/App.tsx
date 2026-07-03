@@ -2629,14 +2629,6 @@ function localTimeInputFromDate(date: Date) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function defaultTaskDueFields() {
-  const dueTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  return {
-    dueDate: formatLocalDateInput(new Date()),
-    dueTime: localTimeInputFromDate(dueTime),
-  };
-}
-
 function defaultTaskForm(): TaskForm {
   return {
     title: "",
