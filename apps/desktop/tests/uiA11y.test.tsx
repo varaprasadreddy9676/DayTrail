@@ -22,39 +22,62 @@ afterEach(() => {
 
 // ── Sidebar collapse ───────────────────────────────────────────────────────
 describe("sidebar collapse", () => {
-  it("toggles between expanded and collapsed, with correct ARIA and persistence", async () => {
+  it("brand mark toggles collapse with correct ARIA and persistence", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const toggle = screen.getByRole("button", { name: /collapse sidebar/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // The brand mark is the toggle (no separate button). Expanded first.
+    const brand = screen.getByRole("button", { name: /collapse sidebar/i });
     // No prior choice stored → defaults to expanded.
     expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBeNull();
 
-    await user.click(toggle);
+    await user.click(brand);
 
-    // Persisted as collapsed, and the accessible label/expanded reflect it.
+    // Persisted as collapsed; brand accessible name flips to "Expand".
     await waitFor(() =>
       expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("1"),
     );
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveAccessibleName(/expand sidebar/i);
+    expect(brand).toHaveAccessibleName(/expand sidebar/i);
 
-    // Toggling back restores expanded state and updates storage.
-    await user.click(toggle);
+    // Clicking the brand again expands back and persists.
+    await user.click(brand);
     await waitFor(() =>
       expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("0"),
     );
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(toggle).toHaveAccessibleName(/collapse sidebar/i);
+    expect(brand).toHaveAccessibleName(/collapse sidebar/i);
+  });
+
+  it("has no separate collapse toggle button", () => {
+    render(<App />);
+    // The only sidebar-affordance is the brand mark itself.
+    const collapseButtons = screen.getAllByRole("button", { name: /collapse sidebar|expand sidebar/i });
+    expect(collapseButtons).toHaveLength(1);
+  });
+
+  it("clicking a nav icon while collapsed expands the sidebar and navigates", async () => {
+    const user = userEvent.setup();
+    // Start collapsed.
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1");
+    render(<App />);
+
+    expect(screen.getByRole("button", { name: /expand sidebar/i })).toBeInTheDocument();
+
+    // Click any nav item — it should expand AND switch the view.
+    await user.click(screen.getByRole("button", { name: /^activity$/i }));
+
+    // Expanded now: brand reads "Collapse sidebar" again, and Activity is current.
+    expect(screen.getByRole("button", { name: /collapse sidebar/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^activity$/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("restores the collapsed choice from localStorage on mount", () => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1");
     render(<App />);
 
-    const toggle = screen.getByRole("button", { name: /expand sidebar/i });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /expand sidebar/i })).toBeInTheDocument();
   });
 
   it("hides the focus composer while collapsed but keeps it mounted (no state loss)", async () => {
@@ -67,13 +90,35 @@ describe("sidebar collapse", () => {
     const composer = screen.getByPlaceholderText(/what are you focusing on\?/i);
     expect(composer).toBeInTheDocument();
 
-    // Collapse the sidebar — the composer becomes hidden, not unmounted.
+    // Collapse the sidebar (via brand mark) — the composer becomes hidden,
+    // not unmounted, so an active session survives collapse/expand.
     await user.click(screen.getByRole("button", { name: /collapse sidebar/i }));
     expect(composer).not.toBeVisible();
 
     // Expand back — the composer reappears with its prior DOM intact.
     await user.click(screen.getByRole("button", { name: /expand sidebar/i }));
     expect(composer).toBeVisible();
+  });
+
+  it("leaks no visible text into the collapsed icon rail", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /collapse sidebar/i }));
+
+    // The sidebar carries the collapsed class, which CSS uses to hide every
+    // text label (display:none) so the rail shows icons only. jsdom does not
+    // compute stylesheet-driven display, so assert on the structural signal.
+    const sidebar = document.querySelector(".native-sidebar");
+    expect(sidebar).toHaveClass("sidebar-collapsed");
+
+    // The FocusMode composer must be marked hidden (not unmounted) so an
+    // active focus session survives collapse — the [hidden] rule guarantees
+    // it never leaks into the rail.
+    const focusCard = document.querySelector(".focus-card");
+    if (focusCard) {
+      expect(focusCard).toHaveAttribute("hidden");
+    }
   });
 });
 

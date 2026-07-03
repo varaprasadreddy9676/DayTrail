@@ -152,6 +152,14 @@ dd {
   margin: 0;
 }
 
+/* The HTML hidden attribute must always hide an element, regardless of any
+   display rule below. Without this, a component that sets display:flex (e.g.
+   .focus-card) would stay visible even when marked hidden — which leaked the
+   "Start focus" text into the collapsed sidebar rail. */
+[hidden] {
+  display: none !important;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 155px minmax(0, 1fr);
@@ -435,10 +443,31 @@ button {
 
 .sidebar-brand {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 10px;
   padding: 0 8px 20px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: opacity 0.12s ease;
+}
+
+.sidebar-brand:hover {
+  opacity: 0.85;
+}
+
+.sidebar-brand:focus-visible {
+  outline: 2px solid var(--accent-main);
+  outline-offset: 1px;
+}
+
+.sidebar-brand--collapsed {
+  justify-content: center;
+  padding: 0 0 16px;
 }
 
 .brand-mark {
@@ -594,60 +623,12 @@ button {
    the grid (the shell class is the reliable trigger; :has() is a progressive
    enhancement for any future render path). The grid narrows to an icon rail,
    every text label is hidden, and icons center. Toggling persists via
-   localStorage so the choice survives restarts — same pattern as theme. */
+   localStorage so the choice survives restarts — same pattern as theme.
+   There is no separate toggle button: clicking the brand mark collapses,
+   and clicking any nav icon (or the brand) expands. */
 .app-shell.sidebar-collapsed-shell,
 .app-shell:has(.native-sidebar.sidebar-collapsed) {
   grid-template-columns: 56px minmax(0, 1fr);
-}
-
-.sidebar-collapse-toggle {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  align-items: center;
-  justify-content: center;
-  margin-left: auto;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
-  opacity: 0;
-  transition:
-    opacity 0.14s ease,
-    background 0.14s ease,
-    color 0.14s ease;
-}
-
-/* Expanded: reveal the toggle on sidebar hover/focus so the default brand
-   row stays clean, but keyboard and hover users always find it. */
-.native-sidebar:hover .sidebar-collapse-toggle,
-.native-sidebar:focus-within .sidebar-collapse-toggle,
-.sidebar-collapse-toggle:focus-visible {
-  opacity: 1;
-}
-
-.sidebar-collapse-toggle:hover {
-  background: color-mix(in srgb, var(--text-main) 8%, transparent);
-  color: var(--text-main);
-}
-
-.sidebar-collapse-toggle:focus-visible {
-  outline: 2px solid var(--accent-main);
-  outline-offset: 1px;
-}
-
-.native-sidebar.sidebar-collapsed .sidebar-brand {
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 4px 14px;
-}
-
-/* Collapsed: keep the toggle visible (only affordance to expand back),
-   and hide the wordmark/subtitle. */
-.native-sidebar.sidebar-collapsed .sidebar-collapse-toggle {
-  opacity: 1;
 }
 
 .native-sidebar.sidebar-collapsed .sidebar-brand-text {

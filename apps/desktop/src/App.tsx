@@ -5050,23 +5050,19 @@ export default function App() {
         className={`native-sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
         aria-label="Primary navigation"
       >
-        <div className="sidebar-brand">
+        <button
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={`sidebar-brand${sidebarCollapsed ? " sidebar-brand--collapsed" : ""}`}
+          onClick={toggleSidebarCollapsed}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          type="button"
+        >
           <img alt="" className="brand-mark" src="/daytrail-icon.png" />
           <span className="sidebar-brand-text">
             <strong>DayTrail</strong>
             <em>Retrace your workday.</em>
           </span>
-          <button
-            aria-expanded={!sidebarCollapsed}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="sidebar-collapse-toggle"
-            onClick={toggleSidebarCollapsed}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            type="button"
-          >
-            <Icon name="panelLeft" />
-          </button>
-        </div>
+        </button>
 
         <nav className="nav-list" aria-label="Workspace views">
           <ul className="nav-items">
@@ -5077,6 +5073,11 @@ export default function App() {
                   aria-current={effectiveNavView === item.id ? "page" : undefined}
                   className="nav-item"
                   onClick={() => {
+                    // In collapsed mode the first click expands the rail back
+                    // so labels are visible; the view also switches.
+                    if (sidebarCollapsed) {
+                      setSidebarCollapsed(false);
+                    }
                     if (item.id === "insights") {
                       void openInsightsView();
                     } else {
