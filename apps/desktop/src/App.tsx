@@ -3186,6 +3186,17 @@ function loadThemePreference(): ThemePreference {
   return "system";
 }
 
+const SIDEBAR_COLLAPSED_KEY = "daytrail-sidebar-collapsed";
+
+function loadSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    /* localStorage unavailable; default to expanded */
+  }
+  return false;
+}
+
 export default function App() {
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(loadThemePreference);
   useEffect(() => {
@@ -3203,6 +3214,19 @@ export default function App() {
     } catch {
       /* localStorage unavailable; theme choice just won't persist across restarts */
     }
+  }, []);
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadSidebarCollapsed);
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* localStorage unavailable; collapse choice just won't persist across restarts */
+      }
+      return next;
+    });
   }, []);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -3253,6 +3277,23 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
+  // Element that held focus before the command palette opened, so we can
+  // restore it on close instead of dropping keyboard users onto <body>.
+  const focusBeforeCommandRef = useRef<HTMLElement | null>(null);
+  const openCommandBar = useCallback(() => {
+    focusBeforeCommandRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    setCommandOpen(true);
+    setCommandQuery("");
+  }, []);
+  const closeCommandBar = useCallback(() => {
+    setCommandOpen(false);
+    setCommandQuery("");
+    const target = focusBeforeCommandRef.current;
+    if (target && document.body.contains(target)) {
+      // Defer one tick so React has unmounted the palette first.
+      window.setTimeout(() => target.focus(), 0);
+    }
+  }, []);
   const [quickNote, setQuickNote] = useState("");
   const [notes, setNotes] = useState<Note[]>(defaultNotes);
   const [actions, setActions] = useState<ActionItem[]>(initialActions);
@@ -3698,8 +3739,7 @@ export default function App() {
         target?.isContentEditable;
 
       if (event.key === "Escape" && commandOpen) {
-        setCommandOpen(false);
-        setCommandQuery("");
+        closeCommandBar();
         return;
       }
 
@@ -3709,14 +3749,13 @@ export default function App() {
 
       if ((event.metaKey && event.key.toLowerCase() === "k") || (event.altKey && event.code === "Space")) {
         event.preventDefault();
-        setCommandOpen(true);
-        setCommandQuery("");
+        openCommandBar();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commandOpen]);
+  }, [commandOpen, openCommandBar, closeCommandBar]);
 
   useEffect(() => {
     let ignore = false;
@@ -5006,47 +5045,63 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="native-sidebar" aria-label="Primary navigation">
+    <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed-shell" : ""}`}>
+      <aside
+        className={`native-sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
+        aria-label="Primary navigation"
+      >
         <div className="sidebar-brand">
           <img alt="" className="brand-mark" src="/daytrail-icon.png" />
-          <span>
+          <span className="sidebar-brand-text">
             <strong>DayTrail</strong>
             <em>Retrace your workday.</em>
           </span>
+          <button
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="sidebar-collapse-toggle"
+            onClick={toggleSidebarCollapsed}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            type="button"
+          >
+            <Icon name="panelLeft" />
+          </button>
         </div>
 
         <nav className="nav-list" aria-label="Workspace views">
-          {navigation.map((item) => (
-            <button
-              aria-label={item.label}
-              aria-current={effectiveNavView === item.id ? "page" : undefined}
-              className="nav-item"
-              key={item.id}
-              onClick={() => {
-                if (item.id === "insights") {
-                  void openInsightsView();
-                } else {
-                  setActiveView(item.id);
-                }
-              }}
-              title={item.label}
-              type="button"
-            >
-              <span className="nav-icon-wrap">
-                <Icon name={item.icon} />
-                {item.id === "insights" && unseenInsightCount > 0 && (
-                  <span className="nav-badge" aria-label={`${unseenInsightCount} new insights`}>
-                    {unseenInsightCount > 9 ? "9+" : unseenInsightCount}
+          <ul className="nav-items">
+            {navigation.map((item) => (
+              <li className="nav-item-row" key={item.id}>
+                <button
+                  aria-label={item.label}
+                  aria-current={effectiveNavView === item.id ? "page" : undefined}
+                  className="nav-item"
+                  onClick={() => {
+                    if (item.id === "insights") {
+                      void openInsightsView();
+                    } else {
+                      setActiveView(item.id);
+                    }
+                  }}
+                  title={item.label}
+                  type="button"
+                >
+                  <span className="nav-icon-wrap">
+                    <Icon name={item.icon} />
+                    {item.id === "insights" && unseenInsightCount > 0 && (
+                      <span className="nav-badge" aria-label={`${unseenInsightCount} new insights`}>
+                        {unseenInsightCount > 9 ? "9+" : unseenInsightCount}
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          ))}
+                  <span className="nav-label">{item.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </nav>
 
-        {!isSimpleMode && sidebarApps.length > 0 && (
+        {!isSimpleMode && sidebarApps.length > 0 && !sidebarCollapsed && (
           <section className="sidebar-section sidebar-apps" aria-label="Apps in selected range">
             <span className="sidebar-label">{timelineRangePreset === "today" ? "Apps Today" : "Apps in Range"}</span>
             {sidebarApps.map((app) => (
@@ -5082,24 +5137,27 @@ export default function App() {
               setOfflineForm({ start: hm(oneHourAgo), end: hm(now), category: "Away from desk" });
               setLogOfflineOpen(true);
             }}
+            title="Log offline time"
             type="button"
           >
-            + Log offline time
+            <span aria-hidden="true" className="sidebar-log-offline-plus">+</span>
+            <span className="sidebar-log-offline-label">Log offline time</span>
           </button>
         </div>
 
-        <FocusMode tasks={effectiveSnapshot?.tasks ?? []} />
+        <FocusMode hidden={sidebarCollapsed} tasks={effectiveSnapshot?.tasks ?? []} />
 
         <footer className="sidebar-footer">
           <button
             className="status-toggle"
             onClick={toggleTracking}
+            title={isPaused ? "Click to resume capture" : "Click to pause capture"}
             type="button"
           >
             <span className={isPaused ? "status-light paused" : "status-light"} />
-            {isPaused ? "Capture paused" : "Capturing"}
+            <span className="status-toggle-label">{isPaused ? "Capture paused" : "Capturing"}</span>
           </button>
-          <span>{aiConfig.provider}</span>
+          <span className="sidebar-provider-label">{aiConfig.provider}</span>
         </footer>
       </aside>
 
@@ -5111,14 +5169,13 @@ export default function App() {
           <div className="toolbar-actions">
             <button
               className="command-trigger"
-              onClick={() => setCommandOpen(true)}
+              onClick={() => openCommandBar()}
               aria-label="Search work"
               title="Search work"
               type="button"
             >
               <Icon name="search" />
               <span className="command-label">Search work</span>
-              <kbd>⌥ Space</kbd>
               <kbd>⌘K</kbd>
             </button>
             {activeView === "rituals" && (
@@ -5379,7 +5436,7 @@ export default function App() {
           commandQuery={commandQuery}
           commandResults={commandResults}
           memoryResults={memoryResults}
-          onClose={() => setCommandOpen(false)}
+          onClose={() => closeCommandBar()}
           onRun={runCommand}
           setCommandQuery={setCommandQuery}
         />
@@ -6457,6 +6514,7 @@ function TodayView({
           <div className="panel-block attention-panel">
             <PanelHeader
               eyebrow="Needs a decision"
+              headingLevel={3}
               title="Review queue"
               value={`${openActions.length} open`}
             />
@@ -6508,6 +6566,7 @@ function TodayView({
           <div className="panel-block recent-panel">
             <PanelHeader
               eyebrow="Recent work"
+              headingLevel={3}
               title="What DayTrail saw"
               value={`${sessions.length} captured`}
             />
@@ -7923,6 +7982,7 @@ function SelectedHourPanel({
     <aside className="panel-block selected-hour-panel">
       <PanelHeader
         eyebrow="Selected hour"
+        headingLevel={3}
         title={label}
         value={bucket && Math.max(bucket.durationMs, bucket.manualDurationMs) > 0 ? formatDuration(Math.max(bucket.durationMs, bucket.manualDurationMs)) : "No activity"}
       />
@@ -12657,16 +12717,25 @@ function PanelHeader({
   eyebrow,
   title,
   value,
+  headingLevel = 2,
 }: {
   eyebrow: string;
   title: string;
   value: string;
+  /**
+   * Heading level for the panel title. Top-level view sections default to 2.
+   * Use 3 for nested sub-panels (e.g. a side panel inside a section that
+   * already has an h2) so the screen-reader outline stays a clean tree
+   * instead of a flat list of equal-weight headings.
+   */
+  headingLevel?: 2 | 3;
 }) {
+  const Heading = (headingLevel === 3 ? "h3" : "h2") as "h2" | "h3";
   return (
     <header className="panel-header">
       <div>
         <span>{eyebrow}</span>
-        <h2>{title}</h2>
+        <Heading>{title}</Heading>
       </div>
       <em>{value}</em>
     </header>
@@ -13014,7 +13083,7 @@ function formatClock(totalSecs: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
-function FocusMode({ tasks = [] }: { tasks?: BackendTask[] }) {
+function FocusMode({ tasks = [], hidden = false }: { tasks?: BackendTask[]; hidden?: boolean }) {
   const [status, setStatus] = useState<FocusStatus | null>(null);
   const [summary, setSummary] = useState<FocusSummary | null>(null);
   const [composing, setComposing] = useState(false);
@@ -13123,7 +13192,7 @@ function FocusMode({ tasks = [] }: { tasks?: BackendTask[] }) {
     const elapsed = Math.floor((nowMs - status.startedAtMs) / 1000);
     const snoozed = Boolean(status.snoozedUntilMs && status.snoozedUntilMs > nowMs);
     return (
-      <div className="focus-card focus-card-active">
+      <div className="focus-card focus-card-active" hidden={hidden}>
         <div className="focus-card-head">
           <span className="focus-dot" />
           <strong>Focus</strong>
@@ -13149,7 +13218,7 @@ function FocusMode({ tasks = [] }: { tasks?: BackendTask[] }) {
 
   if (composing) {
     return (
-      <div className="focus-card">
+      <div className="focus-card" hidden={hidden}>
         <div className="focus-picker">
           <input
             aria-autocomplete="list"
@@ -13234,7 +13303,7 @@ function FocusMode({ tasks = [] }: { tasks?: BackendTask[] }) {
   }
 
   return (
-    <div className="focus-card">
+    <div className="focus-card" hidden={hidden}>
       <button className="button compact sidebar-log-offline" type="button" onClick={() => setComposing(true)}>
         <Icon name="ritual" />
         Start focus

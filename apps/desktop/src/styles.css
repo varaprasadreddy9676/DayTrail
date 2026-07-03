@@ -457,8 +457,9 @@ button {
   box-shadow: 0 10px 28px rgba(10, 132, 255, 0.28);
 }
 
-.sidebar-brand > span:last-child {
+.sidebar-brand-text {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 1px;
 }
@@ -508,6 +509,18 @@ button {
   display: grid;
   gap: 1px;
   padding: 0;
+}
+
+.nav-items {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-item-row {
+  min-width: 0;
 }
 
 .nav-item,
@@ -574,6 +587,102 @@ button {
   box-shadow:
     inset 0 0 0 1px var(--border-subtle),
     0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* ── Collapsed sidebar (icon rail) ──────────────────────────────────────────
+   Driven by .sidebar-collapsed on the <aside> + .sidebar-collapsed-shell on
+   the grid (the shell class is the reliable trigger; :has() is a progressive
+   enhancement for any future render path). The grid narrows to an icon rail,
+   every text label is hidden, and icons center. Toggling persists via
+   localStorage so the choice survives restarts — same pattern as theme. */
+.app-shell.sidebar-collapsed-shell,
+.app-shell:has(.native-sidebar.sidebar-collapsed) {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+/* Expanded: reveal the toggle on sidebar hover/focus so the default brand
+   row stays clean, but keyboard and hover users always find it. */
+.native-sidebar:hover .sidebar-collapse-toggle,
+.native-sidebar:focus-within .sidebar-collapse-toggle,
+.sidebar-collapse-toggle:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: color-mix(in srgb, var(--text-main) 8%, transparent);
+  color: var(--text-main);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent-main);
+  outline-offset: 1px;
+}
+
+.native-sidebar.sidebar-collapsed .sidebar-brand {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px 14px;
+}
+
+/* Collapsed: keep the toggle visible (only affordance to expand back),
+   and hide the wordmark/subtitle. */
+.native-sidebar.sidebar-collapsed .sidebar-collapse-toggle {
+  opacity: 1;
+}
+
+.native-sidebar.sidebar-collapsed .sidebar-brand-text {
+  display: none;
+}
+
+.native-sidebar.sidebar-collapsed .nav-item,
+.native-sidebar.sidebar-collapsed .status-toggle {
+  justify-content: center;
+  gap: 0;
+  padding: 8px 6px;
+}
+
+.native-sidebar.sidebar-collapsed .nav-label,
+.native-sidebar.sidebar-collapsed .status-toggle-label,
+.native-sidebar.sidebar-collapsed .sidebar-provider-label,
+.native-sidebar.sidebar-collapsed .sidebar-log-offline-label,
+.native-sidebar.sidebar-collapsed .sidebar-apps {
+  display: none;
+}
+
+.native-sidebar.sidebar-collapsed .sidebar-log-offline {
+  justify-content: center;
+  padding: 8px 6px;
+}
+
+.native-sidebar.sidebar-collapsed .sidebar-log-offline-plus {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Center the tooltip-worthy icon column so the rail reads cleanly. */
+.native-sidebar.sidebar-collapsed .nav-icon-wrap {
+  width: 100%;
 }
 
 .sidebar-section {
@@ -1113,7 +1222,8 @@ button {
 
 .universal-toolbar h1 {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 720;
+  letter-spacing: -0.005em;
   line-height: 18px;
 }
 
@@ -1256,9 +1366,16 @@ kbd {
   overflow: auto;
   overflow-x: hidden;
   padding: 14px;
-  overscroll-behavior: auto;
+  overscroll-behavior: contain;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
+}
+
+/* Today is a managed grid of zones that each own their scroll — the frame
+   must not also scroll, or two scroll owners compete and wheel events get
+   trapped (classic nested-scroll dead-end). See #1 in the UI/UX review. */
+.view-frame.today-view {
+  overflow: hidden;
 }
 
 .today-view {
@@ -1760,6 +1877,10 @@ kbd {
   min-height: 0;
   align-content: start;
   overflow-y: auto;
+  /* Contain scroll momentum so a wheel inside this list doesn't bleed into
+     the parent zone or hit a hard dead-end — keeps a single predictable
+     scroll owner. */
+  overscroll-behavior: contain;
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
@@ -6550,6 +6671,12 @@ textarea {
     border-top: 1px solid var(--border-subtle);
     border-left: 0;
   }
+
+  /* Collapsed rail must win over the responsive 155px column at this width. */
+  .app-shell.sidebar-collapsed-shell,
+  .app-shell:has(.native-sidebar.sidebar-collapsed) {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {
@@ -9198,5 +9325,22 @@ textarea {
   .task-report-action-row .button,
   .task-report-output-actions .button {
     flex: 1 1 100%;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────────
+   Respect the OS "reduce motion" setting (System Settings → Accessibility →
+   Display → Reduce Motion on macOS; Settings → Accessibility → Visual effects
+   on Windows). Disables decorative animations and collapses transitions to
+   near-instant so the UI doesn't trigger vestibular discomfort. Focus rings,
+   opacity, and color are preserved — only *motion* is dampened. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

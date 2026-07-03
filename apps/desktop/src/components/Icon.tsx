@@ -9,6 +9,7 @@ export type IconName =
   | "check"
   | "copy"
   | "layout"
+  | "panelLeft"
   | "plus"
   | "return"
   | "ritual"
@@ -59,6 +60,12 @@ export function Icon({ name }: { name: IconName }) {
       <>
         <rect height="14" rx="2" width="16" x="4" y="5" />
         <path d="M9 5v14M4 10h16" />
+      </>
+    ),
+    panelLeft: (
+      <>
+        <rect height="16" rx="2" width="16" x="3" y="4" />
+        <path d="M9 4v16" />
       </>
     ),
     plus: <path d="M12 5v14M5 12h14" />,
