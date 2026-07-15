@@ -2398,6 +2398,11 @@ impl WorktraceStore {
                 "notification_sound" => {
                     settings.notification_sound = normalize_notification_sound(&value);
                 }
+                "focus_music_dir" => {
+                    if !value.trim().is_empty() {
+                        settings.focus_music_dir = Some(value);
+                    }
+                }
                 _ => {}
             }
         }
@@ -2642,6 +2647,16 @@ impl WorktraceStore {
             );
             Self::upsert_setting_locked(&conn, "notification_sound", &value, &now)?;
         }
+        if let Some(value) = patch.focus_music_dir {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                anyhow::ensure!(
+                    std::path::Path::new(trimmed).is_dir(),
+                    "focus music folder does not exist"
+                );
+            }
+            Self::upsert_setting_locked(&conn, "focus_music_dir", trimmed, &now)?;
+        }
         drop(conn);
         self.get_settings()
     }
@@ -2750,6 +2765,7 @@ impl WorktraceStore {
             min_gap_minutes: Some(settings.min_gap_minutes),
             premium_notifications_enabled: Some(settings.premium_notifications_enabled),
             notification_sound: Some(settings.notification_sound),
+            focus_music_dir: Some(settings.focus_music_dir.unwrap_or_default()),
         })?;
 
         {

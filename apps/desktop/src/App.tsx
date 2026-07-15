@@ -13206,11 +13206,17 @@ function FocusMode({ tasks = [], hidden = false }: { tasks?: BackendTask[]; hidd
           {snoozed ? " · snoozed" : ""}
         </div>
         <div className="focus-actions">
-          <button className="button compact ghost" type="button" onClick={snooze} disabled={snoozed}>
-            Snooze 5m
+          <button
+            className="button compact ghost"
+            type="button"
+            onClick={snooze}
+            disabled={snoozed}
+            title="Snooze focus for 5 minutes"
+          >
+            Snooze
           </button>
-          <button className="button compact" type="button" onClick={end}>
-            End focus
+          <button className="button compact" type="button" onClick={end} title="End focus session">
+            End
           </button>
         </div>
       </div>

@@ -1451,12 +1451,6 @@ kbd {
   -webkit-line-clamp: 2;
 }
 
-.focus-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .capture-pill {
   display: inline-flex;
   min-height: 22px;
@@ -6915,15 +6909,6 @@ textarea {
     width: 100%;
   }
 
-  .focus-actions {
-    justify-content: stretch;
-  }
-
-  .focus-actions .button {
-    width: 100%;
-    justify-content: center;
-  }
-
   .hour-row {
     grid-template-columns: 46px minmax(0, 1fr) 46px;
     gap: 2px 7px;
@@ -7742,7 +7727,7 @@ textarea {
 }
 
 .focus-card-active {
-  padding: 12px;
+  padding: 14px;
   border-radius: 12px;
   background: var(--success-bg, rgba(46, 160, 67, 0.12));
   border: 1px solid var(--success, #2ea043);
@@ -7758,6 +7743,7 @@ textarea {
 .focus-dot {
   width: 8px;
   height: 8px;
+  flex: 0 0 auto;
   border-radius: 999px;
   background: var(--success, #2ea043);
   animation: focus-pulse 2s ease-in-out infinite;
@@ -7770,12 +7756,13 @@ textarea {
 
 .focus-elapsed {
   margin-left: auto;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
 
 .focus-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -7783,13 +7770,20 @@ textarea {
 }
 
 .focus-meta {
-  font-size: 11px;
-  opacity: 0.8;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .focus-actions {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.focus-actions .button {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .focus-input {

@@ -161,6 +161,8 @@ pub struct Settings {
     pub premium_notifications_enabled: bool,
     #[serde(default = "default_notification_sound")]
     pub notification_sound: String,
+    #[serde(default)]
+    pub focus_music_dir: Option<String>,
 }
 
 fn default_experience_mode() -> String {
@@ -227,6 +229,7 @@ impl Default for Settings {
             min_gap_minutes: default_min_gap_minutes(),
             premium_notifications_enabled: false,
             notification_sound: default_notification_sound(),
+            focus_music_dir: None,
         }
     }
 }
@@ -262,6 +265,7 @@ pub struct SettingsPatch {
     pub min_gap_minutes: Option<i64>,
     pub premium_notifications_enabled: Option<bool>,
     pub notification_sound: Option<String>,
+    pub focus_music_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

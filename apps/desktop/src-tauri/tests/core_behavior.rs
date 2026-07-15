@@ -3592,3 +3592,55 @@ fn today_snapshot_shows_a_new_days_capture_and_excludes_prior_days() {
             .to_string()
     );
 }
+
+#[test]
+fn focus_music_dir_setting_round_trips_and_rejects_missing_folders() {
+    let dir = tempdir().expect("temp dir");
+    let db_path = dir.path().join("worktrace.sqlite3");
+    let store = WorktraceStore::open(&db_path).expect("open store");
+
+    assert_eq!(store.get_settings().expect("settings").focus_music_dir, None);
+
+    let music_dir = dir.path().join("my-focus-music");
+    fs::create_dir_all(&music_dir).expect("create music dir");
+
+    let updated = store
+        .update_settings(SettingsPatch {
+            focus_music_dir: Some(music_dir.display().to_string()),
+            ..SettingsPatch::default()
+        })
+        .expect("settings should accept an existing folder");
+    assert_eq!(
+        updated.focus_music_dir.as_deref(),
+        Some(music_dir.display().to_string().as_str())
+    );
+
+    let reloaded = store.get_settings().expect("settings");
+    assert_eq!(
+        reloaded.focus_music_dir.as_deref(),
+        Some(music_dir.display().to_string().as_str())
+    );
+
+    let missing_dir = dir.path().join("does-not-exist");
+    let rejected = store.update_settings(SettingsPatch {
+        focus_music_dir: Some(missing_dir.display().to_string()),
+        ..SettingsPatch::default()
+    });
+    assert!(
+        rejected.is_err(),
+        "a folder that does not exist must be rejected"
+    );
+    assert_eq!(
+        store.get_settings().expect("settings").focus_music_dir.as_deref(),
+        Some(music_dir.display().to_string().as_str()),
+        "a rejected update must not overwrite the previously saved folder"
+    );
+
+    let cleared = store
+        .update_settings(SettingsPatch {
+            focus_music_dir: Some(String::new()),
+            ..SettingsPatch::default()
+        })
+        .expect("blank value should clear the folder");
+    assert_eq!(cleared.focus_music_dir, None);
+}

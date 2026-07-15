@@ -4,6 +4,7 @@ pub mod commands;
 pub mod daytrail_notification;
 pub mod error;
 pub mod focus;
+pub mod focus_audio;
 pub mod llm;
 pub mod matching;
 pub mod models;

@@ -257,6 +257,7 @@ pub fn start(input: StartFocusInput) -> FocusStatus {
 }
 
 pub fn end() -> Option<FocusSummary> {
+    crate::focus_audio::stop();
     let mut guard = SESSION.lock().ok()?;
     let session = guard.take()?;
     let ended = now_ms();
@@ -303,9 +304,11 @@ pub fn evaluate(app: &AppHandle, store: &WorktraceStore, info: &ActiveWindowInfo
         };
         let now = now_ms();
 
-        // Auto-end on duration.
+        // Auto-end on duration. Stop any focus music with it — the session
+        // owns the soundtrack, so expiry silences it just like manual end.
         if session.ends_at_ms.is_some_and(|end| now >= end) {
             *guard = None;
+            crate::focus_audio::stop();
             return;
         }
 
