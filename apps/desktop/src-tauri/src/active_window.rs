@@ -2206,6 +2206,15 @@ fn ax_content_title_cached(pid: u32, app_name: &str) -> Option<String> {
     const MAX_DEPTH: u32 = 25; // Electron trees can be 20+ levels deep from window root
     const MAX_NODES: usize = 1200;
 
+    // DayTrail must never AX-inspect its own process: when the target pid is
+    // our own, macOS resolves AXUIElementCopyAttributeValue in-process straight
+    // into our WKWebView's accessibility code, and WebKit hard-crashes
+    // (crashDueToApplicationCallingMainThreadOnlyWebKitAPIFromBackgroundThread)
+    // because this runs on the watcher thread, not the main thread.
+    if pid == std::process::id() {
+        return None;
+    }
+
     // --- check cache first ---
     {
         let mut guard = CONTENT_TITLE_CACHE.lock().ok()?;
@@ -2718,7 +2727,7 @@ pub fn normalize_app_display_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::is_chromium_browser;
+    use super::{ax_content_title_cached, is_chromium_browser};
     use super::{
         clean_codex_context_title, codex_thread_hint_from_state_db,
         display_app_name_from_executable, is_resume, meaningful_ax_candidate,
@@ -2740,6 +2749,19 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", script]);
         command
+    }
+
+    // Regression test for a real crash: the watcher thread would call
+    // AXUIElementCopyAttributeValue against DayTrail's own pid, which macOS
+    // resolves in-process into WKWebView's accessibility code and WebKit
+    // hard-crashes on (crashDueToApplicationCallingMainThreadOnlyWebKitAPIFromBackgroundThread)
+    // since this always runs off the main thread. Never call the AX APIs
+    // for our own process.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn never_ax_inspects_own_process() {
+        let own_pid = std::process::id();
+        assert_eq!(ax_content_title_cached(own_pid, "DayTrail"), None);
     }
 
     #[test]
