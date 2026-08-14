@@ -5,12 +5,13 @@
 /// are cached in memory so each icon is only extracted once per session.
 use std::{
     collections::HashMap,
-    process::Command,
     sync::{Mutex, OnceLock},
 };
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -372,7 +373,7 @@ try {
         return None;
     }
 
-    let status = Command::new("powershell.exe")
+    let status = crate::platform::hidden_command("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
